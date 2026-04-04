@@ -38,19 +38,35 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ## Available tools
 
+### Reading
 - **notion_search** — Search pages and databases. Start here to find content.
-- **notion_get_page** — Get a page and its content blocks. Use after search to read details.
-- **notion_query_database** — Query a database with filters and sorts. Use when working with structured data (tables, boards, etc.).
-- **notion_get_database_schema** — Get the schema of a database. Use this BEFORE querying a database to understand its properties and build correct filters.
-- **notion_create_page** — Create a new page (inside a database or as a sub-page).
-- **notion_update_page** — Update properties of an existing page.
-- **notion_append_blocks** — Append content blocks to a page. Use for adding text, headings, lists, etc.
+- **notion_fetch** — Rich fetch: pass a URL or ID and get structured Markdown + properties + schema. Preferred over notion_get_page for understanding content.
+- **notion_get_page** — Get raw page JSON and block children. Use when you need the raw API response.
+- **notion_query_database** — Query a database with filters and sorts.
+- **notion_get_database_schema** — Get the schema of a database. Use BEFORE querying to understand property names and types.
 - **notion_list_users** — List users in a workspace.
+
+### Writing
+- **notion_create_page** — Create a new page. Accepts a "content" field with Markdown (preferred) or raw "children" blocks.
+- **notion_update_page** — Update page properties (title, status, dates, etc.).
+- **notion_append_blocks** — Append content to a page. Accepts Markdown via "content" or raw "children" blocks.
+- **notion_update_page_content** — Search-and-replace inside a page's content. Pass old_str and new_str.
+- **notion_replace_page_content** — Replace ALL content of a page. Pass Markdown via "content" or raw blocks.
+
+### Databases
+- **notion_create_database** — Create a new database with a schema inside a parent page.
+- **notion_update_database** — Modify a database: add, rename, or remove columns. Also update title/description.
+
+### Organization
+- **notion_move_page** — Move a page to a different parent.
+- **notion_delete_page** — Move a page to trash.
 
 ## Tips
 
 - Always search before creating to avoid duplicates.
+- Use notion_fetch to understand a page or database before modifying it.
 - When querying a database for the first time, call notion_get_database_schema first so you know the property names and types for filters.
+- Prefer Markdown "content" over raw "children" blocks when creating or appending — it's simpler and less error-prone.
 - The user speaks Portuguese (Brazil) — respond in Portuguese unless they write in another language.
 `.trim();
 
