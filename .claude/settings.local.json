@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm install 2>&1)",
+      "Bash(npm run build 2>&1)",
+      "Bash(npm install:*)",
+      "Bash(npm start:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(ssh:*)",
+      "Bash(sshpass:*)",
+      "Bash(tailscale status:*)",
+      "Bash(wait)",
+      "Bash(brew install:*)",
+      "Bash(openssl rand:*)",
+      "Bash(npm run:*)",
+      "WebFetch(domain:support.claude.com)",
+      "WebFetch(domain:medium.com)",
+      "Bash(python3 -m json.tool)",
+      "mcp__claude_ai_Notion_MCP__notion_search",
+      "Bash(npx tsc:*)",
+      "mcp__claude_ai_Notion_MCP__notion_create_page",
+      "Bash(node dist/index.js)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(kill 71774)",
+      "Bash(tailscale ssh:*)",
+      "Bash(export SSHPASS='1122334455')",
+      "Bash(rm -f /tmp/sshpw)",
+      "Bash(gh auth:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
