@@ -1,10 +1,48 @@
 import { Router } from "express";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, randomBytes, createHash, timingSafeEqual } from "node:crypto";
+
+// --- Helpers ---
+
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  };
+  return text.replace(/[&<>"']/g, (m) => map[m]);
+}
+
+function generateToken(bytes = 32): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+function sha256base64url(value: string): string {
+  return createHash("sha256").update(value).digest("base64url");
+}
+
+function isValidRedirectUri(uri: string): boolean {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol === "https:") return true;
+    if (parsed.protocol === "http:" && parsed.hostname === "localhost") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 // --- In-memory stores ---
+
 interface RegisteredClient {
   client_id: string;
-  client_secret?: string;
+  client_secret: string;
   redirect_uris: string[];
   client_name?: string;
   created_at: number;
@@ -28,9 +66,39 @@ interface AccessToken {
 const clients = new Map<string, RegisteredClient>();
 const authCodes = new Map<string, AuthCode>();
 const accessTokens = new Map<string, AccessToken>();
+const csrfTokens = new Map<string, number>(); // token -> expires_at
 
 const CODE_TTL_MS = 5 * 60_000; // 5 minutes
 const TOKEN_TTL_MS = 24 * 60 * 60_000; // 24 hours
+const CSRF_TTL_MS = 5 * 60_000; // 5 minutes
+
+// --- Brute-force protection ---
+const failedAttempts = new Map<string, { count: number; blockedUntil: number }>();
+const MAX_ATTEMPTS = 5;
+const BLOCK_DURATION_MS = 5 * 60_000; // 5 minutes
+
+function isBlocked(ip: string): boolean {
+  const entry = failedAttempts.get(ip);
+  if (!entry) return false;
+  if (Date.now() > entry.blockedUntil) {
+    failedAttempts.delete(ip);
+    return false;
+  }
+  return entry.count >= MAX_ATTEMPTS;
+}
+
+function recordFailedAttempt(ip: string): void {
+  const entry = failedAttempts.get(ip) ?? { count: 0, blockedUntil: 0 };
+  entry.count += 1;
+  if (entry.count >= MAX_ATTEMPTS) {
+    entry.blockedUntil = Date.now() + BLOCK_DURATION_MS;
+  }
+  failedAttempts.set(ip, entry);
+}
+
+function clearFailedAttempts(ip: string): void {
+  failedAttempts.delete(ip);
+}
 
 // Cleanup expired entries periodically
 setInterval(() => {
@@ -41,14 +109,15 @@ setInterval(() => {
   for (const [k, v] of accessTokens) {
     if (now > v.expires_at) accessTokens.delete(k);
   }
+  for (const [k, v] of csrfTokens) {
+    if (now > v) csrfTokens.delete(k);
+  }
+  for (const [k, v] of failedAttempts) {
+    if (now > v.blockedUntil && v.count < MAX_ATTEMPTS) failedAttempts.delete(k);
+  }
 }, 60_000);
 
-// --- Helpers ---
-function sha256base64url(value: string): string {
-  return createHash("sha256")
-    .update(value)
-    .digest("base64url");
-}
+// --- Token validation ---
 
 export function isValidAccessToken(token: string): boolean {
   const entry = accessTokens.get(token);
@@ -60,10 +129,17 @@ export function isValidAccessToken(token: string): boolean {
   return true;
 }
 
-// --- Admin password for consent screen ---
-const OAUTH_ADMIN_PASSWORD = process.env.OAUTH_PASSWORD ?? process.env.BEARER_TOKEN ?? "admin";
+// --- Admin password (required) ---
+
+const _oauthPw = process.env.OAUTH_PASSWORD;
+if (!_oauthPw) {
+  console.error("FATAL: OAUTH_PASSWORD environment variable is required");
+  process.exit(1);
+}
+const OAUTH_ADMIN_PASSWORD: string = _oauthPw;
 
 // --- Router ---
+
 export function createOAuthRouter(baseUrl: string): Router {
   const router = Router();
 
@@ -106,31 +182,42 @@ export function createOAuthRouter(baseUrl: string): Router {
       return;
     }
 
+    // Validate redirect URIs
+    for (const uri of redirect_uris) {
+      if (typeof uri !== "string" || !isValidRedirectUri(uri)) {
+        res.status(400).json({
+          error: "invalid_redirect_uri",
+          error_description: `Invalid redirect URI: ${typeof uri === "string" ? uri : "(non-string)"}. Only https:// or http://localhost allowed.`,
+        });
+        return;
+      }
+    }
+
     const client_id = randomUUID();
-    const client_secret = randomUUID();
+    const client_secret = generateToken();
 
     const client: RegisteredClient = {
       client_id,
       client_secret,
       redirect_uris,
-      client_name,
+      client_name: typeof client_name === "string" ? client_name.slice(0, 200) : undefined,
       created_at: Date.now(),
     };
 
     clients.set(client_id, client);
     console.log(
-      `[${new Date().toISOString()}] OAuth: registered client "${client_name}" (${client_id})`
+      `[${new Date().toISOString()}] OAuth: registered client "${client.client_name}" (${client_id})`
     );
 
     res.status(201).json({
       client_id,
       client_secret,
       redirect_uris,
-      client_name,
+      client_name: client.client_name,
     });
   });
 
-  // Authorization endpoint
+  // Authorization endpoint — render consent page
   router.get("/oauth/authorize", (req, res) => {
     const {
       client_id,
@@ -162,7 +249,10 @@ export function createOAuthRouter(baseUrl: string): Router {
       return;
     }
 
-    // Render consent page
+    // Generate CSRF token
+    const csrf = generateToken();
+    csrfTokens.set(csrf, Date.now() + CSRF_TTL_MS);
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -208,7 +298,7 @@ export function createOAuthRouter(baseUrl: string): Router {
   <div class="card">
     <h1>Authorize Access</h1>
     <p class="subtitle">
-      <span class="client-name">${client.client_name || client_id}</span>
+      <span class="client-name">${escapeHtml(client.client_name || client_id)}</span>
       wants to access your Notion MCP server.
     </p>
     <ul class="permissions">
@@ -218,11 +308,12 @@ export function createOAuthRouter(baseUrl: string): Router {
       <li>Query databases</li>
     </ul>
     <form method="POST" action="/oauth/authorize">
-      <input type="hidden" name="client_id" value="${client_id}">
-      <input type="hidden" name="redirect_uri" value="${redirect_uri}">
-      <input type="hidden" name="code_challenge" value="${code_challenge}">
-      <input type="hidden" name="code_challenge_method" value="${code_challenge_method}">
-      <input type="hidden" name="state" value="${state || ""}">
+      <input type="hidden" name="client_id" value="${escapeHtml(client_id)}">
+      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirect_uri)}">
+      <input type="hidden" name="code_challenge" value="${escapeHtml(code_challenge)}">
+      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method)}">
+      <input type="hidden" name="state" value="${escapeHtml(state || "")}">
+      <input type="hidden" name="_csrf" value="${csrf}">
       <label for="password">Enter your admin password to authorize:</label>
       <input type="password" id="password" name="password" required placeholder="Password">
       <p class="error" id="error-msg">Invalid password</p>
@@ -235,7 +326,10 @@ export function createOAuthRouter(baseUrl: string): Router {
 </body>
 </html>`;
 
-    res.type("html").send(html);
+    res
+      .header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'")
+      .type("html")
+      .send(html);
   });
 
   // Authorization POST (consent form submission)
@@ -247,10 +341,36 @@ export function createOAuthRouter(baseUrl: string): Router {
       code_challenge_method,
       state,
       password,
+      _csrf,
     } = req.body;
 
-    // Verify admin password
-    if (password !== OAUTH_ADMIN_PASSWORD) {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+
+    // Brute-force check
+    if (isBlocked(ip)) {
+      console.warn(
+        `[${new Date().toISOString()}] OAuth: blocked login attempt from ${ip} (too many failures)`
+      );
+      res.status(429).type("html").send(`<!DOCTYPE html>
+<html><head><title>Blocked</title>
+<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
+</head><body><h2>Too many failed attempts. Try again in 5 minutes.</h2></body></html>`);
+      return;
+    }
+
+    // CSRF validation
+    if (!_csrf || !csrfTokens.has(_csrf)) {
+      res.status(403).json({ error: "invalid_csrf_token" });
+      return;
+    }
+    csrfTokens.delete(_csrf);
+
+    // Verify admin password (timing-safe)
+    if (!password || !safeEqual(password, OAUTH_ADMIN_PASSWORD)) {
+      recordFailedAttempt(ip);
+      console.warn(
+        `[${new Date().toISOString()}] OAuth: failed password attempt from ${ip}`
+      );
       res.status(403).type("html").send(`<!DOCTYPE html>
 <html><head><title>Error</title>
 <style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
@@ -258,12 +378,14 @@ export function createOAuthRouter(baseUrl: string): Router {
       return;
     }
 
+    clearFailedAttempts(ip);
+
     if (!client_id || !clients.has(client_id)) {
       res.status(400).json({ error: "invalid_client" });
       return;
     }
 
-    const code = randomUUID();
+    const code = generateToken();
     authCodes.set(code, {
       code,
       client_id,
@@ -274,7 +396,7 @@ export function createOAuthRouter(baseUrl: string): Router {
     });
 
     console.log(
-      `[${new Date().toISOString()}] OAuth: issued auth code for client ${client_id}`
+      `[${new Date().toISOString()}] OAuth: issued auth code for client ${client_id} from ${ip}`
     );
 
     const url = new URL(redirect_uri);
@@ -290,6 +412,7 @@ export function createOAuthRouter(baseUrl: string): Router {
       code,
       redirect_uri,
       client_id,
+      client_secret,
       code_verifier,
     } = req.body;
 
@@ -317,6 +440,15 @@ export function createOAuthRouter(baseUrl: string): Router {
       return;
     }
 
+    // Verify client_secret for confidential clients
+    const registeredClient = clients.get(client_id);
+    if (registeredClient?.client_secret) {
+      if (!client_secret || !safeEqual(client_secret, registeredClient.client_secret)) {
+        res.status(401).json({ error: "invalid_client", error_description: "invalid client_secret" });
+        return;
+      }
+    }
+
     // Verify redirect_uri
     if (authCode.redirect_uri !== redirect_uri) {
       res.status(400).json({ error: "invalid_grant" });
@@ -339,7 +471,7 @@ export function createOAuthRouter(baseUrl: string): Router {
     authCodes.delete(code);
 
     // Issue access token
-    const token = randomUUID();
+    const token = generateToken();
     const expiresIn = TOKEN_TTL_MS / 1000;
     accessTokens.set(token, {
       token,
@@ -347,8 +479,9 @@ export function createOAuthRouter(baseUrl: string): Router {
       expires_at: Date.now() + TOKEN_TTL_MS,
     });
 
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
     console.log(
-      `[${new Date().toISOString()}] OAuth: issued access token for client ${client_id}`
+      `[${new Date().toISOString()}] OAuth: issued access token for client ${client_id} from ${ip}`
     );
 
     res.json({

@@ -1,16 +1,32 @@
 import { Client } from "@notionhq/client";
 
-const required = [
+const notionTokens = [
   "NOTION_GLOBALCRIPTO_TOKEN",
   "NOTION_PERSONAL_TOKEN",
   "NOTION_NORA_TOKEN",
 ] as const;
 
-for (const key of required) {
-  if (!process.env[key]) {
+for (const key of notionTokens) {
+  const val = process.env[key];
+  if (!val) {
     console.error(`Missing required environment variable: ${key}`);
     process.exit(1);
   }
+  if (!val.startsWith("ntn_")) {
+    console.error(`Invalid format for ${key}: must start with "ntn_"`);
+    process.exit(1);
+  }
+}
+
+if (!process.env.OAUTH_PASSWORD) {
+  console.error("Missing required environment variable: OAUTH_PASSWORD");
+  process.exit(1);
+}
+
+const bearerToken = process.env.BEARER_TOKEN;
+if (bearerToken && bearerToken.length < 32) {
+  console.error("BEARER_TOKEN must be at least 32 characters");
+  process.exit(1);
 }
 
 export const globalcriptoClient = new Client({

@@ -60,19 +60,15 @@ const app = express();
 app.set("trust proxy", "loopback");
 
 // Security headers
-app.use(
-  helmet({
-    contentSecurityPolicy: false, // MCP uses JSON/SSE, CSP not needed
-  })
-);
+app.use(helmet());
 
-// CORS middleware — restrict to Claude origins
+// CORS middleware — restrict to Claude origins, only on /mcp
 const ALLOWED_ORIGINS = new Set([
   "https://claude.ai",
   "https://www.claude.ai",
 ]);
 
-app.use((req, res, next) => {
+const corsMiddleware: express.RequestHandler = (req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
@@ -88,19 +84,28 @@ app.use((req, res, next) => {
     return;
   }
   next();
-});
+};
 
 // Rate limiting on MCP endpoint
-app.use(
-  "/mcp",
-  rateLimit({
-    windowMs: 60_000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests, try again later" },
-  })
-);
+const mcpLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, try again later" },
+});
+
+// Rate limiting on OAuth endpoints (stricter)
+const oauthLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many OAuth requests, try again later" },
+});
+
+app.use("/mcp", corsMiddleware, mcpLimiter);
+app.use("/oauth", oauthLimiter);
 
 // Parse JSON for all routes, URL-encoded for OAuth consent form
 app.use(express.json());
