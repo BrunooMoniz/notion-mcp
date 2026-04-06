@@ -188,11 +188,10 @@ const sessions = new Map<string, ManagedSession>();
 
 function evictSession(id: string) {
   const session = sessions.get(id);
-  if (session) {
-    clearTimeout(session.timer);
-    session.transport.close?.();
-    sessions.delete(id);
-  }
+  if (!session) return;
+  clearTimeout(session.timer);
+  sessions.delete(id);
+  session.transport.close?.();
 }
 
 setInterval(() => {
