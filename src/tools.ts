@@ -1,12 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getClient, type Workspace } from "./clients.js";
+import { auditWrite } from "./audit.js";
 import {
   markdownToBlocks,
   blocksToMarkdown,
   schemaToMarkdown,
   propertiesToMarkdown,
 } from "./markdown.js";
+
+const NORA_READONLY = process.env.NORA_READONLY === "true";
 
 const workspaceSchema = z
   .enum(["globalcripto", "personal", "nora"])
@@ -188,6 +191,10 @@ export function registerTools(server: McpServer): void {
           ? { children: blocks as Parameters<typeof client.pages.create>[0]["children"] }
           : {}),
       });
+      auditWrite("notion_create_page", workspace, {
+        parent: JSON.stringify(parent),
+        new_page_id: (result as { id?: string }).id,
+      });
       return ok(result);
     }
   );
@@ -208,6 +215,7 @@ export function registerTools(server: McpServer): void {
         page_id,
         properties: properties as Parameters<typeof client.pages.update>[0]["properties"],
       });
+      auditWrite("notion_update_page", workspace, { page_id });
       return ok(result);
     }
   );
@@ -243,6 +251,7 @@ export function registerTools(server: McpServer): void {
         block_id,
         children: blocks as Parameters<typeof client.blocks.children.append>[0]["children"],
       });
+      auditWrite("notion_append_blocks", workspace, { block_id });
       return ok(result);
     }
   );
@@ -295,6 +304,11 @@ export function registerTools(server: McpServer): void {
         parent: { type: "page_id", page_id: parent_page_id },
         title: [{ type: "text", text: { content: title } }],
         properties: schema as Parameters<typeof client.databases.create>[0]["properties"],
+      });
+      auditWrite("notion_create_database", workspace, {
+        parent_page_id,
+        title,
+        new_database_id: (result as { id?: string }).id,
       });
       return ok(result);
     }
@@ -358,6 +372,12 @@ export function registerTools(server: McpServer): void {
         ...(Object.keys(properties).length > 0
           ? { properties: properties as Parameters<typeof client.databases.update>[0]["properties"] }
           : {}),
+      });
+      auditWrite("notion_update_database", workspace, {
+        database_id,
+        added: add_columns ? Object.keys(add_columns) : [],
+        renamed: rename_columns ? Object.keys(rename_columns) : [],
+        removed: remove_columns ?? [],
       });
       return ok(result);
     }
@@ -510,6 +530,10 @@ export function registerTools(server: McpServer): void {
         return text(`No blocks found containing "${old_str}".`);
       }
 
+      auditWrite("notion_update_page_content", workspace, {
+        page_id,
+        replacements,
+      });
       return text(`Replaced in ${replacements} block(s).`);
     }
   );
@@ -553,6 +577,10 @@ export function registerTools(server: McpServer): void {
         children: newBlocks as Parameters<typeof client.blocks.children.append>[0]["children"],
       });
 
+      auditWrite("notion_replace_page_content", workspace, {
+        page_id,
+        deleted_blocks: existing.length,
+      });
       return ok(result);
     }
   );
@@ -567,11 +595,17 @@ export function registerTools(server: McpServer): void {
       page_id: notionIdSchema.describe("The ID of the page to delete"),
     },
     async ({ workspace, page_id }) => {
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to delete: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
       const client = getClient(workspace as Workspace);
       const result = await client.pages.update({
         page_id,
         archived: true,
       });
+      auditWrite("notion_delete_page", workspace, { page_id });
       return ok(result);
     }
   );
@@ -599,6 +633,11 @@ export function registerTools(server: McpServer): void {
         page_id,
         // @ts-expect-error — parent update is supported but types may lag
         parent: { type: parent_type, [parent_type]: new_parent_id },
+      });
+      auditWrite("notion_move_page", workspace, {
+        page_id,
+        new_parent_id,
+        parent_type,
       });
       return ok(result);
     }

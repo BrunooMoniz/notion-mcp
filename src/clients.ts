@@ -1,4 +1,5 @@
 import { Client } from "@notionhq/client";
+import { assertWorkspaceScope } from "./context.js";
 
 const notionTokens = [
   "NOTION_GLOBALCRIPTO_TOKEN",
@@ -18,8 +19,11 @@ for (const key of notionTokens) {
   }
 }
 
-if (!process.env.OAUTH_PASSWORD) {
-  console.error("Missing required environment variable: OAUTH_PASSWORD");
+if (!process.env.OAUTH_PASSWORD_HASH) {
+  console.error(
+    "Missing required environment variable: OAUTH_PASSWORD_HASH.\n" +
+      "Generate one with: node scripts/hash-password.mjs '<your-password>'"
+  );
   process.exit(1);
 }
 
@@ -43,7 +47,11 @@ export const noraClient = new Client({
 
 export type Workspace = "globalcripto" | "personal" | "nora";
 
+export const ALL_WORKSPACES: Workspace[] = ["globalcripto", "personal", "nora"];
+
 export function getClient(workspace: Workspace): Client {
+  // Per-request scope enforcement (no-op when there's no HTTP context).
+  assertWorkspaceScope(workspace);
   switch (workspace) {
     case "globalcripto":
       return globalcriptoClient;

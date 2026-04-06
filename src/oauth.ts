@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { randomUUID, randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import {
+  randomUUID,
+  randomBytes,
+  createHash,
+  timingSafeEqual,
+  scryptSync,
+} from "node:crypto";
+import { ALL_WORKSPACES, type Workspace } from "./clients.js";
 
 // --- Helpers ---
 
@@ -38,6 +45,56 @@ function isValidRedirectUri(uri: string): boolean {
   }
 }
 
+function normalizeWorkspaces(input: unknown): Workspace[] {
+  const arr = Array.isArray(input)
+    ? input
+    : typeof input === "string"
+      ? [input]
+      : [];
+  const result: Workspace[] = [];
+  for (const candidate of arr) {
+    if (typeof candidate !== "string") continue;
+    if ((ALL_WORKSPACES as string[]).includes(candidate)) {
+      result.push(candidate as Workspace);
+    }
+  }
+  return result;
+}
+
+// --- Password verification (scrypt) ---
+
+const _hashEnv = process.env.OAUTH_PASSWORD_HASH;
+if (!_hashEnv) {
+  console.error(
+    "FATAL: OAUTH_PASSWORD_HASH environment variable is required.\n" +
+      "Generate one with: node scripts/hash-password.mjs '<your-password>'"
+  );
+  process.exit(1);
+}
+const [_saltHex, _hashHex] = _hashEnv.split(":");
+if (!_saltHex || !_hashHex) {
+  console.error(
+    "FATAL: OAUTH_PASSWORD_HASH must be in format 'salt-hex:hash-hex'.\n" +
+      "Regenerate with: node scripts/hash-password.mjs '<your-password>'"
+  );
+  process.exit(1);
+}
+const STORED_SALT = Buffer.from(_saltHex, "hex");
+const STORED_HASH = Buffer.from(_hashHex, "hex");
+if (STORED_SALT.length !== 16 || STORED_HASH.length !== 64) {
+  console.error("FATAL: OAUTH_PASSWORD_HASH has invalid lengths (expect 16-byte salt, 64-byte hash).");
+  process.exit(1);
+}
+
+function verifyPassword(candidate: string): boolean {
+  try {
+    const derived = scryptSync(candidate, STORED_SALT, 64);
+    return timingSafeEqual(derived, STORED_HASH);
+  } catch {
+    return false;
+  }
+}
+
 // --- In-memory stores ---
 
 interface RegisteredClient {
@@ -54,12 +111,14 @@ interface AuthCode {
   redirect_uri: string;
   code_challenge: string;
   code_challenge_method: string;
+  scopes: Workspace[];
   expires_at: number;
 }
 
-interface AccessToken {
+export interface AccessToken {
   token: string;
   client_id: string;
+  scopes: Workspace[];
   expires_at: number;
 }
 
@@ -71,6 +130,16 @@ const csrfTokens = new Map<string, number>(); // token -> expires_at
 const CODE_TTL_MS = 5 * 60_000; // 5 minutes
 const TOKEN_TTL_MS = 24 * 60 * 60_000; // 24 hours
 const CSRF_TTL_MS = 5 * 60_000; // 5 minutes
+
+// --- Registration enrollment window ---
+// /oauth/register is only open while this timestamp is in the future.
+// Opened by POST /admin/open-registration (gated by BEARER_TOKEN).
+const ENROLLMENT_WINDOW_MS = 10 * 60_000; // 10 minutes
+let registrationWindowUntil = 0;
+
+export function isRegistrationOpen(): boolean {
+  return Date.now() < registrationWindowUntil;
+}
 
 // --- Brute-force protection ---
 const failedAttempts = new Map<string, { count: number; blockedUntil: number }>();
@@ -117,31 +186,67 @@ setInterval(() => {
   }
 }, 60_000);
 
-// --- Token validation ---
+// --- Token lookup ---
 
-export function isValidAccessToken(token: string): boolean {
+export function getAccessTokenInfo(token: string): AccessToken | null {
   const entry = accessTokens.get(token);
-  if (!entry) return false;
+  if (!entry) return null;
   if (Date.now() > entry.expires_at) {
     accessTokens.delete(token);
-    return false;
+    return null;
   }
-  return true;
+  return entry;
 }
 
-// --- Admin password (required) ---
-
-const _oauthPw = process.env.OAUTH_PASSWORD;
-if (!_oauthPw) {
-  console.error("FATAL: OAUTH_PASSWORD environment variable is required");
-  process.exit(1);
+export function isValidAccessToken(token: string): boolean {
+  return getAccessTokenInfo(token) !== null;
 }
-const OAUTH_ADMIN_PASSWORD: string = _oauthPw;
 
 // --- Router ---
 
-export function createOAuthRouter(baseUrl: string): Router {
+export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router {
   const router = Router();
+
+  // Admin: open the registration enrollment window.
+  // Gated by BEARER_TOKEN so only the server operator can call it.
+  router.post("/admin/open-registration", (req, res) => {
+    if (!bearerToken) {
+      res.status(503).json({
+        error: "unavailable",
+        error_description: "BEARER_TOKEN not configured; admin endpoint disabled",
+      });
+      return;
+    }
+    const auth = req.headers["authorization"];
+    if (!auth || !auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), bearerToken)) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    registrationWindowUntil = Date.now() + ENROLLMENT_WINDOW_MS;
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    console.log(
+      `[${new Date().toISOString()}] OAuth: registration window opened until ${new Date(registrationWindowUntil).toISOString()} by ${ip}`
+    );
+    res.json({
+      open_until: new Date(registrationWindowUntil).toISOString(),
+      ttl_seconds: ENROLLMENT_WINDOW_MS / 1000,
+    });
+  });
+
+  router.post("/admin/close-registration", (req, res) => {
+    if (!bearerToken) {
+      res.status(503).json({ error: "unavailable" });
+      return;
+    }
+    const auth = req.headers["authorization"];
+    if (!auth || !auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), bearerToken)) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    registrationWindowUntil = 0;
+    console.log(`[${new Date().toISOString()}] OAuth: registration window closed manually`);
+    res.json({ ok: true });
+  });
 
   // RFC 9728 — Protected Resource Metadata
   router.get("/.well-known/oauth-protected-resource", (_req, res) => {
@@ -169,8 +274,17 @@ export function createOAuthRouter(baseUrl: string): Router {
     });
   });
 
-  // Dynamic Client Registration (RFC 7591)
+  // Dynamic Client Registration (RFC 7591) — only open during enrollment window
   router.post("/oauth/register", (req, res) => {
+    if (!isRegistrationOpen()) {
+      res.status(403).json({
+        error: "registration_closed",
+        error_description:
+          "Dynamic registration is closed. Admin must open the window first.",
+      });
+      return;
+    }
+
     const { redirect_uris, client_name } = req.body;
 
     if (
@@ -253,6 +367,14 @@ export function createOAuthRouter(baseUrl: string): Router {
     const csrf = generateToken();
     csrfTokens.set(csrf, Date.now() + CSRF_TTL_MS);
 
+    const workspaceCheckboxes = ALL_WORKSPACES.map((ws) => {
+      const defaultChecked = ws !== "nora"; // Nora requires explicit opt-in
+      return `      <label class="scope">
+        <input type="checkbox" name="scope" value="${ws}" ${defaultChecked ? "checked" : ""}>
+        <span>${ws}</span>
+      </label>`;
+    }).join("\n");
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -269,13 +391,21 @@ export function createOAuthRouter(baseUrl: string): Router {
     }
     .card {
       background: #16213e; border-radius: 12px; padding: 40px;
-      max-width: 420px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      max-width: 460px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     }
     h1 { font-size: 1.4em; margin-bottom: 8px; color: #fff; }
     .subtitle { color: #888; margin-bottom: 24px; font-size: 0.9em; }
     .client-name { color: #64b5f6; font-weight: 600; }
     .permissions { background: #0f3460; border-radius: 8px; padding: 16px; margin: 16px 0; }
-    .permissions li { margin: 8px 0; font-size: 0.9em; }
+    .permissions li { margin: 8px 0; font-size: 0.9em; list-style: none; }
+    .section-title { color: #aaa; font-size: 0.85em; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .scopes { background: #0f3460; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+    label.scope {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0; font-size: 0.95em; cursor: pointer;
+    }
+    label.scope input { width: 16px; height: 16px; cursor: pointer; }
+    label.scope span { color: #e0e0e0; font-family: ui-monospace, monospace; }
     label { display: block; margin-bottom: 8px; font-size: 0.9em; color: #aaa; }
     input[type="password"] {
       width: 100%; padding: 10px 14px; border-radius: 8px;
@@ -314,6 +444,10 @@ export function createOAuthRouter(baseUrl: string): Router {
       <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method)}">
       <input type="hidden" name="state" value="${escapeHtml(state || "")}">
       <input type="hidden" name="_csrf" value="${csrf}">
+      <div class="section-title">Workspaces this session may access</div>
+      <div class="scopes">
+${workspaceCheckboxes}
+      </div>
       <label for="password">Enter your admin password to authorize:</label>
       <input type="password" id="password" name="password" required placeholder="Password">
       <p class="error" id="error-msg">Invalid password</p>
@@ -342,6 +476,7 @@ export function createOAuthRouter(baseUrl: string): Router {
       state,
       password,
       _csrf,
+      scope,
     } = req.body;
 
     const ip = req.ip || req.socket.remoteAddress || "unknown";
@@ -365,8 +500,8 @@ export function createOAuthRouter(baseUrl: string): Router {
     }
     csrfTokens.delete(_csrf);
 
-    // Verify admin password (timing-safe)
-    if (!password || !safeEqual(password, OAUTH_ADMIN_PASSWORD)) {
+    // Verify admin password (scrypt, timing-safe)
+    if (!password || typeof password !== "string" || !verifyPassword(password)) {
       recordFailedAttempt(ip);
       console.warn(
         `[${new Date().toISOString()}] OAuth: failed password attempt from ${ip}`
@@ -385,6 +520,24 @@ export function createOAuthRouter(baseUrl: string): Router {
       return;
     }
 
+    // Defense in depth: revalidate redirect_uri against the registered client.
+    // The GET handler already did this, but a hand-crafted POST could bypass it.
+    const client = clients.get(client_id)!;
+    if (!redirect_uri || !client.redirect_uris.includes(redirect_uri)) {
+      res.status(400).json({ error: "invalid_redirect_uri" });
+      return;
+    }
+
+    // Parse and validate scopes. Reject if user unchecked everything.
+    const scopes = normalizeWorkspaces(scope);
+    if (scopes.length === 0) {
+      res.status(400).type("html").send(`<!DOCTYPE html>
+<html><head><title>No scope selected</title>
+<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
+</head><body><h2>Select at least one workspace to authorize.</h2></body></html>`);
+      return;
+    }
+
     const code = generateToken();
     authCodes.set(code, {
       code,
@@ -392,11 +545,12 @@ export function createOAuthRouter(baseUrl: string): Router {
       redirect_uri,
       code_challenge,
       code_challenge_method,
+      scopes,
       expires_at: Date.now() + CODE_TTL_MS,
     });
 
     console.log(
-      `[${new Date().toISOString()}] OAuth: issued auth code for client ${client_id} from ${ip}`
+      `[${new Date().toISOString()}] OAuth: issued auth code for client ${client_id} from ${ip} (scopes: ${scopes.join(",")})`
     );
 
     const url = new URL(redirect_uri);
@@ -470,24 +624,26 @@ export function createOAuthRouter(baseUrl: string): Router {
     // Consume the code (one-time use)
     authCodes.delete(code);
 
-    // Issue access token
+    // Issue access token with scopes inherited from the auth code
     const token = generateToken();
     const expiresIn = TOKEN_TTL_MS / 1000;
     accessTokens.set(token, {
       token,
       client_id,
+      scopes: authCode.scopes,
       expires_at: Date.now() + TOKEN_TTL_MS,
     });
 
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     console.log(
-      `[${new Date().toISOString()}] OAuth: issued access token for client ${client_id} from ${ip}`
+      `[${new Date().toISOString()}] OAuth: issued access token for client ${client_id} from ${ip} (scopes: ${authCode.scopes.join(",")})`
     );
 
     res.json({
       access_token: token,
       token_type: "Bearer",
       expires_in: expiresIn,
+      scope: authCode.scopes.join(" "),
     });
   });
 

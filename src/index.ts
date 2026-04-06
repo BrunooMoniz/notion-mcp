@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerTools } from "./tools.js";
-import { createOAuthRouter, isValidAccessToken } from "./oauth.js";
+import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
+import { requestContext, type RequestContext } from "./context.js";
 
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
@@ -135,11 +136,11 @@ app.use((req, _res, next) => {
   next();
 });
 
-// OAuth routes (well-known, register, authorize, token)
-app.use(createOAuthRouter(BASE_URL));
-
 // Auth middleware for /mcp — accepts static BEARER_TOKEN or OAuth access tokens
 const BEARER_TOKEN = process.env.BEARER_TOKEN;
+
+// OAuth routes (well-known, register, authorize, token, admin)
+app.use(createOAuthRouter(BASE_URL, BEARER_TOKEN));
 
 app.use("/mcp", (req, res, next) => {
   const auth = req.headers["authorization"];
@@ -150,20 +151,32 @@ app.use("/mcp", (req, res, next) => {
   }
 
   const token = auth.slice(7);
-
-  // Check static token
-  if (BEARER_TOKEN && token === BEARER_TOKEN) {
-    next();
-    return;
-  }
-
-  // Check OAuth-issued token
-  if (isValidAccessToken(token)) {
-    next();
-    return;
-  }
-
   const ip = req.ip || req.socket.remoteAddress;
+
+  // Check static bearer token first (Claude Code path). Grants full access.
+  if (BEARER_TOKEN && token === BEARER_TOKEN) {
+    const ctx: RequestContext = {
+      authType: "bearer",
+      scopes: "all",
+      ip,
+    };
+    requestContext.run(ctx, () => next());
+    return;
+  }
+
+  // Check OAuth-issued token (Claude.ai path). Scoped to selected workspaces.
+  const info = getAccessTokenInfo(token);
+  if (info) {
+    const ctx: RequestContext = {
+      authType: "oauth",
+      scopes: info.scopes,
+      clientId: info.client_id,
+      ip,
+    };
+    requestContext.run(ctx, () => next());
+    return;
+  }
+
   console.warn(
     `[${new Date().toISOString()}] UNAUTHORIZED ${req.method} ${req.path} from ${ip}`
   );
@@ -171,7 +184,9 @@ app.use("/mcp", (req, res, next) => {
 });
 
 if (!BEARER_TOKEN) {
-  console.warn("WARNING: BEARER_TOKEN not set — only OAuth tokens will work.");
+  console.warn(
+    "WARNING: BEARER_TOKEN not set — Claude Code direct access and the /admin/open-registration endpoint are disabled. Only OAuth tokens will work."
+  );
 }
 
 // --- Session management with TTL and limits ---
