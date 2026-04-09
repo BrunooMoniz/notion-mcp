@@ -77,6 +77,35 @@ function parseNotionId(input: string): string {
 }
 
 export function registerTools(server: McpServer): void {
+  // Wrap server.tool to add error logging to every handler without touching each one.
+  const origTool = server.tool.bind(server);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (server as any).tool = function wrappedTool(
+    name: string,
+    desc: string,
+    schema: unknown,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler: (args: any, extra: any) => Promise<unknown>
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wrapped = async (args: any, extra: any) => {
+      try {
+        return await handler(args, extra);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const code = String((err as Record<string, unknown>)?.code ?? "");
+        const reqId = String((err as Record<string, unknown>)?.request_id ?? "");
+        console.error(
+          `[${new Date().toISOString()}] tool error [${name}]` +
+            ` workspace=${String((args as Record<string, unknown>)?.workspace ?? "?")}` +
+            ` code=${code} request_id=${reqId} msg=${msg}`
+        );
+        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+      }
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (origTool as any)(name, desc, schema, wrapped);
+  };
   // ── Existing tools ───────────────────────────────────────────────────────
 
   server.tool(
