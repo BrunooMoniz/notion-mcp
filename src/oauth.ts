@@ -6,7 +6,14 @@ import {
   timingSafeEqual,
   scryptSync,
 } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ALL_WORKSPACES, type Workspace } from "./clients.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = join(__dirname, "..", "data");
+const STORE_PATH = join(DATA_DIR, "oauth-store.json");
 
 // --- Helpers ---
 
@@ -127,14 +134,50 @@ const authCodes = new Map<string, AuthCode>();
 const accessTokens = new Map<string, AccessToken>();
 const csrfTokens = new Map<string, number>(); // token -> expires_at
 
+// --- Persistence ---
+
+function loadStore(): void {
+  try {
+    const raw = readFileSync(STORE_PATH, "utf8");
+    const data = JSON.parse(raw) as {
+      clients?: RegisteredClient[];
+      accessTokens?: AccessToken[];
+    };
+    const now = Date.now();
+    for (const c of data.clients ?? []) clients.set(c.client_id, c);
+    for (const t of data.accessTokens ?? []) {
+      if (t.expires_at > now) accessTokens.set(t.token, t);
+    }
+    console.log(`[oauth] Loaded ${clients.size} clients, ${accessTokens.size} tokens from disk.`);
+  } catch {
+    // First run or missing file — start fresh.
+  }
+}
+
+function saveStore(): void {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    const data = {
+      clients: [...clients.values()],
+      accessTokens: [...accessTokens.values()],
+    };
+    writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.error("[oauth] Failed to persist store:", err);
+  }
+}
+
+loadStore();
+
 const CODE_TTL_MS = 5 * 60_000; // 5 minutes
-const TOKEN_TTL_MS = 24 * 60 * 60_000; // 24 hours
+const TOKEN_TTL_MS = 365 * 24 * 60 * 60_000; // 1 year
 const CSRF_TTL_MS = 5 * 60_000; // 5 minutes
 
 // --- Registration enrollment window ---
 // /oauth/register is only open while this timestamp is in the future.
 // Opened by POST /admin/open-registration (gated by BEARER_TOKEN).
-const ENROLLMENT_WINDOW_MS = 10 * 60_000; // 10 minutes
+// Set ENROLLMENT_WINDOW_MS env var to override (in minutes).
+const ENROLLMENT_WINDOW_MS = parseInt(process.env.ENROLLMENT_WINDOW_MINUTES ?? "60") * 60_000;
 let registrationWindowUntil = 0;
 
 export function isRegistrationOpen(): boolean {
@@ -175,8 +218,9 @@ setInterval(() => {
   for (const [k, v] of authCodes) {
     if (now > v.expires_at) authCodes.delete(k);
   }
+  let tokensPruned = false;
   for (const [k, v] of accessTokens) {
-    if (now > v.expires_at) accessTokens.delete(k);
+    if (now > v.expires_at) { accessTokens.delete(k); tokensPruned = true; }
   }
   for (const [k, v] of csrfTokens) {
     if (now > v) csrfTokens.delete(k);
@@ -184,6 +228,7 @@ setInterval(() => {
   for (const [k, v] of failedAttempts) {
     if (now > v.blockedUntil && v.count < MAX_ATTEMPTS) failedAttempts.delete(k);
   }
+  if (tokensPruned) saveStore();
 }, 60_000);
 
 // --- Token lookup ---
@@ -319,6 +364,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     };
 
     clients.set(client_id, client);
+    saveStore();
     console.log(
       `[${new Date().toISOString()}] OAuth: registered client "${client.client_name}" (${client_id})`
     );
@@ -633,6 +679,7 @@ ${workspaceCheckboxes}
       scopes: authCode.scopes,
       expires_at: Date.now() + TOKEN_TTL_MS,
     });
+    saveStore();
 
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     console.log(
