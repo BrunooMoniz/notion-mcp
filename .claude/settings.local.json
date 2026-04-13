@@ -63,7 +63,22 @@
       "mcp__claude_ai_Notion__notion-search",
       "Read(//Users/bruno.moniz/.config/**)",
       "Read(//Users/bruno.moniz/.config/claude/**)",
-      "Bash(claude mcp:*)"
+      "Bash(claude mcp:*)",
+      "mcp__notion-mcp__notion_fetch",
+      "mcp__notion-mcp__notion_search",
+      "mcp__notion-mcp__notion_create_database",
+      "mcp__notion-mcp__notion_update_database",
+      "Bash(mkdir -p /Users/bruno.moniz/.claude/skills/agente-cerebro/references)",
+      "Bash(mkdir -p /Users/bruno.moniz/.claude/skills/briefing-diario/references)",
+      "mcp__notion-mcp__notion_get_database_schema",
+      "Skill(schedule)",
+      "mcp__claude_ai_Notion__notion-query-meeting-notes",
+      "mcp__notion-mcp__notion_update_page",
+      "mcp__notion-mcp__notion_query_database",
+      "mcp__claude_ai_Google_Calendar__list_calendars",
+      "mcp__notion-mcp__notion_create_page",
+      "mcp__claude_ai_Google_Calendar__gcal_list_calendars",
+      "mcp__notion-mcp__notion_replace_page_content"
     ]
   }
 }

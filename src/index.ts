@@ -132,7 +132,13 @@ app.use(express.urlencoded({ extended: false }));
 app.use((req, _res, next) => {
   const timestamp = new Date().toISOString();
   const ip = req.ip || req.socket.remoteAddress;
-  console.log(`[${timestamp}] ${req.method} ${req.path} from ${ip}`);
+  const mcpMethod = req.path === "/mcp" && req.method === "POST" && req.body?.method
+    ? ` [${req.body.method}]`
+    : "";
+  const sessionHint = req.path === "/mcp" && req.headers["mcp-session-id"]
+    ? ` sid=${String(req.headers["mcp-session-id"]).slice(0, 8)}`
+    : "";
+  console.log(`[${timestamp}] ${req.method} ${req.path}${mcpMethod}${sessionHint} from ${ip}`);
   next();
 });
 
@@ -224,6 +230,16 @@ app.post("/mcp", async (req, res) => {
   if (sessionId && sessions.has(sessionId)) {
     const managed = sessions.get(sessionId)!;
     await managed.transport.handleRequest(req, res, req.body);
+    return;
+  }
+
+  // Unknown session ID → tell client to re-initialize (per MCP spec).
+  // Only new connections (no session ID) are allowed to create sessions.
+  if (sessionId && !sessions.has(sessionId)) {
+    console.warn(
+      `[${new Date().toISOString()}] MCP: unknown session ${sessionId.slice(0, 8)}, sending 404 to force re-init`
+    );
+    res.status(404).json({ error: "Session not found or expired. Please reinitialize." });
     return;
   }
 
