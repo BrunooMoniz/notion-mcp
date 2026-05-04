@@ -25,16 +25,16 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 - **When to use:** Personal notes, personal projects, personal tasks, journaling, reading lists, personal finance, or anything not related to a company.
 
 ### "nora"
-- **What it is:** The workspace for Nora, Bruno's daughter.
-- **When to use:** Anything related to Nora — school, activities, health records, routines, wishlists, or parenting notes.
+- **What it is:** The workspace for Nora Finance, a fintech company. Shared with the founding partners (Jean, Luigi, Moniz, Victor).
+- **When to use:** Anything related to Nora Finance — company operations, product, regulatory/legal work, partner discussions, finance tracking (Transações, Fornecedores), meeting notes, or company documentation.
 
 ## How to choose the workspace
 
-1. Look at the user's message for explicit mentions of a workspace name, company, or person (e.g. "GlobalCripto", "pessoal", "Nora").
+1. Look at the user's message for explicit mentions of a workspace name or company (e.g. "GlobalCripto", "pessoal", "Nora", "Nora Finance").
 2. If not explicit, infer from context:
-   - Work/crypto/company topics → "globalcripto"
-   - Personal/individual topics → "personal"
-   - Child/daughter/school/parenting topics → "nora"
+   - GlobalCripto / crypto exchange topics → "globalcripto"
+   - Nora Finance / Nora company / partners (Jean, Luigi, Moniz, Victor) topics → "nora"
+   - Personal/individual topics not tied to either company → "personal"
 3. If still ambiguous, ask the user which workspace they mean before making the call.
 
 ## Available tools
