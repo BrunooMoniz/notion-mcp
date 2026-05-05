@@ -233,8 +233,12 @@ async function applyClassification(
     if (id) orgsIds.push(id);
   }
 
+  // Property names differ per DB:
+  //   Reunioes: Participantes (relation → Pessoas), Organizacoes (relation → Organizacoes)
+  //   Insights: Pessoas (relation), Organizacoes (relation)
+  const pessoasProp = page.db === "Reunioes" ? "Participantes" : "Pessoas";
   if (pessoasIds.length) {
-    props["Pessoas"] = { relation: pessoasIds.map((id) => ({ id })) };
+    props[pessoasProp] = { relation: pessoasIds.map((id) => ({ id })) };
   }
   if (orgsIds.length) {
     props["Organizacoes"] = { relation: orgsIds.map((id) => ({ id })) };
@@ -286,14 +290,17 @@ async function resolveOrCreate(
     index.byNormalizedName.set(norm, resp.id);
     if (kind === "pessoas") stats.pessoas_created++;
     else stats.orgs_created++;
-    // Try to set a 'Status' select if the schema allows; non-fatal if not.
+    // Try to set a triage marker — schemas use different names:
+    //   Pessoas: 'Contexto' (select)
+    //   Organizacoes: 'Status Relacionamento' (select)
+    const triageProp = kind === "pessoas" ? "Contexto" : "Status Relacionamento";
     try {
       await notion.pages.update({
         page_id: resp.id,
-        properties: { Status: { select: { name: "Pendente Revisão" } } } as any,
+        properties: { [triageProp]: { select: { name: "Pendente Revisão" } } } as any,
       });
     } catch {
-      // ignore — schema may not have Status or option
+      // ignore — option may not exist; user can add it
     }
     return resp.id;
   } catch (err: any) {
