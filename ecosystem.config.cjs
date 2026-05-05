@@ -10,5 +10,14 @@ module.exports = {
       restart_delay: 3000,
       max_restarts: 10,
     },
+    {
+      name: "brain-indexer",
+      script: "dist/index-indexer.js",
+      env: {
+        NODE_ENV: "production",
+      },
+      restart_delay: 10000,
+      max_restarts: 5,
+    },
   ],
 };
