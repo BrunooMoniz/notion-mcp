@@ -10,24 +10,39 @@ interface FetchOpts {
   databaseIds?: string[];
 }
 
-const DEFAULT_DATABASES_PERSONAL: { id: string; name: string }[] = [
-  { id: "160d4836-53f1-41a3-b20a-0aaa42adb9cd", name: "Diario Semanal" },
-  { id: "33a07ba5-bee8-81ed-acfb-ffdadfab353f", name: "Reunioes" },
-  { id: "33a07ba5-bee8-81a4-b929-c8bc631ccba5", name: "Insights" },
-  { id: "d5650545-161f-4d32-a706-360a9a5b7af2", name: "Decisoes" },
-  { id: "33a07ba5-bee8-8143-8f06-e95be84ab113", name: "Projetos" },
-  { id: "33a07ba5-bee8-81ff-bec4-eeb4234688f1", name: "Pessoas" },
-  { id: "33a07ba5-bee8-813f-a58f-f0fe1055eec4", name: "Organizacoes" },
-  { id: "33d07ba5-bee8-812c-9563-fc48b665e2f1", name: "Academia" },
-  { id: "30d07ba5-bee8-8054-b8e4-d76a35b476b5", name: "Tasks Tracker" },
-];
+interface DiscoveredDb {
+  id: string;
+  name: string;
+}
 
-export async function* fetchPersonalDocuments(
+async function discoverDatabases(notion: NotionClient): Promise<DiscoveredDb[]> {
+  const dbs: DiscoveredDb[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const resp = await notion.search({
+      filter: { property: "object", value: "database" },
+      page_size: 100,
+      start_cursor: cursor,
+    });
+    for (const r of resp.results) {
+      if ((r as any).object !== "database") continue;
+      const titleProp = (r as any).title?.map((t: any) => t.plain_text).join("") ?? "(untitled)";
+      dbs.push({ id: r.id, name: titleProp });
+    }
+    cursor = resp.next_cursor ?? undefined;
+  } while (cursor);
+  return dbs;
+}
+
+export async function* fetchWorkspaceDocuments(
   opts: FetchOpts,
 ): AsyncGenerator<IndexableDocument> {
   const notion = new NotionClient({ auth: opts.notionToken });
-  const dbs =
-    opts.databaseIds?.map((id) => ({ id, name: "Custom" })) ?? DEFAULT_DATABASES_PERSONAL;
+  const dbs: DiscoveredDb[] = opts.databaseIds
+    ? opts.databaseIds.map((id) => ({ id, name: "Custom" }))
+    : await discoverDatabases(notion);
+
+  console.log(`[notion-source] workspace=${opts.workspace} discovered ${dbs.length} databases`);
 
   for (const db of dbs) {
     try {
@@ -72,6 +87,9 @@ export async function* fetchPersonalDocuments(
     }
   }
 }
+
+// Backwards compat alias for any external caller
+export const fetchPersonalDocuments = fetchWorkspaceDocuments;
 
 async function pageToText(notion: NotionClient, page: any): Promise<string> {
   const lines: string[] = [];
