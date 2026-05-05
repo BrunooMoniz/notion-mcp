@@ -19,5 +19,14 @@ module.exports = {
       restart_delay: 10000,
       max_restarts: 5,
     },
+    {
+      name: "brain-classifier",
+      script: "dist/index-classifier.js",
+      env: {
+        NODE_ENV: "production",
+      },
+      restart_delay: 10000,
+      max_restarts: 5,
+    },
   ],
 };
