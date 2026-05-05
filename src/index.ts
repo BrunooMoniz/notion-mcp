@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerTools } from "./tools.js";
+import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { requestContext, type RequestContext } from "./context.js";
 
@@ -274,6 +275,7 @@ app.post("/mcp", async (req, res) => {
   );
 
   registerTools(server);
+  registerBrainSearchTool(server);
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
