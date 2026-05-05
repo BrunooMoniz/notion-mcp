@@ -6,12 +6,17 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "start:indexer": "node dist/index-indexer.js",
+    "start:classifier": "node dist/index-classifier.js",
     "dev": "tsx src/index.ts",
     "dev:indexer": "tsx src/index-indexer.ts",
+    "dev:classifier": "tsx src/index-classifier.ts",
     "test": "tsx --test src/rag/__tests__/*.test.ts",
-    "reindex": "tsx scripts/reindex-all.mts"
+    "reindex": "tsx scripts/reindex-all.mts",
+    "classify": "tsx scripts/run-classifier.mts",
+    "revisitar": "tsx scripts/run-revisitar.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@modelcontextprotocol/sdk": "^1.10.0",
     "@notionhq/client": "^2.2.15",
     "dotenv": "^17.4.0",
