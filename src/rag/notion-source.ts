@@ -30,38 +30,46 @@ export async function* fetchPersonalDocuments(
     opts.databaseIds?.map((id) => ({ id, name: "Custom" })) ?? DEFAULT_DATABASES_PERSONAL;
 
   for (const db of dbs) {
-    let cursor: string | undefined = undefined;
-    do {
-      const resp = await notion.databases.query({
-        database_id: db.id,
-        start_cursor: cursor,
-        page_size: 50,
-        ...(opts.modifiedSince
-          ? {
-              filter: {
-                timestamp: "last_edited_time",
-                last_edited_time: { on_or_after: opts.modifiedSince.toISOString() },
-              } as any,
-            }
-          : {}),
-      });
-      for (const page of resp.results) {
-        if (!("properties" in page)) continue;
-        const text = await pageToText(notion, page);
-        if (!text.trim()) continue;
-        yield {
-          source_type: "notion",
-          source_id: page.id,
-          workspace: opts.workspace,
-          db_name: db.name,
-          parent_url: (page as any).url ?? `https://www.notion.so/${page.id.replace(/-/g, "")}`,
-          text,
-          metadata: extractMetadata(page),
-          source_updated: new Date((page as any).last_edited_time),
-        };
-      }
-      cursor = resp.next_cursor ?? undefined;
-    } while (cursor);
+    try {
+      let cursor: string | undefined = undefined;
+      do {
+        const resp = await notion.databases.query({
+          database_id: db.id,
+          start_cursor: cursor,
+          page_size: 50,
+          ...(opts.modifiedSince
+            ? {
+                filter: {
+                  timestamp: "last_edited_time",
+                  last_edited_time: { on_or_after: opts.modifiedSince.toISOString() },
+                } as any,
+              }
+            : {}),
+        });
+        for (const page of resp.results) {
+          if (!("properties" in page)) continue;
+          try {
+            const text = await pageToText(notion, page);
+            if (!text.trim()) continue;
+            yield {
+              source_type: "notion",
+              source_id: page.id,
+              workspace: opts.workspace,
+              db_name: db.name,
+              parent_url: (page as any).url ?? `https://www.notion.so/${page.id.replace(/-/g, "")}`,
+              text,
+              metadata: extractMetadata(page),
+              source_updated: new Date((page as any).last_edited_time),
+            };
+          } catch (pageErr: any) {
+            console.warn(`[notion-source] skipped page ${page.id} in "${db.name}": ${pageErr.message ?? pageErr}`);
+          }
+        }
+        cursor = resp.next_cursor ?? undefined;
+      } while (cursor);
+    } catch (dbErr: any) {
+      console.warn(`[notion-source] skipped database "${db.name}" (${db.id}): ${dbErr.message ?? dbErr}`);
+    }
   }
 }
 
