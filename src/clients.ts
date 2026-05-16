@@ -33,16 +33,23 @@ if (bearerToken && bearerToken.length < 32) {
   process.exit(1);
 }
 
+// Notion API version. 2025-09-03 unlocks multi-source databases,
+// data_sources endpoints, comments threading, and file uploads.
+export const NOTION_API_VERSION = "2025-09-03";
+
 export const globalcriptoClient = new Client({
   auth: process.env.NOTION_GLOBALCRIPTO_TOKEN!,
+  notionVersion: NOTION_API_VERSION,
 });
 
 export const personalClient = new Client({
   auth: process.env.NOTION_PERSONAL_TOKEN!,
+  notionVersion: NOTION_API_VERSION,
 });
 
 export const noraClient = new Client({
   auth: process.env.NOTION_NORA_TOKEN!,
+  notionVersion: NOTION_API_VERSION,
 });
 
 export type Workspace = "globalcripto" | "personal" | "nora";
@@ -64,4 +71,81 @@ export function getClient(workspace: Workspace): Client {
       throw new Error(`Unknown workspace: ${_exhaustive}`);
     }
   }
+}
+
+export function getToken(workspace: Workspace): string {
+  assertWorkspaceScope(workspace);
+  switch (workspace) {
+    case "globalcripto":
+      return process.env.NOTION_GLOBALCRIPTO_TOKEN!;
+    case "personal":
+      return process.env.NOTION_PERSONAL_TOKEN!;
+    case "nora":
+      return process.env.NOTION_NORA_TOKEN!;
+    default: {
+      const _exhaustive: never = workspace;
+      throw new Error(`Unknown workspace: ${_exhaustive}`);
+    }
+  }
+}
+
+export interface NotionFetchInit {
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  body?: unknown;
+  query?: Record<string, string | number | undefined>;
+  contentType?: string;
+  rawBody?: BodyInit;
+}
+
+/**
+ * Raw HTTP call to the Notion REST API for endpoints not yet covered by
+ * the @notionhq/client SDK (data sources, file uploads, etc).
+ * Adds workspace-scoped auth + the active Notion-Version header.
+ */
+export async function notionFetch(
+  workspace: Workspace,
+  path: string,
+  init: NotionFetchInit = {}
+): Promise<unknown> {
+  const token = getToken(workspace);
+  const base = path.startsWith("http") ? path : `https://api.notion.com${path}`;
+  let url = base;
+  if (init.query) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(init.query)) {
+      if (v !== undefined) qs.set(k, String(v));
+    }
+    const sep = base.includes("?") ? "&" : "?";
+    url = base + (qs.toString() ? `${sep}${qs.toString()}` : "");
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Notion-Version": NOTION_API_VERSION,
+  };
+  if (init.contentType) {
+    headers["Content-Type"] = init.contentType;
+  } else if (init.body !== undefined && !init.rawBody) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const resp = await fetch(url, {
+    method: init.method ?? "GET",
+    headers,
+    body: init.rawBody ?? (init.body !== undefined ? JSON.stringify(init.body) : undefined),
+  });
+
+  const text = await resp.text();
+  const data = text ? (JSON.parse(text) as unknown) : null;
+
+  if (!resp.ok) {
+    const err = (data ?? {}) as { message?: string; code?: string; request_id?: string };
+    const msg = err.message ?? `HTTP ${resp.status}`;
+    const e = new Error(msg) as Error & { code?: string; request_id?: string; status?: number };
+    e.code = err.code;
+    e.request_id = err.request_id;
+    e.status = resp.status;
+    throw e;
+  }
+  return data;
 }

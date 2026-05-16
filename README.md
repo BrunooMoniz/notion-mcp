@@ -5,7 +5,9 @@ A self-hosted [MCP](https://modelcontextprotocol.io/) server that connects AI as
 ## Features
 
 - **Multi-workspace** -- route requests to different Notion integrations by passing a `workspace` parameter on every tool call
-- **16 tools** -- search, fetch, create, update, delete, and move pages; query and manage databases; append and replace content with Markdown or raw blocks
+- **Notion API 2025-09-03** -- supports multi-source databases, file uploads, and the comments API
+- **24 tools** -- search, fetch, create, update, delete, and move pages; query and manage databases and data sources; append/replace content with Markdown or raw blocks; comments; file uploads
+- **Destructive guard rails** -- delete_page, replace_page_content and remove_columns require explicit `confirm: true`; bypass attempts are blocked
 - **Markdown I/O** -- write content as Markdown and it gets converted to Notion blocks automatically; read pages back as Markdown
 - **OAuth 2.1 flow** -- dynamic client registration (RFC 7591), PKCE (S256), consent screen with per-workspace scope selection, scrypt-hashed admin password
 - **Bearer token auth** -- for direct access from Claude Code or scripts
@@ -126,23 +128,47 @@ Add to your MCP config:
 
 ## Available Tools
 
+### Read
 | Tool | Description |
 |------|-------------|
 | `notion_search` | Search pages and databases |
 | `notion_fetch` | Rich fetch by URL or ID, returns Markdown + properties |
 | `notion_get_page` | Raw page JSON with block children |
-| `notion_query_database` | Query with filters and sorts |
+| `notion_get_block_children` | Paginated list of block children |
+| `notion_query_database` | Query with filters and sorts (auto-falls back for multi-source DBs) |
 | `notion_get_database_schema` | Get database column definitions |
+| `notion_list_data_sources` | List data sources of a multi-source database |
+| `notion_get_data_source_schema` | Schema of a specific data source |
+| `notion_query_data_source` | Query a specific data source |
 | `notion_list_users` | List workspace users |
+| `notion_get_self` | Identity of the current token (PAT name, workspace, limits) |
+| `notion_list_comments` | List comments on a page or block |
+
+### Write (non-destructive)
+| Tool | Description |
+|------|-------------|
 | `notion_create_page` | Create page with Markdown or raw blocks |
 | `notion_update_page` | Update page properties |
 | `notion_append_blocks` | Append content to a page |
 | `notion_update_page_content` | Search-and-replace inside page content |
-| `notion_replace_page_content` | Replace all page content |
-| `notion_create_database` | Create a database with schema |
-| `notion_update_database` | Add, rename, or remove database columns |
 | `notion_move_page` | Move page to a different parent |
-| `notion_delete_page` | Archive a page |
+| `notion_create_comment` | Add comment to a page or thread |
+| `notion_create_database` | Create a database with schema |
+| `notion_update_database` | Add/rename columns (remove_columns requires confirm) |
+
+### Write (DESTRUCTIVE — require `confirm: true`)
+| Tool | Description |
+|------|-------------|
+| `notion_replace_page_content` | Replace ALL page content (deletes existing blocks) |
+| `notion_delete_page` | Archive a page (recoverable for 30 days) |
+| `notion_update_database` w/ remove_columns | Wipes data in those columns across every row |
+
+### Files
+| Tool | Description |
+|------|-------------|
+| `notion_create_file_upload` | Start a file upload session (single_part / multi_part / external_url) |
+| `notion_send_file_upload` | Send file bytes (base64) to an in-progress upload |
+| `notion_complete_file_upload` | Finalize a multi_part upload |
 
 ## Adding Workspaces
 

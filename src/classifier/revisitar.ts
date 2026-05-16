@@ -3,6 +3,7 @@
 // "Revisitar" entries so Bruno can revisit them.
 
 import { Client as NotionClient } from "@notionhq/client";
+import { NOTION_API_VERSION } from "../clients.js";
 
 const PARENT_PAGE_ID = "33707ba5-bee8-810d-bc21-c6d1514502b8"; // Cérebro
 const INSIGHTS_DB = "33a07ba5-bee8-81a4-b929-c8bc631ccba5";
@@ -16,7 +17,7 @@ interface RevisitarStats {
   endedAt: Date;
 }
 
-let cachedRevisitarDbId: string | null = null;
+let cachedRevisitarDbId: string | null = "35707ba5-bee8-81bf-9905-c8a68c75b2a7";
 
 export async function ensureRevisitarDb(notion: NotionClient): Promise<string> {
   if (cachedRevisitarDbId) return cachedRevisitarDbId;
@@ -86,7 +87,7 @@ export async function runRevisitar(): Promise<RevisitarStats> {
 
   const token = process.env.NOTION_PERSONAL_TOKEN;
   if (!token) throw new Error("NOTION_PERSONAL_TOKEN not set");
-  const notion = new NotionClient({ auth: token });
+  const notion = new NotionClient({ auth: token, notionVersion: NOTION_API_VERSION });
 
   const dbId = await ensureRevisitarDb(notion);
 

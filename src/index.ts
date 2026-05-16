@@ -13,7 +13,7 @@ import { requestContext, type RequestContext } from "./context.js";
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
 const INSTRUCTIONS = `
-You have access to a Notion MCP server that manages three separate workspaces. Every tool call requires a "workspace" parameter — always choose the correct one based on context.
+You have access to a Notion MCP server that manages three separate workspaces. Every tool call requires a "workspace" parameter — always choose the correct one based on context. Notion-Version pinned to 2025-09-03 (multi-source databases, file uploads, comments).
 
 ## Workspaces
 
@@ -22,8 +22,8 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 - **When to use:** Anything related to crypto business operations, company projects, team tasks, meeting notes, or company documentation.
 
 ### "personal"
-- **What it is:** Bruno's personal Notion workspace.
-- **When to use:** Personal notes, personal projects, personal tasks, journaling, reading lists, personal finance, or anything not related to a company.
+- **What it is:** Bruno's personal Notion workspace ("Caderno Moniz"). Hosts the "Cérebro" PKM (Reuniões, Insights, Pessoas, Organizações, Tasks Tracker, Diário Semanal, Revisitar).
+- **When to use:** Personal notes, projects, tasks, journaling, reading lists, second-brain queries that aren't company-scoped.
 
 ### "nora"
 - **What it is:** The workspace for Nora Finance, a fintech company. Shared with the founding partners (Jean, Luigi, Moniz, Victor).
@@ -44,31 +44,48 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 - **notion_search** — Search pages and databases. Start here to find content.
 - **notion_fetch** — Rich fetch: pass a URL or ID and get structured Markdown + properties + schema. Preferred over notion_get_page for understanding content.
 - **notion_get_page** — Get raw page JSON and block children. Use when you need the raw API response.
-- **notion_query_database** — Query a database with filters and sorts.
-- **notion_get_database_schema** — Get the schema of a database. Use BEFORE querying to understand property names and types.
+- **notion_get_block_children** — Paginated list of block children (cheaper than notion_get_page when you only need IDs/types).
+- **notion_query_database** — Query a database with filters and sorts. For multi-source databases, this returns the data source list; switch to notion_query_data_source.
+- **notion_get_database_schema** — Get the schema of a database. Use BEFORE querying to understand property names and types. For multi-source databases, returns data sources; switch to notion_get_data_source_schema.
+- **notion_list_data_sources** — List data sources of a multi-source database (Notion's 2025-09-03 model).
+- **notion_get_data_source_schema** — Schema (properties) of a single data source.
+- **notion_query_data_source** — Query a single data source. Same filter/sort semantics as notion_query_database.
 - **notion_list_users** — List users in a workspace.
+- **notion_get_self** — Identity check: which token/workspace is currently active.
 
-### Writing
+### Writing (non-destructive)
 - **notion_create_page** — Create a new page. Accepts a "content" field with Markdown (preferred) or raw "children" blocks.
 - **notion_update_page** — Update page properties (title, status, dates, etc.).
 - **notion_append_blocks** — Append content to a page. Accepts Markdown via "content" or raw "children" blocks.
 - **notion_update_page_content** — Search-and-replace inside a page's content. Pass old_str and new_str.
-- **notion_replace_page_content** — Replace ALL content of a page. Pass Markdown via "content" or raw blocks.
+- **notion_move_page** — Move a page to a different parent.
+- **notion_list_comments** / **notion_create_comment** — Read/post comments on a page or thread.
 
-### Databases
+### Writing (DESTRUCTIVE — require confirm: true)
+- **notion_replace_page_content** — Deletes ALL existing blocks then appends new content. Requires confirm: true.
+- **notion_delete_page** — Archive (move to trash). Requires confirm: true.
+- **notion_update_database** with remove_columns — Wipes data in those columns across every row. Requires confirm: true.
+
+### Databases & files
 - **notion_create_database** — Create a new database with a schema inside a parent page.
 - **notion_update_database** — Modify a database: add, rename, or remove columns. Also update title/description.
+- **notion_create_file_upload** → **notion_send_file_upload** → (for multi-part) **notion_complete_file_upload** — Upload a file and use the returned file_upload.id as block content.
 
-### Organization
-- **notion_move_page** — Move a page to a different parent.
-- **notion_delete_page** — Move a page to trash.
+## Safety rules (must follow)
+
+1. **Never call a DESTRUCTIVE tool without first reading the target.** Use notion_fetch or notion_get_page to confirm you have the right ID and understand what will be lost.
+2. **confirm: true is mandatory for destructive tools.** If unsure, ask the user before passing it. Don't pass confirm:true defensively to avoid prompts — that defeats the guard rail.
+3. **Bulk deletes:** if you would delete more than 3 pages or remove more than 1 column, stop and confirm the full list with the user first.
+4. **No experimenting in nora.** Production data is shared with partners. Test ideas in "personal" first.
+5. **Audit log:** every write is logged. Don't try to suppress or bypass it.
+6. **Search before create.** Avoid duplicates. If a page with the same title exists, surface it before creating a new one.
 
 ## Tips
 
-- Always search before creating to avoid duplicates.
 - Use notion_fetch to understand a page or database before modifying it.
-- When querying a database for the first time, call notion_get_database_schema first so you know the property names and types for filters.
-- Prefer Markdown "content" over raw "children" blocks when creating or appending — it's simpler and less error-prone.
+- When querying a database for the first time, call notion_get_database_schema first to learn property names and types.
+- Prefer Markdown "content" over raw "children" blocks when creating or appending — simpler and less error-prone.
+- For databases that are multi-source (8 of them inside one container is the Nora CRM pattern), use the *_data_source variants.
 - The user speaks Portuguese (Brazil) — respond in Portuguese unless they write in another language.
 `.trim();
 

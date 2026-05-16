@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getClient, type Workspace } from "./clients.js";
+import { getClient, notionFetch, type Workspace } from "./clients.js";
 import { auditWrite } from "./audit.js";
 import {
   markdownToBlocks,
@@ -10,6 +10,9 @@ import {
 } from "./markdown.js";
 
 const NORA_READONLY = process.env.NORA_READONLY === "true";
+
+const DESTRUCTIVE_CONFIRM_NOTE =
+  " Requires confirm:true since this operation is destructive and irreversible without a backup.";
 
 const workspaceSchema = z
   .enum(["globalcripto", "personal", "nora"])
@@ -151,7 +154,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_query_database",
-    "Query a Notion database with optional filters and sorts",
+    "Query a Notion database with optional filters and sorts. For multi-source databases, this falls back to a structured response listing the data sources — call notion_query_data_source on a specific one.",
     {
       workspace: workspaceSchema,
       database_id: notionIdSchema.describe("The ID of the database to query"),
@@ -172,16 +175,41 @@ export function registerTools(server: McpServer): void {
         .max(100)
         .optional()
         .describe("Number of results per page (1-100)"),
+      start_cursor: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response"),
     },
-    async ({ workspace, database_id, filter, sorts, page_size }) => {
+    async ({ workspace, database_id, filter, sorts, page_size, start_cursor }) => {
       const client = getClient(workspace as Workspace);
-      const result = await client.databases.query({
-        database_id,
-        ...(filter ? { filter: filter as Parameters<typeof client.databases.query>[0]["filter"] } : {}),
-        ...(sorts ? { sorts: sorts as Parameters<typeof client.databases.query>[0]["sorts"] } : {}),
-        ...(page_size ? { page_size } : {}),
-      });
-      return ok(result);
+      try {
+        const result = await client.databases.query({
+          database_id,
+          ...(filter ? { filter: filter as Parameters<typeof client.databases.query>[0]["filter"] } : {}),
+          ...(sorts ? { sorts: sorts as Parameters<typeof client.databases.query>[0]["sorts"] } : {}),
+          ...(page_size ? { page_size } : {}),
+          ...(start_cursor ? { start_cursor } : {}),
+        });
+        return ok(result);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "multiple_data_sources_for_database") {
+          const dbResp = (await notionFetch(workspace as Workspace, `/v1/databases/${database_id}`)) as {
+            data_sources?: Array<{ id: string; name: string }>;
+            title?: Array<{ plain_text: string }>;
+          };
+          return ok({
+            error: "multiple_data_sources_for_database",
+            message:
+              "This database has multiple data sources. Use notion_query_data_source with one of the data_source_id values below.",
+            database_id,
+            title: dbResp.title?.map((t) => t.plain_text).join("") ?? "",
+            data_sources: dbResp.data_sources ?? [],
+            next_tool: "notion_query_data_source",
+          });
+        }
+        throw err;
+      }
     }
   );
 
@@ -287,15 +315,33 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_get_database_schema",
-    "Retrieve the schema/structure of a Notion database",
+    "Retrieve the schema/structure of a Notion database. For multi-source databases, returns the list of data sources — call notion_get_data_source_schema on each to inspect properties.",
     {
       workspace: workspaceSchema,
       database_id: notionIdSchema.describe("The ID of the database"),
     },
     async ({ workspace, database_id }) => {
       const client = getClient(workspace as Workspace);
-      const result = await client.databases.retrieve({ database_id });
-      return ok(result);
+      try {
+        const result = await client.databases.retrieve({ database_id });
+        return ok(result);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "multiple_data_sources_for_database") {
+          const dbResp = (await notionFetch(workspace as Workspace, `/v1/databases/${database_id}`)) as {
+            data_sources?: Array<{ id: string; name: string }>;
+            title?: Array<{ plain_text: string }>;
+          };
+          return ok({
+            multi_source: true,
+            database_id,
+            title: dbResp.title?.map((t) => t.plain_text).join("") ?? "",
+            data_sources: dbResp.data_sources ?? [],
+            next_tool: "notion_get_data_source_schema",
+          });
+        }
+        throw err;
+      }
     }
   );
 
@@ -345,7 +391,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_update_database",
-    "Update a database: add, rename, or remove columns. Also supports updating title and description.",
+    "Update a database: add, rename, or remove columns. Also supports updating title and description. Removing columns deletes ALL data in those columns across every row — requires confirm:true.",
     {
       workspace: workspaceSchema,
       database_id: notionIdSchema.describe("The ID of the database to update"),
@@ -362,9 +408,23 @@ export function registerTools(server: McpServer): void {
       remove_columns: z
         .array(z.string())
         .optional()
-        .describe("Column names to remove"),
+        .describe("Column names to remove. Wipes all values in those columns across every row."),
+      confirm: z
+        .literal(true)
+        .optional()
+        .describe("Required when remove_columns is set. Caller acknowledges data loss."),
     },
-    async ({ workspace, database_id, title, description, add_columns, rename_columns, remove_columns }) => {
+    async ({ workspace, database_id, title, description, add_columns, rename_columns, remove_columns, confirm }) => {
+      if (remove_columns && remove_columns.length > 0 && confirm !== true) {
+        return text(
+          `Refusing: removing columns (${remove_columns.join(", ")}) deletes data in every row. Pass confirm: true to proceed.`
+        );
+      }
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to update: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
       const client = getClient(workspace as Workspace);
 
       const properties: Record<string, unknown> = {};
@@ -569,7 +629,8 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_replace_page_content",
-    "Replace the entire content of a page. Deletes all existing blocks and appends new content from Markdown or raw blocks.",
+    "DESTRUCTIVE: replace the entire content of a page. Deletes all existing blocks and appends new content from Markdown or raw blocks." +
+      DESTRUCTIVE_CONFIRM_NOTE,
     {
       workspace: workspaceSchema,
       page_id: notionIdSchema.describe("The ID of the page"),
@@ -581,8 +642,21 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("New content as Markdown — converted to blocks automatically. Ignored if children is provided."),
+      confirm: z
+        .literal(true)
+        .describe("Must be true. Caller acknowledges this deletes all existing blocks on the page."),
     },
-    async ({ workspace, page_id, children, content }) => {
+    async ({ workspace, page_id, children, content, confirm }) => {
+      if (confirm !== true) {
+        return text(
+          "Refusing: notion_replace_page_content requires confirm: true. This operation deletes every existing block on the page before appending the new content."
+        );
+      }
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to replace: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
       const client = getClient(workspace as Workspace);
 
       let newBlocks = children;
@@ -618,12 +692,21 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_delete_page",
-    "Move a page to trash (archive it)",
+    "DESTRUCTIVE: move a page to trash (archive it). The page becomes invisible in the UI and inaccessible via most tools." +
+      DESTRUCTIVE_CONFIRM_NOTE,
     {
       workspace: workspaceSchema,
       page_id: notionIdSchema.describe("The ID of the page to delete"),
+      confirm: z
+        .literal(true)
+        .describe("Must be true. Caller acknowledges archiving this page."),
     },
-    async ({ workspace, page_id }) => {
+    async ({ workspace, page_id, confirm }) => {
+      if (confirm !== true) {
+        return text(
+          "Refusing: notion_delete_page requires confirm: true. Archive moves the page to trash (recoverable for 30 days, then permanent)."
+        );
+      }
       if (NORA_READONLY && workspace === "nora") {
         throw new Error(
           "Refusing to delete: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
@@ -667,6 +750,297 @@ export function registerTools(server: McpServer): void {
         page_id,
         new_parent_id,
         parent_type,
+      });
+      return ok(result);
+    }
+  );
+
+  // ── Data sources (multi-source databases, API 2025-09-03) ────────────────
+
+  server.tool(
+    "notion_list_data_sources",
+    "List the data sources of a Notion database. Multi-source databases expose multiple data sources under a single container; use this to discover them, then call notion_query_data_source on a specific one.",
+    {
+      workspace: workspaceSchema,
+      database_id: notionIdSchema.describe("The container database ID"),
+    },
+    async ({ workspace, database_id }) => {
+      const db = (await notionFetch(workspace as Workspace, `/v1/databases/${database_id}`)) as {
+        data_sources?: Array<{ id: string; name: string }>;
+        title?: Array<{ plain_text: string }>;
+      };
+      return ok({
+        database_id,
+        title: db.title?.map((t) => t.plain_text).join("") ?? "",
+        data_sources: db.data_sources ?? [],
+      });
+    }
+  );
+
+  server.tool(
+    "notion_get_data_source_schema",
+    "Get the schema (properties) of a specific data source within a multi-source database.",
+    {
+      workspace: workspaceSchema,
+      data_source_id: notionIdSchema.describe("The data source ID"),
+    },
+    async ({ workspace, data_source_id }) => {
+      const ds = await notionFetch(workspace as Workspace, `/v1/data_sources/${data_source_id}`);
+      return ok(ds);
+    }
+  );
+
+  server.tool(
+    "notion_query_data_source",
+    "Query a specific data source within a multi-source database. Same filter/sort semantics as notion_query_database.",
+    {
+      workspace: workspaceSchema,
+      data_source_id: notionIdSchema.describe("The data source ID to query"),
+      filter: z.record(z.unknown()).optional().describe("Notion filter object"),
+      sorts: z
+        .array(
+          z.object({
+            property: z.string(),
+            direction: z.enum(["ascending", "descending"]),
+          })
+        )
+        .optional(),
+      page_size: z.number().int().min(1).max(100).optional(),
+      start_cursor: z.string().optional(),
+    },
+    async ({ workspace, data_source_id, filter, sorts, page_size, start_cursor }) => {
+      const body: Record<string, unknown> = {};
+      if (filter) body.filter = filter;
+      if (sorts) body.sorts = sorts;
+      if (page_size) body.page_size = page_size;
+      if (start_cursor) body.start_cursor = start_cursor;
+      const result = await notionFetch(
+        workspace as Workspace,
+        `/v1/data_sources/${data_source_id}/query`,
+        { method: "POST", body }
+      );
+      return ok(result);
+    }
+  );
+
+  // ── Comments (Notion-Version 2022-06-28+, fully usable via PAT) ──────────
+
+  server.tool(
+    "notion_list_comments",
+    "List unresolved comments on a Notion page or block.",
+    {
+      workspace: workspaceSchema,
+      block_id: notionIdSchema.describe("Page or block ID"),
+      page_size: z.number().int().min(1).max(100).optional(),
+      start_cursor: z.string().optional(),
+    },
+    async ({ workspace, block_id, page_size, start_cursor }) => {
+      const result = await notionFetch(workspace as Workspace, "/v1/comments", {
+        query: { block_id, page_size, start_cursor },
+      });
+      return ok(result);
+    }
+  );
+
+  server.tool(
+    "notion_create_comment",
+    "Add a comment on a page or to an existing discussion thread.",
+    {
+      workspace: workspaceSchema,
+      parent: z
+        .union([
+          z.object({ page_id: notionIdSchema }),
+          z.object({ discussion_id: z.string() }),
+        ])
+        .describe(
+          "Either { page_id } to start a new comment on a page, or { discussion_id } to reply to an existing thread"
+        ),
+      rich_text: z
+        .array(z.record(z.unknown()))
+        .optional()
+        .describe("Notion rich text array. Use this OR text."),
+      text: z
+        .string()
+        .optional()
+        .describe("Plain text comment (auto-wrapped into rich_text)."),
+    },
+    async ({ workspace, parent, rich_text, text: textBody }) => {
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to comment: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
+      const rt =
+        rich_text ??
+        (textBody !== undefined
+          ? [{ type: "text", text: { content: textBody } }]
+          : undefined);
+      if (!rt || rt.length === 0) {
+        return text("Error: either rich_text or text must be provided.");
+      }
+      const result = await notionFetch(workspace as Workspace, "/v1/comments", {
+        method: "POST",
+        body: { parent, rich_text: rt },
+      });
+      auditWrite("notion_create_comment", workspace, {
+        parent: JSON.stringify(parent),
+      });
+      return ok(result);
+    }
+  );
+
+  // ── File uploads (Notion's new file_uploads API) ─────────────────────────
+
+  server.tool(
+    "notion_create_file_upload",
+    "Start a Notion file upload session. Returns a file_upload object whose id can be used as block content. Most uploads use mode 'single_part' — call notion_send_file_upload next with the file bytes.",
+    {
+      workspace: workspaceSchema,
+      filename: z.string().describe("Display name for the file"),
+      content_type: z
+        .string()
+        .optional()
+        .describe("MIME type, e.g. 'image/png' or 'application/pdf'"),
+      mode: z
+        .enum(["single_part", "multi_part", "external_url"])
+        .default("single_part")
+        .describe("single_part for files ≤20MB; multi_part for larger; external_url to pull from a URL"),
+      number_of_parts: z
+        .number()
+        .int()
+        .min(2)
+        .max(1000)
+        .optional()
+        .describe("Required when mode='multi_part'"),
+      external_url: z
+        .string()
+        .optional()
+        .describe("Required when mode='external_url'"),
+    },
+    async ({ workspace, filename, content_type, mode, number_of_parts, external_url }) => {
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to upload: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
+      const body: Record<string, unknown> = { filename, mode };
+      if (content_type) body.content_type = content_type;
+      if (mode === "multi_part") {
+        if (!number_of_parts) {
+          return text("Error: multi_part mode requires number_of_parts.");
+        }
+        body.number_of_parts = number_of_parts;
+      }
+      if (mode === "external_url") {
+        if (!external_url) {
+          return text("Error: external_url mode requires external_url.");
+        }
+        body.external_url = external_url;
+      }
+      const result = await notionFetch(workspace as Workspace, "/v1/file_uploads", {
+        method: "POST",
+        body,
+      });
+      auditWrite("notion_create_file_upload", workspace, { filename });
+      return ok(result);
+    }
+  );
+
+  server.tool(
+    "notion_send_file_upload",
+    "Send file bytes (base64-encoded) to an in-progress file upload session. For multi-part, pass part_number.",
+    {
+      workspace: workspaceSchema,
+      file_upload_id: notionIdSchema.describe("ID returned by notion_create_file_upload"),
+      file_base64: z.string().describe("File content encoded as base64"),
+      filename: z.string().describe("Filename to include in the multipart form"),
+      content_type: z
+        .string()
+        .default("application/octet-stream")
+        .describe("MIME type of the file"),
+      part_number: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Required for multi_part uploads"),
+    },
+    async ({ workspace, file_upload_id, file_base64, filename, content_type, part_number }) => {
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to upload: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
+      const bytes = Buffer.from(file_base64, "base64");
+      const form = new FormData();
+      form.append("file", new Blob([bytes], { type: content_type }), filename);
+      if (part_number !== undefined) form.append("part_number", String(part_number));
+      const result = await notionFetch(
+        workspace as Workspace,
+        `/v1/file_uploads/${file_upload_id}/send`,
+        { method: "POST", rawBody: form }
+      );
+      auditWrite("notion_send_file_upload", workspace, {
+        file_upload_id,
+        bytes: bytes.length,
+        part_number,
+      });
+      return ok(result);
+    }
+  );
+
+  server.tool(
+    "notion_complete_file_upload",
+    "Mark a multi_part file upload as complete after all parts have been sent.",
+    {
+      workspace: workspaceSchema,
+      file_upload_id: notionIdSchema.describe("ID of the multi-part upload"),
+    },
+    async ({ workspace, file_upload_id }) => {
+      if (NORA_READONLY && workspace === "nora") {
+        throw new Error(
+          "Refusing to upload: the 'nora' workspace is in read-only mode (NORA_READONLY=true)."
+        );
+      }
+      const result = await notionFetch(
+        workspace as Workspace,
+        `/v1/file_uploads/${file_upload_id}/complete`,
+        { method: "POST", body: {} }
+      );
+      auditWrite("notion_complete_file_upload", workspace, { file_upload_id });
+      return ok(result);
+    }
+  );
+
+  // ── Introspection ────────────────────────────────────────────────────────
+
+  server.tool(
+    "notion_get_self",
+    "Return info about the token currently used for this workspace: integration/PAT name, owner, workspace name, workspace_id, and workspace upload limits.",
+    {
+      workspace: workspaceSchema,
+    },
+    async ({ workspace }) => {
+      const me = await notionFetch(workspace as Workspace, "/v1/users/me");
+      return ok(me);
+    }
+  );
+
+  server.tool(
+    "notion_get_block_children",
+    "List the direct block children of a page or block (paginated). Use when you only need block IDs/types and want to avoid fetching the whole page.",
+    {
+      workspace: workspaceSchema,
+      block_id: notionIdSchema.describe("Page or block ID"),
+      page_size: z.number().int().min(1).max(100).optional(),
+      start_cursor: z.string().optional(),
+    },
+    async ({ workspace, block_id, page_size, start_cursor }) => {
+      const client = getClient(workspace as Workspace);
+      const result = await client.blocks.children.list({
+        block_id,
+        ...(page_size ? { page_size } : {}),
+        ...(start_cursor ? { start_cursor } : {}),
       });
       return ok(result);
     }

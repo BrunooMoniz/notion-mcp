@@ -17,14 +17,29 @@ Port: 3456 (default). Health check: `GET /health`.
 
 ```
 src/
-  index.ts       # Express server, session lifecycle, auth middleware
-  tools.ts       # 16 Notion tool definitions (Zod schemas + handlers)
-  clients.ts     # Notion API clients, one per workspace
+  index.ts       # Express server, session lifecycle, auth middleware, INSTRUCTIONS
+  tools.ts       # ~24 Notion tool definitions (Zod schemas + handlers)
+  clients.ts     # Notion clients + NOTION_API_VERSION + notionFetch raw helper
   oauth.ts       # OAuth 2.1 server (RFC 7591/8414, PKCE, consent screen)
   context.ts     # AsyncLocalStorage for per-request scope enforcement
   audit.ts       # JSONL audit log for write operations
   markdown.ts    # Markdown <-> Notion block conversion
+  rag/           # Brain indexer + search (PGLite vector store)
+  classifier/    # LLM page classifier + spaced-repetition Revisitar
 ```
+
+## Notion API version
+
+Pinned to `2025-09-03` (see `NOTION_API_VERSION` in `clients.ts`). This unlocks:
+- multi-source databases (`data_sources` array on Database object, separate `/v1/data_sources/:id` endpoints)
+- file uploads (`/v1/file_uploads`)
+- richer comments API
+
+For endpoints not yet typed by `@notionhq/client`, use `notionFetch(workspace, path, init)` — it auths with the workspace's token and pins the version header.
+
+## Destructive operations
+
+Tools that wipe data (`notion_delete_page`, `notion_replace_page_content`, `notion_update_database` with `remove_columns`) require `confirm: true`. The handler refuses without it. Don't add fallback paths around this — the prompt-level safety rules in `INSTRUCTIONS` reinforce the same convention.
 
 ## Workspaces
 

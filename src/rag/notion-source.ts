@@ -1,6 +1,7 @@
 // src/rag/notion-source.ts
 import { Client as NotionClient } from "@notionhq/client";
 import { createHash } from "node:crypto";
+import { NOTION_API_VERSION } from "../clients.js";
 import type { IndexableDocument, Workspace } from "./types.js";
 
 interface FetchOpts {
@@ -37,7 +38,7 @@ async function discoverDatabases(notion: NotionClient): Promise<DiscoveredDb[]> 
 export async function* fetchWorkspaceDocuments(
   opts: FetchOpts,
 ): AsyncGenerator<IndexableDocument> {
-  const notion = new NotionClient({ auth: opts.notionToken });
+  const notion = new NotionClient({ auth: opts.notionToken, notionVersion: NOTION_API_VERSION });
   const dbs: DiscoveredDb[] = opts.databaseIds
     ? opts.databaseIds.map((id) => ({ id, name: "Custom" }))
     : await discoverDatabases(notion);

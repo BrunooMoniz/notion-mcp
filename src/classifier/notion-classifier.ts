@@ -2,6 +2,7 @@
 // Orchestrates: fetch unclassified pages → LLM classify → apply props + relations on Notion.
 
 import { Client as NotionClient } from "@notionhq/client";
+import { NOTION_API_VERSION } from "../clients.js";
 import { classifyPage } from "./anthropic.js";
 import type { ClassificationResult, PageToClassify } from "./types.js";
 
@@ -44,7 +45,7 @@ export async function runClassifier(opts: { sinceDays?: number; limit?: number }
 
   const token = process.env.NOTION_PERSONAL_TOKEN;
   if (!token) throw new Error("NOTION_PERSONAL_TOKEN not set");
-  const notion = new NotionClient({ auth: token });
+  const notion = new NotionClient({ auth: token, notionVersion: NOTION_API_VERSION });
 
   const sinceDays = opts.sinceDays ?? 7;
   const sinceIso = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
