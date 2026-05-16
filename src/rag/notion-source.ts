@@ -1,7 +1,7 @@
 // src/rag/notion-source.ts
 import { Client as NotionClient } from "@notionhq/client";
 import { createHash } from "node:crypto";
-import { NOTION_API_VERSION } from "../clients.js";
+import { NOTION_API_VERSION, notionFetch } from "../clients.js";
 import type { IndexableDocument, Workspace } from "./types.js";
 
 interface FetchOpts {
@@ -12,6 +12,7 @@ interface FetchOpts {
 }
 
 interface DiscoveredDb {
+  // data_source id (used by /v1/data_sources/{id}/query under API 2025-09-03)
   id: string;
   name: string;
 }
@@ -21,12 +22,12 @@ async function discoverDatabases(notion: NotionClient): Promise<DiscoveredDb[]> 
   let cursor: string | undefined = undefined;
   do {
     const resp = await notion.search({
-      filter: { property: "object", value: "database" },
+      filter: { property: "object", value: "data_source" as any },
       page_size: 100,
       start_cursor: cursor,
     });
     for (const r of resp.results) {
-      if ((r as any).object !== "database") continue;
+      if ((r as any).object !== "data_source") continue;
       const titleProp = (r as any).title?.map((t: any) => t.plain_text).join("") ?? "(untitled)";
       dbs.push({ id: r.id, name: titleProp });
     }
@@ -43,25 +44,28 @@ export async function* fetchWorkspaceDocuments(
     ? opts.databaseIds.map((id) => ({ id, name: "Custom" }))
     : await discoverDatabases(notion);
 
-  console.log(`[notion-source] workspace=${opts.workspace} discovered ${dbs.length} databases`);
+  console.log(`[notion-source] workspace=${opts.workspace} discovered ${dbs.length} data sources`);
 
   for (const db of dbs) {
     try {
       let cursor: string | undefined = undefined;
       do {
-        const resp = await notion.databases.query({
-          database_id: db.id,
-          start_cursor: cursor,
+        const body: Record<string, unknown> = {
           page_size: 50,
+          ...(cursor ? { start_cursor: cursor } : {}),
           ...(opts.modifiedSince
             ? {
                 filter: {
                   timestamp: "last_edited_time",
                   last_edited_time: { on_or_after: opts.modifiedSince.toISOString() },
-                } as any,
+                },
               }
             : {}),
-        });
+        };
+        const resp = (await notionFetch(opts.workspace, `/v1/data_sources/${db.id}/query`, {
+          method: "POST",
+          body,
+        })) as { results: any[]; next_cursor: string | null };
         for (const page of resp.results) {
           if (!("properties" in page)) continue;
           try {

@@ -2,7 +2,7 @@
 // Orchestrates: fetch unclassified pages → LLM classify → apply props + relations on Notion.
 
 import { Client as NotionClient } from "@notionhq/client";
-import { NOTION_API_VERSION } from "../clients.js";
+import { NOTION_API_VERSION, notionFetch } from "../clients.js";
 import { classifyPage } from "./anthropic.js";
 import type { ClassificationResult, PageToClassify } from "./types.js";
 
@@ -17,6 +17,21 @@ const PERSONAL_DBS = {
   Pessoas: "33a07ba5-bee8-81ff-bec4-eeb4234688f1",
   Organizacoes: "33a07ba5-bee8-813f-a58f-f0fe1055eec4",
 } as const;
+
+// Notion API 2025-09-03 queries by data_source_id, not database_id.
+const PERSONAL_DATA_SOURCES: Record<keyof typeof PERSONAL_DBS, string> = {
+  Reunioes: "33a07ba5-bee8-811e-b576-000b0579facc",
+  Insights: "33a07ba5-bee8-81fc-8f49-000b348bf422",
+  Pessoas: "33a07ba5-bee8-81b2-815d-000b9414591a",
+  Organizacoes: "33a07ba5-bee8-81cf-88d1-000bff9b6b4c",
+};
+
+function dataSourceFor(dbId: string): string {
+  for (const [name, id] of Object.entries(PERSONAL_DBS)) {
+    if (id === dbId) return PERSONAL_DATA_SOURCES[name as keyof typeof PERSONAL_DBS];
+  }
+  throw new Error(`No data_source mapping for database_id ${dbId}`);
+}
 
 interface ClassifierStats {
   scanned: number;
@@ -86,17 +101,17 @@ interface EntityIndex {
   dbId: string;
 }
 
-async function loadEntityIndex(notion: NotionClient, dbId: string): Promise<EntityIndex> {
+async function loadEntityIndex(_notion: NotionClient, dbId: string): Promise<EntityIndex> {
   const byNormalizedName = new Map<string, string>();
+  const dataSourceId = dataSourceFor(dbId);
   let cursor: string | undefined = undefined;
   do {
-    const resp = await notion.databases.query({
-      database_id: dbId,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const resp = (await notionFetch("personal", `/v1/data_sources/${dataSourceId}/query`, {
+      method: "POST",
+      body: { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) },
+    })) as { results: any[]; next_cursor: string | null };
     for (const page of resp.results) {
-      if (!("properties" in page)) continue;
+      if (!page?.properties) continue;
       const titleProp = Object.values<any>(page.properties).find((p) => p.type === "title");
       const title = titleProp?.title?.map((t: any) => t.plain_text).join("") ?? "";
       if (title.trim()) {
@@ -125,19 +140,22 @@ async function fetchUnclassified(
   limit: number,
 ): Promise<PageToClassify[]> {
   if (limit <= 0) return [];
-  const resp = await notion.databases.query({
-    database_id: dbId,
-    page_size: Math.min(limit, 50),
-    filter: {
-      timestamp: "created_time",
-      created_time: { on_or_after: sinceIso },
-    } as any,
-    sorts: [{ timestamp: "created_time", direction: "descending" }],
-  });
+  const dataSourceId = dataSourceFor(dbId);
+  const resp = (await notionFetch("personal", `/v1/data_sources/${dataSourceId}/query`, {
+    method: "POST",
+    body: {
+      page_size: Math.min(limit, 50),
+      filter: {
+        timestamp: "created_time",
+        created_time: { on_or_after: sinceIso },
+      },
+      sorts: [{ timestamp: "created_time", direction: "descending" }],
+    },
+  })) as { results: any[] };
 
   const results: PageToClassify[] = [];
   for (const page of resp.results) {
-    if (!("properties" in page)) continue;
+    if (!page?.properties) continue;
     const props = page.properties;
     const current = {
       frente: ((props as any).Frente?.select?.name) ?? null,
