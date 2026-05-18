@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getClient, notionFetch, type Workspace } from "./clients.js";
+import { getClient, getSearchClient, notionFetch, type Workspace } from "./clients.js";
 import { auditWrite } from "./audit.js";
 import {
   markdownToBlocks,
@@ -126,7 +126,9 @@ export function registerTools(server: McpServer): void {
         .describe("Filter results by object type"),
     },
     async ({ workspace, query, filter }) => {
-      const client = getClient(workspace as Workspace);
+      // Search/discovery uses the internal-integration client because PATs
+      // return empty for /v1/search. See src/clients.ts.
+      const client = getSearchClient(workspace as Workspace);
       const result = await client.search({
         query,
         ...(filter ? { filter } : {}),

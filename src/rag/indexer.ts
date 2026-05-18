@@ -14,16 +14,7 @@ interface IndexerStats {
   endedAt: Date;
 }
 
-interface WorkspaceConfig {
-  name: Workspace;
-  envVar: string;
-}
-
-const WORKSPACES: WorkspaceConfig[] = [
-  { name: "personal", envVar: "NOTION_PERSONAL_TOKEN" },
-  { name: "globalcripto", envVar: "NOTION_GLOBALCRIPTO_TOKEN" },
-  { name: "nora", envVar: "NOTION_NORA_TOKEN" },
-];
+const WORKSPACES: Workspace[] = ["personal", "globalcripto", "nora"];
 
 export async function runDeltaSync(opts: {
   fullReindex?: boolean;
@@ -31,7 +22,7 @@ export async function runDeltaSync(opts: {
 } = {}): Promise<IndexerStats> {
   const startedAt = new Date();
   const targets = opts.workspaces
-    ? WORKSPACES.filter((w) => opts.workspaces!.includes(w.name))
+    ? WORKSPACES.filter((w) => opts.workspaces!.includes(w))
     : WORKSPACES;
 
   const stats: IndexerStats = {
@@ -43,14 +34,8 @@ export async function runDeltaSync(opts: {
     endedAt: new Date(),
   };
 
-  for (const ws of targets) {
-    const token = process.env[ws.envVar];
-    if (!token) {
-      console.warn(`[indexer] skipping workspace ${ws.name}: ${ws.envVar} not set`);
-      continue;
-    }
-
-    const sourceType = `notion-${ws.name}`;
+  for (const wsName of targets) {
+    const sourceType = `notion-${wsName}`;
     const lastSync = opts.fullReindex ? new Date(0) : await getSyncState(sourceType);
     const wsStarted = new Date();
 
@@ -60,8 +45,7 @@ export async function runDeltaSync(opts: {
 
     try {
       for await (const doc of fetchWorkspaceDocuments({
-        workspace: ws.name,
-        notionToken: token,
+        workspace: wsName,
         modifiedSince: opts.fullReindex ? undefined : lastSync,
       })) {
         wsDocs++;
@@ -76,17 +60,17 @@ export async function runDeltaSync(opts: {
       await upsertChunks(wsChunks);
       await setSyncState(sourceType, wsStarted);
 
-      stats.workspaces[ws.name] = { documents: wsDocs, chunks: wsChunks.length };
+      stats.workspaces[wsName] = { documents: wsDocs, chunks: wsChunks.length };
       stats.documents += wsDocs;
       stats.chunks += wsChunks.length;
       stats.apiCalls += Math.ceil(wsChunks.length / 128);
 
       console.log(
-        `[indexer] workspace=${ws.name} documents=${wsDocs} chunks=${wsChunks.length}`,
+        `[indexer] workspace=${wsName} documents=${wsDocs} chunks=${wsChunks.length}`,
       );
     } catch (err: any) {
-      console.error(`[indexer] workspace ${ws.name} FAILED:`, err.message ?? err);
-      stats.workspaces[ws.name] = { documents: wsDocs, chunks: wsChunks.length };
+      console.error(`[indexer] workspace ${wsName} FAILED:`, err.message ?? err);
+      stats.workspaces[wsName] = { documents: wsDocs, chunks: wsChunks.length };
     }
   }
 

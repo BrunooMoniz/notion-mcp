@@ -1,12 +1,17 @@
 // src/rag/notion-source.ts
 import { Client as NotionClient } from "@notionhq/client";
 import { createHash } from "node:crypto";
-import { NOTION_API_VERSION, notionFetch } from "../clients.js";
+import {
+  NOTION_API_VERSION,
+  notionFetch,
+  getClient,
+  getSearchClient,
+  getExtraDataSources,
+} from "../clients.js";
 import type { IndexableDocument, Workspace } from "./types.js";
 
 interface FetchOpts {
   workspace: Workspace;
-  notionToken: string;
   modifiedSince?: Date;
   databaseIds?: string[];
 }
@@ -17,11 +22,11 @@ interface DiscoveredDb {
   name: string;
 }
 
-async function discoverDatabases(notion: NotionClient): Promise<DiscoveredDb[]> {
+async function discoverDatabases(searchClient: NotionClient): Promise<DiscoveredDb[]> {
   const dbs: DiscoveredDb[] = [];
   let cursor: string | undefined = undefined;
   do {
-    const resp = await notion.search({
+    const resp = await searchClient.search({
       filter: { property: "object", value: "data_source" as any },
       page_size: 100,
       start_cursor: cursor,
@@ -36,15 +41,40 @@ async function discoverDatabases(notion: NotionClient): Promise<DiscoveredDb[]> 
   return dbs;
 }
 
+async function fetchDataSourceName(workspace: Workspace, dataSourceId: string): Promise<string> {
+  try {
+    const resp = (await notionFetch(workspace, `/v1/data_sources/${dataSourceId}`)) as {
+      title?: { plain_text?: string }[];
+    };
+    return resp.title?.map((t) => t.plain_text ?? "").join("") || "(untitled)";
+  } catch {
+    return "(extra)";
+  }
+}
+
 export async function* fetchWorkspaceDocuments(
   opts: FetchOpts,
 ): AsyncGenerator<IndexableDocument> {
-  const notion = new NotionClient({ auth: opts.notionToken, notionVersion: NOTION_API_VERSION });
-  const dbs: DiscoveredDb[] = opts.databaseIds
-    ? opts.databaseIds.map((id) => ({ id, name: "Custom" }))
-    : await discoverDatabases(notion);
+  const readClient = getClient(opts.workspace);
+  const searchClient = getSearchClient(opts.workspace);
 
-  console.log(`[notion-source] workspace=${opts.workspace} discovered ${dbs.length} data sources`);
+  let dbs: DiscoveredDb[];
+  if (opts.databaseIds) {
+    dbs = opts.databaseIds.map((id) => ({ id, name: "Custom" }));
+  } else {
+    dbs = await discoverDatabases(searchClient);
+    // Merge in the per-workspace manifest of extras (data sources the PAT
+    // can read but search doesn't surface). Dedupe by id.
+    const known = new Set(dbs.map((d) => d.id));
+    for (const extraId of getExtraDataSources(opts.workspace)) {
+      if (known.has(extraId)) continue;
+      const name = await fetchDataSourceName(opts.workspace, extraId);
+      dbs.push({ id: extraId, name });
+      known.add(extraId);
+    }
+  }
+
+  console.log(`[notion-source] workspace=${opts.workspace} data_sources=${dbs.length}`);
 
   for (const db of dbs) {
     try {
@@ -67,9 +97,9 @@ export async function* fetchWorkspaceDocuments(
           body,
         })) as { results: any[]; next_cursor: string | null };
         for (const page of resp.results) {
-          if (!("properties" in page)) continue;
+          if (!page?.properties) continue;
           try {
-            const text = await pageToText(notion, page);
+            const text = await pageToText(readClient, page);
             if (!text.trim()) continue;
             yield {
               source_type: "notion",

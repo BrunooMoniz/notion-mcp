@@ -3,7 +3,7 @@
 // "Revisitar" entries so Bruno can revisit them.
 
 import { Client as NotionClient } from "@notionhq/client";
-import { NOTION_API_VERSION, notionFetch } from "../clients.js";
+import { NOTION_API_VERSION, notionFetch, getSearchClient } from "../clients.js";
 
 const PARENT_PAGE_ID = "33707ba5-bee8-810d-bc21-c6d1514502b8"; // Cérebro
 const INSIGHTS_DB = "33a07ba5-bee8-81a4-b929-c8bc631ccba5";
@@ -34,8 +34,10 @@ let cachedRevisitarRefs: RevisitarRefs | null = {
 export async function ensureRevisitarDb(notion: NotionClient): Promise<RevisitarRefs> {
   if (cachedRevisitarRefs) return cachedRevisitarRefs;
 
-  // Search for existing data_source titled "Revisitar"
-  const search = await notion.search({
+  // Search for existing data_source titled "Revisitar". /v1/search only
+  // returns content visible to the internal-integration token; PATs return
+  // empty. Use the search client explicitly.
+  const search = await getSearchClient("personal").search({
     query: "Revisitar",
     filter: { property: "object", value: "data_source" as any },
   });
