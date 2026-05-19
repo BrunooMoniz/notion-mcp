@@ -126,7 +126,7 @@ export async function* fetchWorkspaceDocuments(
 // Backwards compat alias for any external caller
 export const fetchPersonalDocuments = fetchWorkspaceDocuments;
 
-async function pageToText(notion: NotionClient, page: any): Promise<string> {
+export async function pageToText(notion: NotionClient, page: any): Promise<string> {
   const lines: string[] = [];
   for (const [, prop] of Object.entries<any>(page.properties)) {
     if (prop.type === "title" && prop.title?.length) {
@@ -188,7 +188,7 @@ function blockText(block: any): string {
   }
 }
 
-function extractMetadata(page: any): Record<string, unknown> {
+export function extractMetadata(page: any): Record<string, unknown> {
   const meta: Record<string, unknown> = {};
   for (const [name, prop] of Object.entries<any>(page.properties)) {
     if (prop.type === "select" && prop.select?.name) meta[name.toLowerCase()] = prop.select.name;

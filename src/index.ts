@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerTools } from "./tools.js";
 import { registerBrainSearchTool } from "./rag/brain-tool.js";
+import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { requestContext, type RequestContext } from "./context.js";
 
@@ -87,6 +88,11 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 - Prefer Markdown "content" over raw "children" blocks when creating or appending — simpler and less error-prone.
 - For databases that are multi-source (8 of them inside one container is the Nora CRM pattern), use the *_data_source variants.
 - The user speaks Portuguese (Brazil) — respond in Portuguese unless they write in another language.
+
+## Brain RAG tools
+
+- **brain_search** — Hybrid semantic+keyword search over the indexed second brain.
+- **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no cérebro", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
 `.trim();
 
 const app = express();
@@ -293,6 +299,7 @@ app.post("/mcp", async (req, res) => {
 
   registerTools(server);
   registerBrainSearchTool(server);
+  registerBrainIndexUrlTool(server);
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
