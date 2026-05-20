@@ -1,5 +1,6 @@
 // src/rag/indexer.ts
 import { fetchWorkspaceDocuments, chunkId } from "./notion-source.js";
+import { fetchGranolaDocuments } from "./granola-source.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
 import { upsertChunks, deleteBySource, getSyncState, setSyncState } from "./storage.js";
@@ -10,11 +11,20 @@ interface IndexerStats {
   chunks: number;
   apiCalls: number;
   workspaces: Record<string, { documents: number; chunks: number }>;
+  granola: Record<string, { documents: number; chunks: number }>;
   startedAt: Date;
   endedAt: Date;
 }
 
 const WORKSPACES: Workspace[] = ["personal", "globalcripto", "nora"];
+
+// Granola has two Bruno-side accounts: personal and corporate (globalcripto).
+// Each maps to its own PAT (different env var) and tags chunks with the
+// matching workspace so brain_search filters can use the same enum.
+const GRANOLA_FEEDS: Array<{ workspace: Workspace; tokenEnv: string }> = [
+  { workspace: "personal", tokenEnv: "GRANOLA_PERSONAL_TOKEN" },
+  { workspace: "globalcripto", tokenEnv: "GRANOLA_GLOBALCRIPTO_TOKEN" },
+];
 
 export async function runDeltaSync(opts: {
   fullReindex?: boolean;
@@ -30,10 +40,12 @@ export async function runDeltaSync(opts: {
     chunks: 0,
     apiCalls: 0,
     workspaces: {},
+    granola: {},
     startedAt,
     endedAt: new Date(),
   };
 
+  // ---- Notion pass ----
   for (const wsName of targets) {
     const sourceType = `notion-${wsName}`;
     const lastSync = opts.fullReindex ? new Date(0) : await getSyncState(sourceType);
@@ -71,6 +83,51 @@ export async function runDeltaSync(opts: {
     } catch (err: any) {
       console.error(`[indexer] workspace ${wsName} FAILED:`, err.message ?? err);
       stats.workspaces[wsName] = { documents: wsDocs, chunks: wsChunks.length };
+    }
+  }
+
+  // ---- Granola pass ----
+  for (const feed of GRANOLA_FEEDS) {
+    if (opts.workspaces && !opts.workspaces.includes(feed.workspace)) continue;
+    if (!process.env[feed.tokenEnv]) continue;
+
+    const sourceType = `granola-${feed.workspace}`;
+    const lastSync = opts.fullReindex ? new Date(0) : await getSyncState(sourceType);
+    const feedStarted = new Date();
+
+    let docs = 0;
+    const chunks: ChunkWithEmbedding[] = [];
+    const docsToReplace: string[] = [];
+
+    try {
+      for await (const doc of fetchGranolaDocuments({
+        workspace: feed.workspace,
+        tokenEnv: feed.tokenEnv,
+        modifiedSince: opts.fullReindex ? undefined : lastSync,
+      })) {
+        docs++;
+        const docChunks = await indexDocument(doc);
+        docsToReplace.push(doc.source_id);
+        chunks.push(...docChunks);
+      }
+
+      for (const id of docsToReplace) {
+        await deleteBySource("granola", id);
+      }
+      await upsertChunks(chunks);
+      await setSyncState(sourceType, feedStarted);
+
+      stats.granola[feed.workspace] = { documents: docs, chunks: chunks.length };
+      stats.documents += docs;
+      stats.chunks += chunks.length;
+      stats.apiCalls += Math.ceil(chunks.length / 128);
+
+      console.log(
+        `[indexer] granola.${feed.workspace} documents=${docs} chunks=${chunks.length}`,
+      );
+    } catch (err: any) {
+      console.error(`[indexer] granola ${feed.workspace} FAILED:`, err.message ?? err);
+      stats.granola[feed.workspace] = { documents: docs, chunks: chunks.length };
     }
   }
 
