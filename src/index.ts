@@ -9,6 +9,7 @@ import { registerTools } from "./tools.js";
 import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
+import { createGoogleRouter } from "./google/routes.js";
 import { requestContext, type RequestContext } from "./context.js";
 
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
@@ -171,6 +172,9 @@ const BEARER_TOKEN = process.env.BEARER_TOKEN;
 
 // OAuth routes (well-known, register, authorize, token, admin)
 app.use(createOAuthRouter(BASE_URL, BEARER_TOKEN));
+
+// Google OAuth + status — for connecting calendar.readonly to the indexer
+app.use(createGoogleRouter());
 
 app.use("/mcp", (req, res, next) => {
   const auth = req.headers["authorization"];
