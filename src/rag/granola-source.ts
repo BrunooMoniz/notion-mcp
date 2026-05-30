@@ -115,6 +115,9 @@ function noteMetadata(note: GranolaNoteFull): Record<string, unknown> {
     folder: note.folder_membership?.[0]?.folder_name,
     calendar_event_id: note.calendar_event?.id,
     web_url: note.web_url,
+    // F.2.3: surface the upstream created_at so the indexer can advance the
+    // persisted cursor to max(created_at) instead of wall-clock time.
+    created_at: note.created_at,
   };
 }
 
