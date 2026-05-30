@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 import {
   reciprocalRankFusion,
   brainSearch,
+  buildWorkspaceScopeClause,
   __setSearchDepsForTest,
 } from "../search.js";
-import type { Chunk } from "../types.js";
+import type { Chunk, SearchFilters } from "../types.js";
 
 const mk = (id: string): Chunk => ({
   id,
@@ -136,4 +137,107 @@ test("rerank disabled: falls back to normalized RRF without calling reranker", a
   assert.equal(rerankCalled, false);
   assert.equal(out.length, 3);
   assert.ok(out[0].score <= 1 && out[0].score >= 0);
+});
+
+// --- F.4.2: workspace-scope enforcement -------------------------------------
+// buildWorkspaceScopeClause is pure (no DB): forces WHERE workspace = ANY(...)
+// from the caller's allowed workspaces, intersected with any caller filter.
+
+test("scoped token -> WHERE workspace = ANY(...) (intersect caller)", () => {
+  const { sql, params } = buildWorkspaceScopeClause(["personal"], { workspace: undefined });
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [["personal"]]);
+});
+
+test("scoped token + caller filter -> intersection only", () => {
+  // caller asks globalcripto but token only allows personal -> empty intersection
+  const { sql, params } = buildWorkspaceScopeClause(["personal"], { workspace: "globalcripto" });
+  assert.deepEqual(params, [[]]); // empty -> zero rows, no leak
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+});
+
+test("scoped token + matching caller filter -> that single workspace", () => {
+  const { sql, params } = buildWorkspaceScopeClause(
+    ["personal", "globalcripto"],
+    { workspace: "personal" },
+  );
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [["personal"]]);
+});
+
+test("null allowed (all/cron) -> no clause", () => {
+  const { sql, params } = buildWorkspaceScopeClause(null, { workspace: undefined });
+  assert.equal(sql, "");
+  assert.deepEqual(params, []);
+});
+
+test("null allowed but caller asked a workspace -> still no scope clause (caller filter handled separately)", () => {
+  const { sql, params } = buildWorkspaceScopeClause(null, { workspace: "globalcripto" });
+  assert.equal(sql, "");
+  assert.deepEqual(params, []);
+});
+
+// startIdx is honored so the clause can be appended after embedding/topK params.
+test("buildWorkspaceScopeClause honors startIdx for placeholder numbering", () => {
+  const { sql } = buildWorkspaceScopeClause(["personal"], { workspace: undefined }, 4);
+  assert.match(sql, /workspace\s*=\s*ANY\(\$4\)/i);
+});
+
+// --- F.4.2 acceptance: cross-workspace leak guard ---------------------------
+// A personal-scoped token must yield ZERO globalcripto/nora chunks. We assert
+// this end-to-end through brainSearch: the injected storage layer receives an
+// effective allowed-workspace list of ["personal"] only, so any chunk it would
+// otherwise return for globalcripto/nora is filtered out before it reaches the
+// caller. We verify by inspecting the SearchFilters handed to storage.
+
+test("brainSearch with personal-scoped token forces _allowedWorkspaces=['personal']", async () => {
+  let semFilters: SearchFilters | undefined;
+  __setSearchDepsForTest({
+    getAllowedWorkspaces: () => ["personal"],
+    searchSemantic: async (_e, filters, limit: number) => {
+      semFilters = filters;
+      return Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1));
+    },
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  await brainSearch("q", { topK: 3 });
+  assert.deepEqual(semFilters?._allowedWorkspaces, ["personal"]);
+});
+
+test("brainSearch: personal token + caller asks globalcripto -> empty allowed set (no leak)", async () => {
+  let semFilters: SearchFilters | undefined;
+  __setSearchDepsForTest({
+    getAllowedWorkspaces: () => ["personal"],
+    searchSemantic: async (_e, filters, limit: number) => {
+      semFilters = filters;
+      return Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1));
+    },
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  await brainSearch("q", { topK: 3, filters: { workspace: "globalcripto" } });
+  // empty intersection -> ANY('{}') -> zero rows; never another workspace.
+  assert.deepEqual(semFilters?._allowedWorkspaces, []);
+});
+
+test("brainSearch with no context (null allowed) leaves _allowedWorkspaces undefined (unfiltered)", async () => {
+  let semFilters: SearchFilters | undefined;
+  __setSearchDepsForTest({
+    getAllowedWorkspaces: () => null,
+    searchSemantic: async (_e, filters, limit: number) => {
+      semFilters = filters;
+      return Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1));
+    },
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  await brainSearch("q", { topK: 3 });
+  assert.equal(semFilters?._allowedWorkspaces, undefined);
 });

@@ -179,6 +179,15 @@ export function buildFilterClauses(
   const clauses: string[] = [];
   const params: unknown[] = [];
   let i = startIdx;
+  // F.4.2 — hard workspace-scope guard. When brainSearch threads an
+  // _allowedWorkspaces list (from the OAuth scope, intersected with the caller's
+  // requested workspace), restrict every query to those workspaces. An empty
+  // array yields ANY('{}') -> zero rows, so a scoped token can never read
+  // another workspace's chunks. `undefined` = no restriction (bearer/cron/eval).
+  if (filters._allowedWorkspaces !== undefined) {
+    clauses.push(`workspace = ANY($${i++})`);
+    params.push(filters._allowedWorkspaces);
+  }
   if (filters.workspace) {
     clauses.push(`workspace = $${i++}`);
     params.push(filters.workspace);

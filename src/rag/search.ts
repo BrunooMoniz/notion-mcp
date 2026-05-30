@@ -10,7 +10,8 @@ import {
   rerankEnabled,
   type RerankResult,
 } from "./rerank.js";
-import type { Chunk, SearchFilters, SearchHit, SearchMode } from "./types.js";
+import type { Chunk, SearchFilters, SearchHit, SearchMode, Workspace } from "./types.js";
+import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedWorkspaces.js";
 
 export interface RankedChunk {
   chunk: Chunk;
@@ -39,6 +40,56 @@ export function reciprocalRankFusion(
     .sort((a, b) => b.score - a.score)
     .slice(0, poolSize)
     .map((s) => ({ chunk: s.chunk, score: s.score }));
+}
+
+// --- F.4.2: workspace-scope enforcement ------------------------------------
+
+/**
+ * Build the workspace-scope WHERE fragment + params for a request.
+ *
+ * `allowed` is the caller's allowed workspaces (from getAllowedWorkspaces):
+ *   - `null`  -> bearer "all" / cron / eval / tests: NO scope clause (unfiltered).
+ *   - array   -> a scoped OAuth token: hard-restrict to these workspaces.
+ *
+ * The result is intersected with the caller's requested `workspace` filter (if
+ * any): asking for a workspace outside the token's scope yields an EMPTY array,
+ * which compiles to `workspace = ANY('{}')` -> zero rows. This is the security
+ * default: a scoped token can never read another workspace's chunks, and a
+ * malicious/buggy caller filter cannot widen the scope.
+ *
+ * `startIdx` is the 1-based placeholder index for the emitted `$N`.
+ * Exported pure so unit tests can assert the SQL/params without a live DB.
+ */
+export function buildWorkspaceScopeClause(
+  allowed: Workspace[] | null,
+  callerFilter: { workspace?: Workspace } | undefined,
+  startIdx = 1,
+): { sql: string; params: unknown[] } {
+  if (allowed === null) return { sql: "", params: [] };
+  const requested = callerFilter?.workspace;
+  // Intersect the token's allowed set with the caller's requested workspace.
+  const effective = requested
+    ? allowed.filter((w) => w === requested)
+    : allowed;
+  return {
+    sql: `workspace = ANY($${startIdx})`,
+    params: [effective],
+  };
+}
+
+/**
+ * Compute the effective allowed-workspace list to thread into SearchFilters as
+ * `_allowedWorkspaces`. Returns `undefined` (no restriction) for null/all,
+ * otherwise the intersection of the token scope and the caller's requested
+ * workspace (possibly empty = zero rows).
+ */
+function effectiveAllowedWorkspaces(
+  allowed: Workspace[] | null,
+  callerFilter: SearchFilters | undefined,
+): Workspace[] | undefined {
+  if (allowed === null) return undefined;
+  const requested = callerFilter?.workspace;
+  return requested ? allowed.filter((w) => w === requested) : allowed;
 }
 
 // --- dependency-injection seam (test-only) ---------------------------------
@@ -70,6 +121,7 @@ interface SearchDeps {
   searchKeyword: SearchKeywordFn;
   embedQuery: EmbedQueryFn;
   rerankDocuments: RerankFn;
+  getAllowedWorkspaces: () => Workspace[] | null;
 }
 
 const defaultDeps: SearchDeps = {
@@ -77,6 +129,7 @@ const defaultDeps: SearchDeps = {
   searchKeyword: searchKeywordImpl,
   embedQuery: embedQueryImpl,
   rerankDocuments: rerankDocumentsImpl,
+  getAllowedWorkspaces: getAllowedWorkspacesImpl,
 };
 
 let deps: SearchDeps = defaultDeps;
@@ -136,26 +189,41 @@ export async function brainSearch(
   // Over-fetch a candidate pool so the reranker has enough to work with.
   const poolSize = Math.max(30, topK * 4);
 
+  // F.4.2 — enforce the caller's workspace scope at the SQL layer. We compute the
+  // effective allowed-workspace list (token scope intersected with the caller's
+  // requested workspace) and thread it into the filters as _allowedWorkspaces so
+  // EVERY query (semantic + keyword) is hard-restricted. A scoped token asking
+  // for a workspace outside its scope gets an empty list -> zero rows (no leak).
+  // null (bearer/cron/eval/tests) -> undefined -> no restriction.
+  const allowedWorkspaces = effectiveAllowedWorkspaces(
+    deps.getAllowedWorkspaces(),
+    opts.filters,
+  );
+  const filters: SearchFilters | undefined =
+    allowedWorkspaces !== undefined
+      ? { ...(opts.filters ?? {}), _allowedWorkspaces: allowedWorkspaces }
+      : opts.filters;
+
   let hits: SearchHit[] = [];
 
   if (mode === "keyword") {
     // Keyword-only: expose the real ts_rank score, trim to topK.
-    const kwHits = await deps.searchKeyword(query, opts.filters, poolSize);
+    const kwHits = await deps.searchKeyword(query, filters, poolSize);
     hits = kwHits
       .slice(0, topK)
       .map((h) => ({ chunk: h.chunk, score: h.score }));
   } else if (mode === "semantic") {
     // Semantic-only: expose the real cosine similarity (not 1/rank).
     const qEmbed = await deps.embedQuery(query);
-    const semHits = await deps.searchSemantic(qEmbed, opts.filters, poolSize);
+    const semHits = await deps.searchSemantic(qEmbed, filters, poolSize);
     hits = semHits
       .slice(0, topK)
       .map((h) => ({ chunk: h.chunk, score: h.score }));
   } else {
     // Hybrid: over-fetch both, fuse to the full pool, then rerank -> topK.
     const qEmbed = await deps.embedQuery(query);
-    const semHits = await deps.searchSemantic(qEmbed, opts.filters, poolSize);
-    const kwHits = await deps.searchKeyword(query, opts.filters, poolSize);
+    const semHits = await deps.searchSemantic(qEmbed, filters, poolSize);
+    const kwHits = await deps.searchKeyword(query, filters, poolSize);
 
     // Keep cosine per chunk for the fallback tie-break.
     const cosineById = new Map<string, number>();

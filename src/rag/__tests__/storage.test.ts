@@ -232,3 +232,38 @@ test("no date filter -> no date clause (nulls included)", () => {
   const { sql } = buildFilterClauses({});
   assert.ok(!/metadata->>'data'/i.test(sql));
 });
+
+// --- F.4.2: workspace-scope enforcement reaches the SQL ---------------------
+// buildFilterClauses must emit a hard `workspace = ANY($N)` clause whenever the
+// caller threads an _allowedWorkspaces list (computed from the OAuth scope).
+// This is the actual leak guard: a personal-scoped query can never return
+// globalcripto/nora rows because the SQL itself restricts them.
+
+test("_allowedWorkspaces emits workspace = ANY clause with the scoped array", () => {
+  const { sql, params } = buildFilterClauses({ _allowedWorkspaces: ["personal"] });
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [["personal"]]);
+});
+
+test("_allowedWorkspaces empty array -> ANY('{}') -> zero rows (no leak)", () => {
+  const { sql, params } = buildFilterClauses({ _allowedWorkspaces: [] });
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [[]]);
+});
+
+test("_allowedWorkspaces undefined -> no scope clause (unfiltered)", () => {
+  const { sql } = buildFilterClauses({});
+  assert.ok(!/ANY\(/i.test(sql));
+});
+
+test("_allowedWorkspaces coexists with caller workspace filter (both emitted)", () => {
+  // caller workspace equality AND the hard scope ANY are both applied.
+  const { sql, params } = buildFilterClauses({
+    workspace: "personal",
+    _allowedWorkspaces: ["personal"],
+  });
+  assert.match(sql, /workspace\s*=\s*\$\d/i); // caller equality
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i); // hard scope
+  assert.ok(params.includes("personal"));
+  assert.ok(params.some((p) => Array.isArray(p) && p[0] === "personal"));
+});
