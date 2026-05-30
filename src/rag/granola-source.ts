@@ -118,6 +118,9 @@ function noteMetadata(note: GranolaNoteFull): Record<string, unknown> {
     // F.2.3: surface the upstream created_at so the indexer can advance the
     // persisted cursor to max(created_at) instead of wall-clock time.
     created_at: note.created_at,
+    // F.3.3: tag the effective date so the `data` filter (COALESCE over
+    // metadata.data) works for Granola. The note's created_at is its date.
+    data: note.created_at,
   };
 }
 

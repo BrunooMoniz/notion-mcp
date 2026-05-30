@@ -27,6 +27,8 @@ export interface SearchFilters {
   date_from?: string;          // YYYY-MM-DD
   date_to?: string;
   pessoa?: string;
+  source_type?: SourceType;          // keep only this source
+  exclude_source_type?: SourceType;  // drop this source (e.g. exclude calendar noise)
 }
 
 export type SearchMode = "hybrid" | "semantic" | "keyword";

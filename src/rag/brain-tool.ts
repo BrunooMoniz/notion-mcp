@@ -12,6 +12,8 @@ const filtersSchema = z
     date_from: z.string().optional(),
     date_to: z.string().optional(),
     pessoa: z.string().optional(),
+    source_type: z.enum(["notion", "granola", "calendar"]).optional(),
+    exclude_source_type: z.enum(["notion", "granola", "calendar"]).optional(),
   })
   .optional();
 
@@ -29,7 +31,7 @@ Use cases:
 Options:
 - mode: "hybrid" (default, semantic + keyword fused) | "semantic" | "keyword".
 - rerank: true (default) to apply the cross-encoder reranker; false to skip it (faster, ranks by normalized hybrid score).
-- filters: scope by workspace, db, frente, date range, or pessoa.`,
+- filters: scope by workspace, db, frente, date range, pessoa, or source_type / exclude_source_type (e.g. exclude_source_type: "calendar" to drop event noise). Date filters match metadata.data (falling back to last-updated); chunks with no date are included unless bounded out. pessoa matches Notion people + Granola attendees, accent- and case-insensitive.`,
     {
       query: z.string().min(1),
       top_k: z.number().int().min(1).max(50).default(12),

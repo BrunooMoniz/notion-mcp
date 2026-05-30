@@ -9,6 +9,7 @@ import {
   searchSemantic,
   searchKeyword,
   pruneOrphans,
+  buildFilterClauses,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -182,4 +183,52 @@ test("pruneOrphans throws if granola/calendar called without workspace", async (
     () => pruneOrphans("granola", null, ["s1"]),
     /workspace required/i,
   );
+});
+
+// --- F.3.1: source_type / exclude_source_type filters -----------------------
+// buildFilterClauses is pure (no DB) — runs WITHOUT POSTGRES_URL.
+
+test("source_type produces equality clause", () => {
+  const { sql, params } = buildFilterClauses({ source_type: "granola" });
+  assert.match(sql, /source_type\s*=\s*\$\d/i);
+  assert.ok(params.includes("granola"));
+});
+
+test("exclude_source_type produces inequality clause", () => {
+  const { sql } = buildFilterClauses({ exclude_source_type: "calendar" });
+  assert.match(sql, /source_type\s*(<>|!=)\s*\$\d/i);
+});
+
+// --- F.3.2: pessoa filter across real per-source shapes ---------------------
+
+test("pessoa clause references pessoas + attendees with unaccent ILIKE", () => {
+  const { sql, params } = buildFilterClauses({ pessoa: "João" });
+  // both keys covered
+  assert.match(sql, /metadata->'pessoas'/i);
+  assert.match(sql, /metadata->'attendees'/i);
+  // accent/partial-insensitive
+  assert.match(sql, /unaccent/i);
+  assert.match(sql, /ILIKE/i);
+  assert.ok(
+    params.some(
+      (p) => String(p).toLowerCase().includes("joao") || String(p).includes("João"),
+    ),
+  );
+});
+
+test("pessoa clause does NOT reference contatos (dropped until populated)", () => {
+  const { sql } = buildFilterClauses({ pessoa: "Maria" });
+  assert.ok(!/contatos/i.test(sql));
+});
+
+// --- F.3.3: data filter COALESCE semantics + null inclusion -----------------
+
+test("data filter uses COALESCE(metadata.data, source_updated)", () => {
+  const { sql } = buildFilterClauses({ date_from: "2026-01-01", date_to: "2026-02-01" });
+  assert.match(sql, /COALESCE\(\(metadata->>'data'\)::date,\s*source_updated::date\)/i);
+});
+
+test("no date filter -> no date clause (nulls included)", () => {
+  const { sql } = buildFilterClauses({});
+  assert.ok(!/metadata->>'data'/i.test(sql));
 });

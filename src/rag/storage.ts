@@ -161,9 +161,19 @@ function rowToChunk(r: QueryRow): Chunk {
   };
 }
 
-function buildFilterClauses(
+/**
+ * Build the dynamic WHERE fragment + ordered params for a SearchFilters object.
+ *
+ * `startIdx` is the 1-based index of the FIRST positional placeholder this
+ * fragment should emit (callers that prepend their own params — e.g. the query
+ * embedding + topK — pass the next free slot; pure tests omit it and get $1…).
+ *
+ * Exported so unit tests can assert the emitted SQL/params without a live DB.
+ * All values stay parameterized (no string interpolation of user input).
+ */
+export function buildFilterClauses(
   filters: SearchFilters | undefined,
-  startIdx: number,
+  startIdx = 1,
 ): { sql: string; params: unknown[] } {
   if (!filters) return { sql: "", params: [] };
   const clauses: string[] = [];
@@ -181,17 +191,47 @@ function buildFilterClauses(
     clauses.push(`metadata->>'frente' = $${i++}`);
     params.push(filters.frente);
   }
+  if (filters.source_type) {
+    clauses.push(`source_type = $${i++}`);
+    params.push(filters.source_type);
+  }
+  if (filters.exclude_source_type) {
+    clauses.push(`source_type <> $${i++}`);
+    params.push(filters.exclude_source_type);
+  }
+  // Date semantics: the effective date of a chunk is its own metadata.data
+  // (Notion date prop / Granola created_at / Calendar start), falling back to
+  // source_updated when unset. Rows whose COALESCE'd date is NULL (neither
+  // present) are INCLUDED — we only emit a clause when a bound is given, so
+  // "no date filter" never excludes anything.
   if (filters.date_from) {
-    clauses.push(`(metadata->>'data')::date >= $${i++}::date`);
+    clauses.push(`COALESCE((metadata->>'data')::date, source_updated::date) >= $${i++}::date`);
     params.push(filters.date_from);
   }
   if (filters.date_to) {
-    clauses.push(`(metadata->>'data')::date <= $${i++}::date`);
+    clauses.push(`COALESCE((metadata->>'data')::date, source_updated::date) <= $${i++}::date`);
     params.push(filters.date_to);
   }
   if (filters.pessoa) {
-    clauses.push(`metadata->'pessoas' @> $${i++}::jsonb`);
-    params.push(JSON.stringify([filters.pessoa]));
+    // Real per-source shapes: Notion writes metadata.pessoas (string[]),
+    // Granola writes metadata.attendees (string[]). Match either, accent- and
+    // case-insensitive, partial. `contatos` is dropped (no chunk populates it
+    // yet — dead branch). Body fallback catches names that only appear inline.
+    const n = i++;
+    clauses.push(
+      `(
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(metadata->'pessoas','[]'::jsonb)) e
+          WHERE unaccent(e) ILIKE unaccent('%' || $${n} || '%')
+        )
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(metadata->'attendees','[]'::jsonb)) e
+          WHERE unaccent(e) ILIKE unaccent('%' || $${n} || '%')
+        )
+        OR unaccent(text) ILIKE unaccent('%' || $${n} || '%')
+      )`,
+    );
+    params.push(filters.pessoa);
   }
   return {
     sql: clauses.length ? "AND " + clauses.join(" AND ") : "",
