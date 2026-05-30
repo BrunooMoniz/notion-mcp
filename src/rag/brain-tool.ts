@@ -18,17 +18,23 @@ const filtersSchema = z
 export function registerBrainSearchTool(server: McpServer): void {
   server.tool(
     "brain_search",
-    `Search Bruno's second brain (Notion personal workspace in Fase 1; Granola, Calendar, and other workspaces in Fase 2).
-Hybrid retrieval combines semantic vector search with PT-BR full-text. Returns chunks with metadata, scores, and source URLs.
+    `Search Bruno's second brain — indexed Notion pages, Granola meeting notes, and Calendar events across his workspaces.
+Hybrid retrieval combines semantic vector search with PT-BR full-text, then a cross-encoder reranker (Voyage rerank) reorders the candidate pool by relevance. Scores are real relevance scores (reranker relevance_score, or normalized hybrid fusion when rerank is off/unavailable). Results are scoped to the caller's allowed workspaces. Returns chunks with metadata, scores, and source URLs.
 
 Use cases:
 - Lookup pontual: pass a specific question, get matching chunks.
 - Sintese: pass a topic, retrieve enough chunks to summarize across.
-- Conexao: pass an entity name and date range, find related items.`,
+- Conexao: pass an entity name and date range, find related items.
+
+Options:
+- mode: "hybrid" (default, semantic + keyword fused) | "semantic" | "keyword".
+- rerank: true (default) to apply the cross-encoder reranker; false to skip it (faster, ranks by normalized hybrid score).
+- filters: scope by workspace, db, frente, date range, or pessoa.`,
     {
       query: z.string().min(1),
       top_k: z.number().int().min(1).max(50).default(12),
       mode: z.enum(["hybrid", "semantic", "keyword"]).default("hybrid"),
+      rerank: z.boolean().default(true),
       include_neighbors: z.boolean().default(false),
       filters: filtersSchema,
     },
@@ -37,6 +43,7 @@ Use cases:
       const hits = await brainSearch(args.query, {
         topK: args.top_k,
         mode: args.mode,
+        rerank: args.rerank,
         filters,
         includeNeighbors: args.include_neighbors,
       });
