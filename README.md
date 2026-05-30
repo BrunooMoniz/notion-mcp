@@ -6,7 +6,8 @@ A self-hosted [MCP](https://modelcontextprotocol.io/) server that connects AI as
 
 - **Multi-workspace** -- route requests to different Notion integrations by passing a `workspace` parameter on every tool call
 - **Notion API 2025-09-03** -- supports multi-source databases, file uploads, and the comments API
-- **24 tools** -- search, fetch, create, update, delete, and move pages; query and manage databases and data sources; append/replace content with Markdown or raw blocks; comments; file uploads
+- **27 tools** -- 25 Notion tools (search, fetch, create, update, delete, and move pages; query and manage databases and data sources; append/replace content with Markdown or raw blocks; comments; file uploads) plus 2 brain tools (`brain_search`, `brain_index_url`)
+- **Brain RAG (second brain)** -- hybrid semantic + keyword retrieval over an indexed PostgreSQL + pgvector store, workspace-scoped, with a Voyage cross-encoder reranker
 - **Destructive guard rails** -- delete_page, replace_page_content and remove_columns require explicit `confirm: true`; bypass attempts are blocked
 - **Markdown I/O** -- write content as Markdown and it gets converted to Notion blocks automatically; read pages back as Markdown
 - **OAuth 2.1 flow** -- dynamic client registration (RFC 7591), PKCE (S256), consent screen with per-workspace scope selection, scrypt-hashed admin password
@@ -20,12 +21,14 @@ A self-hosted [MCP](https://modelcontextprotocol.io/) server that connects AI as
 ```
 src/
   index.ts       Express server, MCP session lifecycle, auth middleware
-  tools.ts       All 16 Notion tool definitions (Zod schemas + handlers)
+  tools.ts       25 Notion tool definitions (Zod schemas + handlers)
   clients.ts     Notion API clients per workspace
   oauth.ts       Full OAuth 2.1 server (register, authorize, token)
   context.ts     AsyncLocalStorage for per-request auth/scope enforcement
   audit.ts       JSONL audit log writer
   markdown.ts    Bidirectional Markdown <-> Notion block conversion
+  rag/           Brain indexer + hybrid search (PostgreSQL + pgvector)
+  classifier/    LLM page classifier + spaced-repetition Revisitar
 ```
 
 ## Setup
@@ -169,6 +172,25 @@ Add to your MCP config:
 | `notion_create_file_upload` | Start a file upload session (single_part / multi_part / external_url) |
 | `notion_send_file_upload` | Send file bytes (base64) to an in-progress upload |
 | `notion_complete_file_upload` | Finalize a multi_part upload |
+
+### Brain (RAG)
+| Tool | Description |
+|------|-------------|
+| `brain_search` | Hybrid semantic + keyword search over the indexed second brain, fused via RRF and reranked by a Voyage cross-encoder. Workspace-scoped. Options: `rerank` (default true), `source_type` / `exclude_source_type`, `pessoa`, `date_from` / `date_to`, `workspace`. |
+| `brain_index_url` | On-demand indexing of a Notion URL/ID into the brain (pages, data sources, databases). |
+
+**`brain_search` vs `notion_search`:** `notion_search` calls Notion's live
+`/v1/search` (title/keyword match against the current workspace contents).
+`brain_search` queries the local **PostgreSQL + pgvector** index: vector
+similarity (Voyage `voyage-3-large` embeddings) + accent-insensitive
+Portuguese full text, fused with Reciprocal Rank Fusion over an over-fetched
+candidate pool, then reranked by `rerank-2.5-lite` for the final relevance
+score. Reads are workspace-scoped: a scoped OAuth token never sees another
+workspace's chunks.
+
+> **Tool count:** 25 Notion tools + `brain_search` + `brain_index_url` = **27**.
+> The Fundação ("Confiar no Cérebro") work added **zero** new MCP tools — only
+> new `brain_search` options (`rerank`, `source_type`, `exclude_source_type`).
 
 ## Adding Workspaces
 
