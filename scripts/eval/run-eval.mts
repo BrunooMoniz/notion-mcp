@@ -70,8 +70,8 @@ async function main(): Promise<void> {
   for (const item of items) {
     // brainSearch runs OUTSIDE an HTTP request (no AsyncLocalStorage store),
     // so getAllowedWorkspaces() returns null (no workspace filter) — see F.4.
-    const hits = await brainSearch({ query: item.q, topK: 10 });
-    const ids = hits.map((h) => h.source_id);
+    const hits = await brainSearch(item.q, { topK: 10 });
+    const ids = hits.map((h) => h.chunk.source_id);
     rows.push({
       q: item.q,
       type: item.type,
