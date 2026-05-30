@@ -14,7 +14,7 @@ export interface RankedChunk {
 
 export function reciprocalRankFusion(
   lists: RankedChunk[][],
-  topK: number,
+  poolSize: number,
   k = 60,
 ): SearchHit[] {
   const scores = new Map<string, { chunk: Chunk; score: number }>();
@@ -26,9 +26,12 @@ export function reciprocalRankFusion(
       else scores.set(chunk.id, { chunk, score: incr });
     }
   }
+  // Return up to poolSize fused candidates. Callers that want a reranker pool
+  // pass the full pool size (e.g. max(30, topK*4)) so RRF does not pre-slice
+  // the candidate set down to a small topK before reranking.
   return [...scores.values()]
     .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
+    .slice(0, poolSize)
     .map((s) => ({ chunk: s.chunk, score: s.score }));
 }
 
