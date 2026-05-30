@@ -1,7 +1,8 @@
 // src/classifier/anthropic.ts
 // Wrapper around Anthropic SDK for classification.
 import Anthropic from "@anthropic-ai/sdk";
-import type { ClassificationResult, PageToClassify } from "./types.js";
+import type { ClassificationResult, Frente, ReuniaoTipo, InsightCategoria, PageToClassify } from "./types.js";
+import { validateClassification } from "./validate.js";
 
 const MODEL = process.env.CLASSIFIER_MODEL ?? "claude-haiku-4-5-20251001";
 
@@ -13,6 +14,24 @@ function getClient(): Anthropic {
     client = new Anthropic({ apiKey });
   }
   return client;
+}
+
+/**
+ * Generic "ask Haiku" helper: one system prompt + one user message, returns the
+ * concatenated text. Reusable beyond classification (e.g. an eval LLM-judge).
+ */
+export async function callHaiku(system: string, user: string): Promise<string> {
+  const c = getClient();
+  const resp = await c.messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+  return resp.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
 }
 
 const SYSTEM_PROMPT = `Você é um classificador de notas do "segundo cérebro" do Bruno Moniz.
@@ -30,23 +49,33 @@ Categorias de Insight (use exatamente um): "Estrategia" | "Regulacao" | "Produto
 Responda APENAS com JSON válido. Sem markdown, sem texto explicativo.`;
 
 export async function classifyPage(page: PageToClassify): Promise<ClassificationResult> {
-  const c = getClient();
-
   const userPrompt = buildUserPrompt(page);
 
-  const resp = await c.messages.create({
-    model: MODEL,
-    max_tokens: 512,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userPrompt }],
-  });
+  let text = await callHaiku(SYSTEM_PROMPT, userPrompt);
 
-  const text = resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  let parsed: ClassificationResult;
+  try {
+    parsed = parseJsonResponse(text, page.db);
+  } catch (err) {
+    // 1-retry JSON repair: re-ask Haiku for STRICT JSON only when the first
+    // response was malformed (no parseable JSON object).
+    text = await callHaiku(
+      SYSTEM_PROMPT,
+      `${userPrompt}\n\n---\nSua resposta anterior não era JSON válido. Responda APENAS com o objeto JSON pedido, sem markdown, sem texto antes ou depois.`,
+    );
+    parsed = parseJsonResponse(text, page.db);
+  }
 
-  return parseJsonResponse(text, page.db);
+  // Enum validation: drop any hallucinated frente/tipo/categoria so a value
+  // outside the union in types.ts is never propagated to Notion.
+  const validated = validateClassification(parsed);
+  return {
+    frente: page.db === "Reunioes" ? ((validated.frente as Frente | undefined) ?? null) : null,
+    tipo: page.db === "Reunioes" ? ((validated.tipo as ReuniaoTipo | undefined) ?? null) : null,
+    categoria: page.db === "Insights" ? ((validated.categoria as InsightCategoria | undefined) ?? null) : null,
+    pessoas: validated.pessoas,
+    organizacoes: validated.organizacoes,
+  };
 }
 
 function buildUserPrompt(page: PageToClassify): string {
