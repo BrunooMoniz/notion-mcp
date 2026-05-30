@@ -71,7 +71,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-function noteText(note: GranolaNoteFull): string {
+// F.1.6: the raw transcript is noise (verbatim speech) and can carry sensitive
+// content (e.g. salaries). We do NOT index it by default — only the summary.
+// Set GRANOLA_INDEX_TRANSCRIPT=true to opt back in.
+export function indexTranscriptEnabled(): boolean {
+  return process.env.GRANOLA_INDEX_TRANSCRIPT === "true";
+}
+
+export function buildNoteText(note: GranolaNoteFull): string {
   const lines: string[] = [];
   lines.push(`# ${note.title ?? "(untitled)"}`);
   if (note.created_at) lines.push(`**Data:** ${note.created_at}`);
@@ -89,7 +96,7 @@ function noteText(note: GranolaNoteFull): string {
     lines.push("## Summary");
     lines.push(summary.trim());
   }
-  if (note.transcript?.length) {
+  if (indexTranscriptEnabled() && note.transcript?.length) {
     lines.push("");
     lines.push("## Transcript");
     for (const entry of note.transcript) {
@@ -143,13 +150,18 @@ export async function* fetchGranolaDocuments(
     for (const summary of notes) {
       await sleep(THROTTLE_MS);
       let full: GranolaNoteFull;
+      // F.1.6: only request the transcript from the API under the same gate, so
+      // the default path never even pulls the sensitive content over the wire.
+      const detailPath = indexTranscriptEnabled()
+        ? `/notes/${summary.id}?include=transcript`
+        : `/notes/${summary.id}`;
       try {
-        full = await granolaGet<GranolaNoteFull>(`/notes/${summary.id}?include=transcript`, token);
+        full = await granolaGet<GranolaNoteFull>(detailPath, token);
       } catch (err: any) {
         console.warn(`[granola-source] fetch ${summary.id} failed: ${err.message}`);
         continue;
       }
-      const text = noteText(full);
+      const text = buildNoteText(full);
       if (!text.trim()) continue;
 
       const lastEdited =
