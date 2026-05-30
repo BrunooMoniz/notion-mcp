@@ -80,6 +80,39 @@ export async function deleteBySource(sourceType: string, sourceId: string): Prom
   ]);
 }
 
+/**
+ * Delete chunks for a source that are no longer present upstream (orphans),
+ * scoped to a single (source_type, workspace) namespace.
+ *
+ * `source_type` in brain_chunks is the BARE value (`notion`/`granola`/`calendar`),
+ * distinct from the dashed sync_state keys (`granola-<ws>` / `calendar-google`).
+ * Because granola/calendar chunks from different workspaces share the same bare
+ * source_type, a workspace-less prune would delete another workspace's chunks —
+ * so we REQUIRE the workspace argument for those sources.
+ *
+ * Returns the number of rows deleted.
+ */
+export async function pruneOrphans(
+  sourceType: "notion" | "granola" | "calendar",
+  workspace: string | null,
+  liveIds: string[],
+): Promise<number> {
+  if ((sourceType === "granola" || sourceType === "calendar") && !workspace) {
+    throw new Error("workspace required for granola/calendar prune");
+  }
+  const p = getPool();
+  const params: unknown[] = [sourceType];
+  let where = "source_type = $1";
+  if (workspace) {
+    params.push(workspace);
+    where += ` AND workspace = $${params.length}`;
+  }
+  params.push(liveIds);
+  where += ` AND source_id <> ALL($${params.length})`;
+  const res = await p.query(`DELETE FROM brain_chunks WHERE ${where}`, params);
+  return res.rowCount ?? 0;
+}
+
 export async function getSyncState(sourceType: string): Promise<Date> {
   const p = getPool();
   const { rows } = await p.query<{ last_sync_at: Date }>(

@@ -8,6 +8,7 @@ import {
   closePool,
   searchSemantic,
   searchKeyword,
+  pruneOrphans,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -153,4 +154,32 @@ test("searchKeyword returns ts_rank score (exposed as score field)", async () =>
   const out = await searchKeyword("query", undefined, 5);
   assert.equal(out[0].score, 0.31);
   assert.equal(out[0].chunk.source_id, "s2");
+});
+
+// --- F.2.2: pruneOrphans namespace-safe deletes -----------------------------
+// These run WITHOUT POSTGRES_URL via the __setPoolForTest seam.
+
+test("pruneOrphans scopes DELETE by source_type AND workspace", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rowCount: 2, rows: [] };
+    },
+  } as never);
+  const deleted = await pruneOrphans("granola", "personal", ["s1", "s2"]);
+  assert.equal(deleted, 2);
+  assert.match(sql, /source_type\s*=\s*\$1/i);
+  assert.match(sql, /workspace\s*=\s*\$2/i);
+  assert.match(sql, /source_id\s*<>\s*ALL\(\$3\)/i);
+  assert.deepEqual(params, ["granola", "personal", ["s1", "s2"]]);
+});
+
+test("pruneOrphans throws if granola/calendar called without workspace", async () => {
+  await assert.rejects(
+    () => pruneOrphans("granola", null, ["s1"]),
+    /workspace required/i,
+  );
 });
