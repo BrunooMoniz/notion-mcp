@@ -11,6 +11,7 @@
     "dev:indexer": "tsx src/index-indexer.ts",
     "dev:classifier": "tsx src/index-classifier.ts",
     "test": "tsx --test src/rag/__tests__/*.test.ts",
+    "eval": "tsx scripts/eval/run-eval.mts",
     "reindex": "tsx scripts/reindex-all.mts",
     "classify": "tsx scripts/run-classifier.mts",
     "revisitar": "tsx scripts/run-revisitar.mts"
