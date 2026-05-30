@@ -1,7 +1,11 @@
 // src/rag/__tests__/search.test.ts
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { reciprocalRankFusion } from "../search.js";
+import {
+  reciprocalRankFusion,
+  brainSearch,
+  __setSearchDepsForTest,
+} from "../search.js";
 import type { Chunk } from "../types.js";
 
 const mk = (id: string): Chunk => ({
@@ -53,4 +57,83 @@ test("reciprocalRankFusion poolSize larger than candidates returns all", () => {
   const kw = [{ chunk: mk("b"), rank: 1 }];
   const fused = reciprocalRankFusion([sem, kw], 30, 60);
   assert.equal(fused.length, 2);
+});
+
+// --- F.1.4: brainSearch over-fetch -> rerank -> topK, real scores ----------
+// Deps (searchSemantic/searchKeyword/embedQuery/rerankDocuments) are injected
+// via the test seam, so these run WITHOUT POSTGRES_URL or VOYAGE_API_KEY.
+
+afterEach(() => __setSearchDepsForTest(null));
+
+const mkScored = (id: string, score: number, rank: number) => ({
+  chunk: mk(id),
+  rank,
+  score,
+});
+
+test("brainSearch over-fetches max(30, topK*4) then reranks to topK", async () => {
+  let semLimit = 0;
+  __setSearchDepsForTest({
+    searchSemantic: async (_e, _f, limit: number) => {
+      semLimit = limit;
+      return Array.from({ length: limit }, (_, i) =>
+        mkScored(`s${i}`, 1 - i / limit, i + 1),
+      );
+    },
+    searchKeyword: async (_q, _f, limit: number) =>
+      Array.from({ length: limit }, (_, i) => mkScored(`k${i}`, 1 - i / limit, i + 1)),
+    embedQuery: async () => [0.1, 0.2],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d, i) => ({ id: d.id, relevance_score: 1 - i * 0.01 })),
+  });
+
+  const out = await brainSearch("q", { topK: 5, rerank: true });
+  assert.ok(semLimit >= 30, `expected pool >=30, got ${semLimit}`);
+  assert.equal(out.length, 5);
+  assert.equal(out[0].score, 1); // reranker relevance_score, not 1/61
+});
+
+test("brainSearch rerank fallback uses normalized RRF score", async () => {
+  __setSearchDepsForTest({
+    searchSemantic: async (_e, _f, limit: number) =>
+      Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1)),
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })), // fallback
+  });
+  const out = await brainSearch("q", { topK: 3, rerank: true });
+  assert.equal(out.length, 3);
+  assert.ok(out[0].score >= out[1].score); // monotonic normalized score
+  assert.ok(out[0].score <= 1 && out[0].score >= 0);
+});
+
+test("mode=semantic exposes cosine, not 1/rank", async () => {
+  __setSearchDepsForTest({
+    searchSemantic: async () => [mkScored("s0", 0.77, 1)],
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs) =>
+      docs.map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  const out = await brainSearch("q", { topK: 1, mode: "semantic" });
+  assert.equal(out[0].score, 0.77);
+});
+
+test("rerank disabled: falls back to normalized RRF without calling reranker", async () => {
+  let rerankCalled = false;
+  __setSearchDepsForTest({
+    searchSemantic: async (_e, _f, limit: number) =>
+      Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1)),
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) => {
+      rerankCalled = true;
+      return docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: 0.5 }));
+    },
+  });
+  const out = await brainSearch("q", { topK: 3, rerank: false });
+  assert.equal(rerankCalled, false);
+  assert.equal(out.length, 3);
+  assert.ok(out[0].score <= 1 && out[0].score >= 0);
 });
