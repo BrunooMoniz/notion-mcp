@@ -5,7 +5,21 @@ import { formatVector } from "./embeddings.js";
 
 let pool: pg.Pool | null = null;
 
+/** Minimal pg-like surface the storage layer depends on (lets tests inject a stub). */
+type PoolLike = Pick<pg.Pool, "query">;
+
+let injectedPool: PoolLike | null = null;
+
+/**
+ * Test-only seam: inject a fake pool (or pass null to clear). Guarded so
+ * production never touches it — `getPool()` only uses it when set by a test.
+ */
+export function __setPoolForTest(p: PoolLike | null): void {
+  injectedPool = p;
+}
+
 export function getPool(): pg.Pool {
+  if (injectedPool) return injectedPool as pg.Pool;
   if (!pool) {
     pool = new pg.Pool({ connectionString: process.env.POSTGRES_URL });
   }
@@ -156,7 +170,7 @@ export async function searchSemantic(
   queryEmbedding: number[],
   filters: SearchFilters | undefined,
   topK: number,
-): Promise<{ chunk: Chunk; rank: number }[]> {
+): Promise<{ chunk: Chunk; rank: number; score: number }[]> {
   const p = getPool();
   const filterClauses = buildFilterClauses(filters, 3);
   const sql = `
@@ -175,14 +189,15 @@ export async function searchSemantic(
     topK,
     ...filterClauses.params,
   ]);
-  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1 }));
+  // Expose the real cosine similarity (1 - distance) instead of discarding it.
+  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
 
 export async function searchKeyword(
   queryText: string,
   filters: SearchFilters | undefined,
   topK: number,
-): Promise<{ chunk: Chunk; rank: number }[]> {
+): Promise<{ chunk: Chunk; rank: number; score: number }[]> {
   const p = getPool();
   const filterClauses = buildFilterClauses(filters, 3);
   const sql = `
@@ -201,7 +216,8 @@ export async function searchKeyword(
     topK,
     ...filterClauses.params,
   ]);
-  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1 }));
+  // Expose the real ts_rank score instead of discarding it.
+  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
 
 export async function getNeighbors(sourceId: string, chunkIndex: number): Promise<Chunk[]> {

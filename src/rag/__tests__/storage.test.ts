@@ -1,7 +1,15 @@
 // src/rag/__tests__/storage.test.ts
-import { test, before, after } from "node:test";
+import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { upsertChunks, deleteBySource, getPool, closePool } from "../storage.js";
+import {
+  upsertChunks,
+  deleteBySource,
+  getPool,
+  closePool,
+  searchSemantic,
+  searchKeyword,
+  __setPoolForTest,
+} from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
 
 const TEST_PREFIX = "__test_storage__";
@@ -86,4 +94,63 @@ test("deleteBySource removes all chunks for a source", async () => {
     [sourceId],
   );
   assert.equal(rows[0].count, "0");
+});
+
+// --- F.1.2: searchSemantic/searchKeyword expose real scores ----------------
+// These run WITHOUT POSTGRES_URL: the pool is replaced with a stub via the
+// __setPoolForTest seam, so no live DB is touched.
+
+afterEach(() => {
+  // Clear any injected stub so the credentialed tests above are unaffected.
+  __setPoolForTest(null);
+});
+
+test("searchSemantic returns cosine score (exposed as score field)", async () => {
+  __setPoolForTest({
+    query: async () => ({
+      rows: [
+        {
+          id: "id1",
+          source_type: "notion",
+          source_id: "s1",
+          workspace: "personal",
+          db_name: null,
+          parent_url: null,
+          chunk_index: 0,
+          text: "t",
+          metadata: {},
+          source_updated: null,
+          score: 0.82,
+        },
+      ],
+    }),
+  });
+  const out = await searchSemantic([0.1, 0.2], undefined, 5);
+  assert.equal(out[0].score, 0.82);
+  assert.equal(out[0].chunk.source_id, "s1");
+});
+
+test("searchKeyword returns ts_rank score (exposed as score field)", async () => {
+  __setPoolForTest({
+    query: async () => ({
+      rows: [
+        {
+          id: "id2",
+          source_type: "notion",
+          source_id: "s2",
+          workspace: "personal",
+          db_name: null,
+          parent_url: null,
+          chunk_index: 0,
+          text: "t",
+          metadata: {},
+          source_updated: null,
+          score: 0.31,
+        },
+      ],
+    }),
+  });
+  const out = await searchKeyword("query", undefined, 5);
+  assert.equal(out[0].score, 0.31);
+  assert.equal(out[0].chunk.source_id, "s2");
 });
