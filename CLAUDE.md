@@ -24,9 +24,53 @@ src/
   context.ts     # AsyncLocalStorage for per-request scope enforcement
   audit.ts       # JSONL audit log for write operations
   markdown.ts    # Markdown <-> Notion block conversion
-  rag/           # Brain indexer + search (PGLite vector store)
+  rag/           # Brain indexer + hybrid search (PostgreSQL + pgvector)
   classifier/    # LLM page classifier + spaced-repetition Revisitar
 ```
+
+## Brain RAG (second brain)
+
+The brain is a **PostgreSQL + pgvector** store. Three PM2 processes —
+`notion-mcp`, `brain-indexer`, `brain-classifier`, plus the nightly
+`brain-reindex-nightly` cron — write to the same Postgres concurrently; Postgres
+MVCC handles concurrency, so there is no writer-serialization constraint.
+
+Retrieval (`src/rag/search.ts`):
+- **Hybrid search** — semantic (Voyage `voyage-3-large` embeddings) + keyword
+  (Postgres full-text), fused with Reciprocal Rank Fusion over an over-fetched
+  candidate pool, then reranked.
+- **Reranker** — Voyage `rerank-2.5-lite` cross-encoder produces the real
+  relevance score. Env kill switch `RERANK_ENABLED=false` hard-disables it
+  (graceful fallback to normalized RRF on any rerank failure).
+- **HNSW index** on the `embedding` column (`vector_cosine_ops`, `m=16`,
+  `ef_construction=200`) — replaces the recall-lossy ivfflat.
+- **Accent-insensitive full text** — the `tsv` generated column uses the
+  `portuguese_unaccent` text-search configuration (a dictionary mapping that
+  keeps `to_tsvector` IMMUTABLE), so `reunião`/`reuniao` and `são`/`sao` match.
+- **pg_trgm GIN** on raw `text` for proper-noun / partial fallback (ILIKE).
+
+Brain MCP tools (registered in `index.ts`):
+- **`brain_search`** — hybrid semantic+keyword search with rerank. Options:
+  `rerank` (default true), `source_type` / `exclude_source_type`, `pessoa`,
+  `date_from` / `date_to`, `workspace`.
+- **`brain_index_url`** — on-demand indexing of a Notion URL/ID into the brain.
+
+**Workspace scoping** — brain reads are workspace-scoped via
+`getAllowedWorkspaces()` (`src/getAllowedWorkspaces.ts`): a scoped OAuth token
+only sees its granted workspaces (intersected with any caller `workspace`
+filter; empty intersection returns zero rows — no cross-workspace leak). Bearer
+("all") tokens and out-of-request contexts (cron / `npm run eval`) are
+unfiltered. `brain_index_url` calls `assertWorkspaceScope()` before writing.
+
+**Calendars** — indexed from per-calendar **iCal secret URLs** via
+`src/rag/calendar-ics-source.ts` (env `GOOGLE_CAL_ICS`, a JSON array of
+`{url,label,workspace}`). This is account-agnostic and needs no Google Cloud, so
+it covers multiple calendars across multiple Google accounts. The legacy
+Google-OAuth indexer (`src/rag/calendar-source.ts`, `src/google/`) still works as
+a fallback when `GOOGLE_CAL_ICS` is unset. iCal URLs are secrets — `.env` only.
+
+Migrations: fresh installs run `scripts/init-db.sql`; existing DBs apply
+`scripts/migrate-f2.sql` (verify with `scripts/verify-f2.sql`).
 
 ## Notion API version
 

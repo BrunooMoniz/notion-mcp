@@ -91,6 +91,9 @@ function eventText(ev: CalendarEvent, calendarLabel: string): string {
 }
 
 function eventMetadata(ev: CalendarEvent, calendarId: string, calendarLabel: string): Record<string, unknown> {
+  // F.3.3: tag the effective date so the `data` filter (COALESCE over
+  // metadata.data) works for Calendar. The event start is its date.
+  const start = ev.start?.dateTime ?? ev.start?.date ?? null;
   return {
     calendar_id: calendarId,
     calendar_label: calendarLabel,
@@ -103,6 +106,7 @@ function eventMetadata(ev: CalendarEvent, calendarId: string, calendarLabel: str
     event_type: ev.eventType,
     htmlLink: ev.htmlLink,
     recurring_id: ev.recurringEventId,
+    data: start,
   };
 }
 

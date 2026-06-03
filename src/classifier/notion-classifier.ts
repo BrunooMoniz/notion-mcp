@@ -4,7 +4,8 @@
 import { Client as NotionClient } from "@notionhq/client";
 import { NOTION_API_VERSION, notionFetch } from "../clients.js";
 import { classifyPage } from "./anthropic.js";
-import type { ClassificationResult, PageToClassify } from "./types.js";
+import { validateClassification } from "./validate.js";
+import type { ClassificationResult, Frente, ReuniaoTipo, InsightCategoria, PageToClassify } from "./types.js";
 
 interface DbConfig {
   workspace: "personal" | "globalcripto" | "nora";
@@ -227,16 +228,25 @@ async function applyClassification(
 ): Promise<void> {
   const props: Record<string, any> = {};
 
+  // Enum validation gate (F.4.5): drop any hallucinated frente/tipo/categoria
+  // before building Notion props, so a value outside the union in types.ts can
+  // never be written as a new Notion select option. classifyPage already
+  // validates, but this guards any other caller path into applyClassification.
+  const validated = validateClassification(result);
+  const frente = validated.frente as Frente | undefined;
+  const tipo = validated.tipo as ReuniaoTipo | undefined;
+  const categoria = validated.categoria as InsightCategoria | undefined;
+
   if (page.db === "Reunioes") {
-    if (!page.current_props.frente && result.frente) {
-      props["Frente"] = { select: { name: result.frente } };
+    if (!page.current_props.frente && frente) {
+      props["Frente"] = { select: { name: frente } };
     }
-    if (!page.current_props.tipo && result.tipo) {
-      props["Tipo"] = { select: { name: result.tipo } };
+    if (!page.current_props.tipo && tipo) {
+      props["Tipo"] = { select: { name: tipo } };
     }
   } else {
-    if (!page.current_props.categoria && result.categoria) {
-      props["Categoria"] = { select: { name: result.categoria } };
+    if (!page.current_props.categoria && categoria) {
+      props["Categoria"] = { select: { name: categoria } };
     }
   }
 

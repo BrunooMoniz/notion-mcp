@@ -14,6 +14,10 @@ interface FetchOpts {
   workspace: Workspace;
   modifiedSince?: Date;
   databaseIds?: string[];
+  // F.2.3: invoked for any page seen as archived/in_trash so the indexer can
+  // delete it on sight (even in a delta pass, where the orphan prune does not
+  // run). Archived pages are NOT yielded as live documents.
+  onArchived?: (sourceId: string) => void;
 }
 
 interface DiscoveredDb {
@@ -98,6 +102,12 @@ export async function* fetchWorkspaceDocuments(
         })) as { results: any[]; next_cursor: string | null };
         for (const page of resp.results) {
           if (!page?.properties) continue;
+          // F.2.3: drop archived / trashed pages — don't index them, and tell
+          // the indexer to delete any existing chunks for them on sight.
+          if ((page as any).archived === true || (page as any).in_trash === true) {
+            opts.onArchived?.(page.id);
+            continue;
+          }
           try {
             const text = await pageToText(readClient, page);
             if (!text.trim()) continue;

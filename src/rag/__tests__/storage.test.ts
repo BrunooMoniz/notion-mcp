@@ -1,7 +1,17 @@
 // src/rag/__tests__/storage.test.ts
-import { test, before, after } from "node:test";
+import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { upsertChunks, deleteBySource, getPool, closePool } from "../storage.js";
+import {
+  upsertChunks,
+  deleteBySource,
+  getPool,
+  closePool,
+  searchSemantic,
+  searchKeyword,
+  pruneOrphans,
+  buildFilterClauses,
+  __setPoolForTest,
+} from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
 
 const TEST_PREFIX = "__test_storage__";
@@ -86,4 +96,174 @@ test("deleteBySource removes all chunks for a source", async () => {
     [sourceId],
   );
   assert.equal(rows[0].count, "0");
+});
+
+// --- F.1.2: searchSemantic/searchKeyword expose real scores ----------------
+// These run WITHOUT POSTGRES_URL: the pool is replaced with a stub via the
+// __setPoolForTest seam, so no live DB is touched.
+
+afterEach(() => {
+  // Clear any injected stub so the credentialed tests above are unaffected.
+  __setPoolForTest(null);
+});
+
+test("searchSemantic returns cosine score (exposed as score field)", async () => {
+  __setPoolForTest({
+    query: async () => ({
+      rows: [
+        {
+          id: "id1",
+          source_type: "notion",
+          source_id: "s1",
+          workspace: "personal",
+          db_name: null,
+          parent_url: null,
+          chunk_index: 0,
+          text: "t",
+          metadata: {},
+          source_updated: null,
+          score: 0.82,
+        },
+      ],
+    }),
+  });
+  const out = await searchSemantic([0.1, 0.2], undefined, 5);
+  assert.equal(out[0].score, 0.82);
+  assert.equal(out[0].chunk.source_id, "s1");
+});
+
+test("searchKeyword returns ts_rank score (exposed as score field)", async () => {
+  __setPoolForTest({
+    query: async () => ({
+      rows: [
+        {
+          id: "id2",
+          source_type: "notion",
+          source_id: "s2",
+          workspace: "personal",
+          db_name: null,
+          parent_url: null,
+          chunk_index: 0,
+          text: "t",
+          metadata: {},
+          source_updated: null,
+          score: 0.31,
+        },
+      ],
+    }),
+  });
+  const out = await searchKeyword("query", undefined, 5);
+  assert.equal(out[0].score, 0.31);
+  assert.equal(out[0].chunk.source_id, "s2");
+});
+
+// --- F.2.2: pruneOrphans namespace-safe deletes -----------------------------
+// These run WITHOUT POSTGRES_URL via the __setPoolForTest seam.
+
+test("pruneOrphans scopes DELETE by source_type AND workspace", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rowCount: 2, rows: [] };
+    },
+  } as never);
+  const deleted = await pruneOrphans("granola", "personal", ["s1", "s2"]);
+  assert.equal(deleted, 2);
+  assert.match(sql, /source_type\s*=\s*\$1/i);
+  assert.match(sql, /workspace\s*=\s*\$2/i);
+  assert.match(sql, /source_id\s*<>\s*ALL\(\$3\)/i);
+  assert.deepEqual(params, ["granola", "personal", ["s1", "s2"]]);
+});
+
+test("pruneOrphans throws if granola/calendar called without workspace", async () => {
+  await assert.rejects(
+    () => pruneOrphans("granola", null, ["s1"]),
+    /workspace required/i,
+  );
+});
+
+// --- F.3.1: source_type / exclude_source_type filters -----------------------
+// buildFilterClauses is pure (no DB) — runs WITHOUT POSTGRES_URL.
+
+test("source_type produces equality clause", () => {
+  const { sql, params } = buildFilterClauses({ source_type: "granola" });
+  assert.match(sql, /source_type\s*=\s*\$\d/i);
+  assert.ok(params.includes("granola"));
+});
+
+test("exclude_source_type produces inequality clause", () => {
+  const { sql } = buildFilterClauses({ exclude_source_type: "calendar" });
+  assert.match(sql, /source_type\s*(<>|!=)\s*\$\d/i);
+});
+
+// --- F.3.2: pessoa filter across real per-source shapes ---------------------
+
+test("pessoa clause references pessoas + attendees with unaccent ILIKE", () => {
+  const { sql, params } = buildFilterClauses({ pessoa: "João" });
+  // both keys covered
+  assert.match(sql, /metadata->'pessoas'/i);
+  assert.match(sql, /metadata->'attendees'/i);
+  // accent/partial-insensitive
+  assert.match(sql, /unaccent/i);
+  assert.match(sql, /ILIKE/i);
+  assert.ok(
+    params.some(
+      (p) => String(p).toLowerCase().includes("joao") || String(p).includes("João"),
+    ),
+  );
+});
+
+test("pessoa clause does NOT reference contatos (dropped until populated)", () => {
+  const { sql } = buildFilterClauses({ pessoa: "Maria" });
+  assert.ok(!/contatos/i.test(sql));
+});
+
+// --- F.3.3: data filter COALESCE semantics + null inclusion -----------------
+
+test("data filter uses COALESCE(metadata.data, source_updated)", () => {
+  const { sql } = buildFilterClauses({ date_from: "2026-01-01", date_to: "2026-02-01" });
+  assert.match(sql, /COALESCE\(\(metadata->>'data'\)::date,\s*source_updated::date\)/i);
+});
+
+test("no date filter -> no date clause (nulls included)", () => {
+  const { sql } = buildFilterClauses({});
+  assert.ok(!/metadata->>'data'/i.test(sql));
+});
+
+// --- F.4.2: workspace-scope enforcement reaches the SQL ---------------------
+// buildFilterClauses must emit a hard `workspace = ANY($N)` clause whenever the
+// caller threads an _allowedWorkspaces list (computed from the OAuth scope).
+// This is the actual leak guard: a personal-scoped query can never return
+// globalcripto/nora rows because the SQL itself restricts them.
+
+test("_allowedWorkspaces emits workspace = ANY clause with the scoped array", () => {
+  const { sql, params } = buildFilterClauses({ _allowedWorkspaces: ["personal"] });
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [["personal"]]);
+});
+
+test("_allowedWorkspaces empty array -> ANY('{}') -> zero rows (no leak)", () => {
+  const { sql, params } = buildFilterClauses({ _allowedWorkspaces: [] });
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i);
+  assert.deepEqual(params, [[]]);
+});
+
+test("_allowedWorkspaces undefined -> no scope clause (unfiltered)", () => {
+  const { sql } = buildFilterClauses({});
+  assert.ok(!/ANY\(/i.test(sql));
+});
+
+test("_allowedWorkspaces coexists with caller workspace filter (both emitted)", () => {
+  // caller workspace equality AND the hard scope ANY are both applied.
+  const { sql, params } = buildFilterClauses({
+    workspace: "personal",
+    _allowedWorkspaces: ["personal"],
+  });
+  assert.match(sql, /workspace\s*=\s*\$\d/i); // caller equality
+  assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i); // hard scope
+  assert.ok(params.includes("personal"));
+  assert.ok(params.some((p) => Array.isArray(p) && p[0] === "personal"));
 });

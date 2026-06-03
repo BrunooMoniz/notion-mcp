@@ -5,7 +5,21 @@ import { formatVector } from "./embeddings.js";
 
 let pool: pg.Pool | null = null;
 
+/** Minimal pg-like surface the storage layer depends on (lets tests inject a stub). */
+type PoolLike = Pick<pg.Pool, "query">;
+
+let injectedPool: PoolLike | null = null;
+
+/**
+ * Test-only seam: inject a fake pool (or pass null to clear). Guarded so
+ * production never touches it — `getPool()` only uses it when set by a test.
+ */
+export function __setPoolForTest(p: PoolLike | null): void {
+  injectedPool = p;
+}
+
 export function getPool(): pg.Pool {
+  if (injectedPool) return injectedPool as pg.Pool;
   if (!pool) {
     pool = new pg.Pool({ connectionString: process.env.POSTGRES_URL });
   }
@@ -66,6 +80,39 @@ export async function deleteBySource(sourceType: string, sourceId: string): Prom
   ]);
 }
 
+/**
+ * Delete chunks for a source that are no longer present upstream (orphans),
+ * scoped to a single (source_type, workspace) namespace.
+ *
+ * `source_type` in brain_chunks is the BARE value (`notion`/`granola`/`calendar`),
+ * distinct from the dashed sync_state keys (`granola-<ws>` / `calendar-google`).
+ * Because granola/calendar chunks from different workspaces share the same bare
+ * source_type, a workspace-less prune would delete another workspace's chunks —
+ * so we REQUIRE the workspace argument for those sources.
+ *
+ * Returns the number of rows deleted.
+ */
+export async function pruneOrphans(
+  sourceType: "notion" | "granola" | "calendar",
+  workspace: string | null,
+  liveIds: string[],
+): Promise<number> {
+  if ((sourceType === "granola" || sourceType === "calendar") && !workspace) {
+    throw new Error("workspace required for granola/calendar prune");
+  }
+  const p = getPool();
+  const params: unknown[] = [sourceType];
+  let where = "source_type = $1";
+  if (workspace) {
+    params.push(workspace);
+    where += ` AND workspace = $${params.length}`;
+  }
+  params.push(liveIds);
+  where += ` AND source_id <> ALL($${params.length})`;
+  const res = await p.query(`DELETE FROM brain_chunks WHERE ${where}`, params);
+  return res.rowCount ?? 0;
+}
+
 export async function getSyncState(sourceType: string): Promise<Date> {
   const p = getPool();
   const { rows } = await p.query<{ last_sync_at: Date }>(
@@ -114,14 +161,33 @@ function rowToChunk(r: QueryRow): Chunk {
   };
 }
 
-function buildFilterClauses(
+/**
+ * Build the dynamic WHERE fragment + ordered params for a SearchFilters object.
+ *
+ * `startIdx` is the 1-based index of the FIRST positional placeholder this
+ * fragment should emit (callers that prepend their own params — e.g. the query
+ * embedding + topK — pass the next free slot; pure tests omit it and get $1…).
+ *
+ * Exported so unit tests can assert the emitted SQL/params without a live DB.
+ * All values stay parameterized (no string interpolation of user input).
+ */
+export function buildFilterClauses(
   filters: SearchFilters | undefined,
-  startIdx: number,
+  startIdx = 1,
 ): { sql: string; params: unknown[] } {
   if (!filters) return { sql: "", params: [] };
   const clauses: string[] = [];
   const params: unknown[] = [];
   let i = startIdx;
+  // F.4.2 — hard workspace-scope guard. When brainSearch threads an
+  // _allowedWorkspaces list (from the OAuth scope, intersected with the caller's
+  // requested workspace), restrict every query to those workspaces. An empty
+  // array yields ANY('{}') -> zero rows, so a scoped token can never read
+  // another workspace's chunks. `undefined` = no restriction (bearer/cron/eval).
+  if (filters._allowedWorkspaces !== undefined) {
+    clauses.push(`workspace = ANY($${i++})`);
+    params.push(filters._allowedWorkspaces);
+  }
   if (filters.workspace) {
     clauses.push(`workspace = $${i++}`);
     params.push(filters.workspace);
@@ -134,17 +200,47 @@ function buildFilterClauses(
     clauses.push(`metadata->>'frente' = $${i++}`);
     params.push(filters.frente);
   }
+  if (filters.source_type) {
+    clauses.push(`source_type = $${i++}`);
+    params.push(filters.source_type);
+  }
+  if (filters.exclude_source_type) {
+    clauses.push(`source_type <> $${i++}`);
+    params.push(filters.exclude_source_type);
+  }
+  // Date semantics: the effective date of a chunk is its own metadata.data
+  // (Notion date prop / Granola created_at / Calendar start), falling back to
+  // source_updated when unset. Rows whose COALESCE'd date is NULL (neither
+  // present) are INCLUDED — we only emit a clause when a bound is given, so
+  // "no date filter" never excludes anything.
   if (filters.date_from) {
-    clauses.push(`(metadata->>'data')::date >= $${i++}::date`);
+    clauses.push(`COALESCE((metadata->>'data')::date, source_updated::date) >= $${i++}::date`);
     params.push(filters.date_from);
   }
   if (filters.date_to) {
-    clauses.push(`(metadata->>'data')::date <= $${i++}::date`);
+    clauses.push(`COALESCE((metadata->>'data')::date, source_updated::date) <= $${i++}::date`);
     params.push(filters.date_to);
   }
   if (filters.pessoa) {
-    clauses.push(`metadata->'pessoas' @> $${i++}::jsonb`);
-    params.push(JSON.stringify([filters.pessoa]));
+    // Real per-source shapes: Notion writes metadata.pessoas (string[]),
+    // Granola writes metadata.attendees (string[]). Match either, accent- and
+    // case-insensitive, partial. `contatos` is dropped (no chunk populates it
+    // yet — dead branch). Body fallback catches names that only appear inline.
+    const n = i++;
+    clauses.push(
+      `(
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(metadata->'pessoas','[]'::jsonb)) e
+          WHERE unaccent(e) ILIKE unaccent('%' || $${n} || '%')
+        )
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(metadata->'attendees','[]'::jsonb)) e
+          WHERE unaccent(e) ILIKE unaccent('%' || $${n} || '%')
+        )
+        OR unaccent(text) ILIKE unaccent('%' || $${n} || '%')
+      )`,
+    );
+    params.push(filters.pessoa);
   }
   return {
     sql: clauses.length ? "AND " + clauses.join(" AND ") : "",
@@ -156,7 +252,7 @@ export async function searchSemantic(
   queryEmbedding: number[],
   filters: SearchFilters | undefined,
   topK: number,
-): Promise<{ chunk: Chunk; rank: number }[]> {
+): Promise<{ chunk: Chunk; rank: number; score: number }[]> {
   const p = getPool();
   const filterClauses = buildFilterClauses(filters, 3);
   const sql = `
@@ -175,14 +271,15 @@ export async function searchSemantic(
     topK,
     ...filterClauses.params,
   ]);
-  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1 }));
+  // Expose the real cosine similarity (1 - distance) instead of discarding it.
+  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
 
 export async function searchKeyword(
   queryText: string,
   filters: SearchFilters | undefined,
   topK: number,
-): Promise<{ chunk: Chunk; rank: number }[]> {
+): Promise<{ chunk: Chunk; rank: number; score: number }[]> {
   const p = getPool();
   const filterClauses = buildFilterClauses(filters, 3);
   const sql = `
@@ -201,7 +298,8 @@ export async function searchKeyword(
     topK,
     ...filterClauses.params,
   ]);
-  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1 }));
+  // Expose the real ts_rank score instead of discarding it.
+  return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
 
 export async function getNeighbors(sourceId: string, chunkIndex: number): Promise<Chunk[]> {

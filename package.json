@@ -11,6 +11,7 @@
     "dev:indexer": "tsx src/index-indexer.ts",
     "dev:classifier": "tsx src/index-classifier.ts",
     "test": "tsx --test src/rag/__tests__/*.test.ts",
+    "eval": "tsx scripts/eval/run-eval.mts",
     "reindex": "tsx scripts/reindex-all.mts",
     "classify": "tsx scripts/run-classifier.mts",
     "revisitar": "tsx scripts/run-revisitar.mts"
@@ -24,6 +25,7 @@
     "express-rate-limit": "^8.3.2",
     "helmet": "^8.1.0",
     "node-cron": "^3.0.3",
+    "node-ical": "^0.26.1",
     "pg": "^8.13.1",
     "zod": "^3.23.0"
   },

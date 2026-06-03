@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getClient, notionFetch, type Workspace } from "../clients.js";
+import { assertWorkspaceScope } from "../context.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
@@ -140,6 +141,10 @@ Returns counts and per-page indexing stats.`,
         .describe("Cap for data_source/database expansion (default 50)"),
     },
     async ({ workspace, url, max_pages }) => {
+      // Security gate: enforce token workspace scope before any work.
+      // No-op for bearer ("all") and for non-HTTP contexts (startup/cron/tests).
+      assertWorkspaceScope(workspace as Workspace);
+
       const id = extractNotionId(url);
       if (!id) {
         return {
