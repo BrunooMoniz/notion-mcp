@@ -62,6 +62,13 @@ filter; empty intersection returns zero rows — no cross-workspace leak). Beare
 ("all") tokens and out-of-request contexts (cron / `npm run eval`) are
 unfiltered. `brain_index_url` calls `assertWorkspaceScope()` before writing.
 
+**Calendars** — indexed from per-calendar **iCal secret URLs** via
+`src/rag/calendar-ics-source.ts` (env `GOOGLE_CAL_ICS`, a JSON array of
+`{url,label,workspace}`). This is account-agnostic and needs no Google Cloud, so
+it covers multiple calendars across multiple Google accounts. The legacy
+Google-OAuth indexer (`src/rag/calendar-source.ts`, `src/google/`) still works as
+a fallback when `GOOGLE_CAL_ICS` is unset. iCal URLs are secrets — `.env` only.
+
 Migrations: fresh installs run `scripts/init-db.sql`; existing DBs apply
 `scripts/migrate-f2.sql` (verify with `scripts/verify-f2.sql`).
 

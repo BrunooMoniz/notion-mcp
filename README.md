@@ -188,6 +188,14 @@ candidate pool, then reranked by `rerank-2.5-lite` for the final relevance
 score. Reads are workspace-scoped: a scoped OAuth token never sees another
 workspace's chunks.
 
+**Indexing calendars (iCal, no Google Cloud):** the brain can index multiple
+calendars — even across different Google accounts — from each calendar's private
+iCal URL. In Google Calendar: *Settings and sharing → Integrate calendar → Secret
+address in iCal format* (`.../basic.ics`). Put them in `GOOGLE_CAL_ICS` (a JSON
+array of `{url, label, workspace}`; see `.env.example`). These URLs are secrets —
+keep them in `.env` only. A legacy Google-OAuth indexer also exists as a fallback
+when `GOOGLE_CAL_ICS` is unset.
+
 > **Tool count:** 25 Notion tools + `brain_search` + `brain_index_url` = **27**.
 > The Fundação ("Confiar no Cérebro") work added **zero** new MCP tools — only
 > new `brain_search` options (`rerank`, `source_type`, `exclude_source_type`).

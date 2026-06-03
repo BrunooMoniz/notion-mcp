@@ -2,6 +2,7 @@
 import { fetchWorkspaceDocuments, chunkId } from "./notion-source.js";
 import { fetchGranolaDocuments } from "./granola-source.js";
 import { fetchCalendarDocuments } from "./calendar-source.js";
+import { fetchIcsCalendarDocuments, hasIcsCalendars } from "./calendar-ics-source.js";
 import { hasCreds as hasGoogleCreds } from "../google/oauth.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
@@ -173,8 +174,11 @@ export async function runDeltaSync(opts: {
     }
   }
 
-  // ---- Calendar pass (Google Calendar via OAuth refresh token) ----
-  if (hasGoogleCreds()) {
+  // ---- Calendar pass ----
+  // Prefer iCal (GOOGLE_CAL_ICS): simple, account-agnostic, no Google Cloud.
+  // Fall back to the Google-OAuth indexer only if iCal isn't configured.
+  const useIcs = hasIcsCalendars();
+  if (useIcs || hasGoogleCreds()) {
     const sourceType = "calendar-google";
     const lastSync = opts.fullReindex ? new Date(0) : await getSyncState(sourceType);
     const feedStarted = new Date();
@@ -188,9 +192,10 @@ export async function runDeltaSync(opts: {
     const liveIdsByWorkspace = new Map<Workspace, string[]>();
 
     try {
-      for await (const doc of fetchCalendarDocuments({
-        modifiedSince: opts.fullReindex ? undefined : lastSync,
-      })) {
+      const calDocs = useIcs
+        ? fetchIcsCalendarDocuments({ modifiedSince: opts.fullReindex ? undefined : lastSync })
+        : fetchCalendarDocuments({ modifiedSince: opts.fullReindex ? undefined : lastSync });
+      for await (const doc of calDocs) {
         docs++;
         const docChunks = await indexDocument(doc);
         docsToReplace.push(doc.source_id);
@@ -220,13 +225,13 @@ export async function runDeltaSync(opts: {
       stats.chunks += chunks.length;
       stats.apiCalls += Math.ceil(chunks.length / 128);
 
-      console.log(`[indexer] calendar documents=${docs} chunks=${chunks.length}`);
+      console.log(`[indexer] calendar (${useIcs ? "ics" : "google-oauth"}) documents=${docs} chunks=${chunks.length}`);
     } catch (err: any) {
       console.error(`[indexer] calendar FAILED:`, err.message ?? err);
       stats.calendar = { documents: docs, chunks: chunks.length };
     }
   } else {
-    console.log("[indexer] calendar skipped — Google not connected (visit /google/connect)");
+    console.log("[indexer] calendar skipped — set GOOGLE_CAL_ICS or connect Google (/google/connect)");
   }
 
   stats.endedAt = new Date();
