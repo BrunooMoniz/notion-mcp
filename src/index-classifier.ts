@@ -7,11 +7,13 @@ import cron from "node-cron";
 import { runClassifier } from "./classifier/notion-classifier.js";
 import { runRevisitar } from "./classifier/revisitar.js";
 import { syncGranolasToReunioes } from "./classifier/granola-to-reuniao.js";
+import { runDailyBriefing } from "./briefing/daily-briefing.js";
 import { recordRun } from "./rag/storage.js";
 
 const CLASSIFIER_CRON = process.env.CLASSIFIER_CRON ?? "30 * * * *"; // half past every hour
 const REVISITAR_CRON = process.env.REVISITAR_CRON ?? "0 7 * * *";    // 07:00 every day
 const GRANOLA_REUNIAO_CRON = process.env.GRANOLA_REUNIAO_CRON ?? "*/15 * * * *"; // every 15min
+const BRIEFING_CRON = process.env.BRIEFING_CRON ?? "0 7 * * *";      // 07:00 every day
 
 async function tickClassifier(label: string): Promise<void> {
   const start = Date.now();
@@ -58,8 +60,21 @@ async function tickGranolaReuniao(label: string): Promise<void> {
   }
 }
 
+async function tickBriefing(label: string): Promise<void> {
+  const start = Date.now();
+  try {
+    // runDailyBriefing records its own status_runs row; this tick only logs.
+    await runDailyBriefing();
+    console.log(
+      `[${new Date().toISOString()}] [briefing:${label}] ok took=${Date.now() - start}ms`,
+    );
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] [briefing:${label}] FAILED`, err);
+  }
+}
+
 console.log(
-  `brain-classifier starting; classifier cron: ${CLASSIFIER_CRON}; revisitar cron: ${REVISITAR_CRON}; granola->reuniao cron: ${GRANOLA_REUNIAO_CRON}`,
+  `brain-classifier starting; classifier cron: ${CLASSIFIER_CRON}; revisitar cron: ${REVISITAR_CRON}; granola->reuniao cron: ${GRANOLA_REUNIAO_CRON}; briefing cron: ${BRIEFING_CRON}`,
 );
 console.log("running initial classifier tick...");
 void tickClassifier("initial");
@@ -67,6 +82,8 @@ console.log("running initial revisitar tick...");
 void tickRevisitar("initial");
 console.log("running initial granola->reuniao tick...");
 void tickGranolaReuniao("initial");
+console.log("running initial briefing tick...");
+void tickBriefing("initial");
 
 cron.schedule(CLASSIFIER_CRON, () => {
   void tickClassifier("cron");
@@ -76,4 +93,7 @@ cron.schedule(REVISITAR_CRON, () => {
 });
 cron.schedule(GRANOLA_REUNIAO_CRON, () => {
   void tickGranolaReuniao("cron");
+});
+cron.schedule(BRIEFING_CRON, () => {
+  void tickBriefing("cron");
 });
