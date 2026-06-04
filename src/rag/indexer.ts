@@ -5,6 +5,7 @@ import { fetchCalendarDocuments } from "./calendar-source.js";
 import { fetchIcsCalendarDocuments, hasIcsCalendars } from "./calendar-ics-source.js";
 import { hasCreds as hasGoogleCreds } from "../google/oauth.js";
 import { chunkText } from "./chunker.js";
+import { buildContextHeader } from "./context-header.js";
 import { batchEmbed } from "./embeddings.js";
 import { upsertChunks, deleteBySource, pruneOrphans, getSyncState, setSyncState, recordRun } from "./storage.js";
 import { nextGranolaCursor } from "./granola-cursor.js";
@@ -246,8 +247,15 @@ export async function runDeltaSync(opts: {
 }
 
 async function indexDocument(doc: IndexableDocument): Promise<ChunkWithEmbedding[]> {
-  const texts = chunkText(doc.text);
-  if (texts.length === 0) return [];
+  const rawChunks = chunkText(doc.text);
+  if (rawChunks.length === 0) return [];
+
+  // Contextual retrieval: prepend a deterministic provenance header to each
+  // chunk so the SAME header+chunk string is both embedded and stored.
+  const header = buildContextHeader(doc);
+  const texts = header
+    ? rawChunks.map((c) => `${header}\n\n${c}`)
+    : rawChunks;
 
   const embeddings = await batchEmbed(texts);
   return texts.map((text, idx) => ({
