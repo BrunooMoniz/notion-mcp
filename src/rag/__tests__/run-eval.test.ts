@@ -5,7 +5,7 @@
 // NodeNext resolves the .mts module via its .mjs runtime specifier.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { recallAtK, mrr, aggregate } from "../../../scripts/eval/run-eval.mjs";
+import { recallAtK, mrr, aggregate, recallAtKSub, mrrSub } from "../../../scripts/eval/run-eval.mjs";
 
 test("recallAtK: hit within k", () => {
   // expected ids B, top-k results A,B,C at k=3 -> 1 of 1 expected found
@@ -36,6 +36,23 @@ test("mrr: first relevant at rank 1 -> 1", () => {
 
 test("mrr: no relevant -> 0", () => {
   assert.equal(mrr(["A", "C"], ["B"]), 0);
+});
+
+test("recallAtKSub: substring match within k", () => {
+  // expected page-id 'abc123' appears in url[1] within k=3 -> 1/1
+  const urls = ["https://x/p/Other-zzz", "https://x/p/Talos-abc123", "https://x/p/More-yyy"];
+  assert.equal(recallAtKSub(urls, ["abc123"], 3), 1);
+});
+
+test("recallAtKSub: substring beyond k -> 0", () => {
+  const urls = ["a", "b", "c", "https://x/p/T-abc123"];
+  assert.equal(recallAtKSub(urls, ["abc123"], 3), 0);
+});
+
+test("mrrSub: first url containing the substring sets the rank", () => {
+  const urls = ["https://x/p/Other-zzz", "https://x/p/Talos-abc123"];
+  assert.equal(mrrSub(urls, ["abc123"]), 0.5);
+  assert.equal(mrrSub(urls, ["nope"]), 0);
 });
 
 test("aggregate: averages per-question metrics", () => {

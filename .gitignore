@@ -5,3 +5,6 @@ dist/
 logs/
 audit.log
 data/
+# Eval golden set + results contain real private questions/content — keep local/VPS only.
+scripts/eval/golden-set.jsonl
+eval-results/

@@ -20,6 +20,23 @@ export function mrr(results: string[], expected: string[]): number {
   return 0;
 }
 
+// Substring variants used by the runner: the golden set specifies `expect` as
+// stable substrings (the page-id hex), matched against each hit's parent_url so
+// the gabarito survives page renames and URL-format changes.
+export function recallAtKSub(urls: string[], expected: string[], k: number): number {
+  if (expected.length === 0) return 1;
+  const topK = urls.slice(0, k);
+  const found = expected.filter((e) => e.length > 0 && topK.some((u) => u.includes(e))).length;
+  return found / expected.length;
+}
+
+export function mrrSub(urls: string[], expected: string[]): number {
+  for (let i = 0; i < urls.length; i++) {
+    if (expected.some((e) => e.length > 0 && urls[i].includes(e))) return 1 / (i + 1);
+  }
+  return 0;
+}
+
 export interface EvalRow {
   recall_at_5: number;
   mrr: number;
@@ -41,7 +58,10 @@ export function aggregate(rows: EvalRow[]): { recall_at_5: number; mrr: number }
 
 interface GoldenItem {
   q: string;
-  expect_source_ids: string[];
+  // Substrings to find in a returned hit's parent_url (use the stable page-id
+  // hex so the gabarito survives renames). The question is "hit" if any expected
+  // substring appears in a top-k result's parent_url.
+  expect: string[];
   type: "lookup" | "sintese" | "estado";
   note?: string;
 }
@@ -71,12 +91,12 @@ async function main(): Promise<void> {
     // brainSearch runs OUTSIDE an HTTP request (no AsyncLocalStorage store),
     // so getAllowedWorkspaces() returns null (no workspace filter) — see F.4.
     const hits = await brainSearch(item.q, { topK: 10 });
-    const ids = hits.map((h) => h.chunk.source_id);
+    const urls = hits.map((h) => h.chunk.parent_url ?? "");
     rows.push({
       q: item.q,
       type: item.type,
-      recall_at_5: recallAtK(ids, item.expect_source_ids, 5),
-      mrr: mrr(ids, item.expect_source_ids),
+      recall_at_5: recallAtKSub(urls, item.expect, 5),
+      mrr: mrrSub(urls, item.expect),
     });
   }
 
