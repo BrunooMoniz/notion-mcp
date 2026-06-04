@@ -11,6 +11,8 @@ import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { requestContext, type RequestContext } from "./context.js";
+import { getStatus } from "./rag/storage.js";
+import { summarizeStatus } from "./rag/status.js";
 
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
@@ -330,6 +332,27 @@ app.delete("/mcp", async (req, res) => {
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+// Bearer-protected observability: latest run per source + staleness, so a dead
+// or 0-indexing source is never silent. Not public (auth like /mcp's bearer path).
+app.get("/status", async (req, res) => {
+  const auth = req.headers["authorization"];
+  const token = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  if (!BEARER_TOKEN || token !== BEARER_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const sources = summarizeStatus(await getStatus());
+    res.json({
+      now: new Date().toISOString(),
+      stale_or_failing: sources.filter((s) => !s.ok || s.stale).map((s) => s.source),
+      sources,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "status query failed" });
+  }
 });
 
 const PORT = process.env.PORT ?? 3456;

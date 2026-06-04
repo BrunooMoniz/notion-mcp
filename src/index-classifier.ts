@@ -7,6 +7,7 @@ import cron from "node-cron";
 import { runClassifier } from "./classifier/notion-classifier.js";
 import { runRevisitar } from "./classifier/revisitar.js";
 import { syncGranolasToReunioes } from "./classifier/granola-to-reuniao.js";
+import { recordRun } from "./rag/storage.js";
 
 const CLASSIFIER_CRON = process.env.CLASSIFIER_CRON ?? "30 * * * *"; // half past every hour
 const REVISITAR_CRON = process.env.REVISITAR_CRON ?? "0 7 * * *";    // 07:00 every day
@@ -21,8 +22,10 @@ async function tickClassifier(label: string): Promise<void> {
         `pessoas(linked=${stats.pessoas_linked} created=${stats.pessoas_created}) orgs(linked=${stats.orgs_linked} created=${stats.orgs_created}) ` +
         `errors=${stats.errors} took=${Date.now() - start}ms`,
     );
+    await recordRun({ worker: "classifier", source: "classifier", ok: stats.errors === 0, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
     console.error(`[${new Date().toISOString()}] [classifier:${label}] FAILED`, err);
+    await recordRun({ worker: "classifier", source: "classifier", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
 
@@ -33,8 +36,10 @@ async function tickRevisitar(label: string): Promise<void> {
     console.log(
       `[${new Date().toISOString()}] [revisitar:${label}] candidates=${stats.candidates} created=${stats.created} took=${Date.now() - start}ms`,
     );
+    await recordRun({ worker: "classifier", source: "revisitar", ok: true, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
     console.error(`[${new Date().toISOString()}] [revisitar:${label}] FAILED`, err);
+    await recordRun({ worker: "classifier", source: "revisitar", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
 
@@ -46,8 +51,10 @@ async function tickGranolaReuniao(label: string): Promise<void> {
       `[${new Date().toISOString()}] [granola->reuniao:${label}] scanned=${stats.scanned} created=${stats.created} ` +
         `appended=${stats.appended} skipped=${stats.skipped} errors=${stats.errors} took=${Date.now() - start}ms`,
     );
+    await recordRun({ worker: "classifier", source: "granola-reuniao", ok: stats.errors === 0, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
     console.error(`[${new Date().toISOString()}] [granola->reuniao:${label}] FAILED`, err);
+    await recordRun({ worker: "classifier", source: "granola-reuniao", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
 

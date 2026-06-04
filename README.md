@@ -96,9 +96,10 @@ workspace's chunks.
 
 **Set it up**
 
-1. Provision Postgres + pgvector and run the schema:
+1. Provision Postgres + pgvector and apply the schema (fresh installs and
+   upgrades both just run the migration runner — it's idempotent):
    ```bash
-   psql "$POSTGRES_URL" -f scripts/init-db.sql
+   npm run migrate
    ```
 2. Add `POSTGRES_URL`, `VOYAGE_API_KEY` (and optional `RERANK_*`) to `.env`.
 3. Run the indexer (PM2 runs it on a cron; one-off full reindex below):
@@ -169,7 +170,7 @@ src/
                    granola-source.ts       Granola notes
                    notion-source.ts        Notion pages
   classifier/    LLM page classifier + spaced-repetition Revisitar
-scripts/         init-db.sql, migrations, reindex, eval harness
+scripts/         migrate.mts + migrations/, reindex, eval harness
 ```
 
 **Notion API** is pinned to `2025-09-03` (multi-source databases, file uploads,

@@ -6,10 +6,16 @@ import {
   timingSafeEqual,
   scryptSync,
 } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALL_WORKSPACES, type Workspace } from "./clients.js";
+import {
+  isTokenExpired,
+  isRevoked as isRevokedPure,
+  validateRefreshToken as validateRefreshTokenPure,
+  type TokenStore as PureTokenStore,
+} from "./oauth-tokens.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "data");
@@ -129,26 +135,61 @@ export interface AccessToken {
   expires_at: number;
 }
 
+export interface RefreshToken {
+  token: string;
+  client_id: string;
+  scopes: Workspace[];
+  expires_at: number;
+}
+
 const clients = new Map<string, RegisteredClient>();
 const authCodes = new Map<string, AuthCode>();
 const accessTokens = new Map<string, AccessToken>();
+const refreshTokens = new Map<string, RefreshToken>();
+// Revoked access AND refresh token strings. Persisted so revocation survives
+// restarts. getAccessTokenInfo and the refresh grant both consult this.
+const revokedTokens = new Set<string>();
 const csrfTokens = new Map<string, number>(); // token -> expires_at
+
+// Build the plain TokenStore snapshot the pure helpers operate on. Cheap to
+// construct per-call (small maps); keeps oauth.ts the single source of truth
+// for state while reusing the unit-tested logic in oauth-tokens.ts.
+function snapshotStore(): PureTokenStore {
+  return {
+    accessTokens: [...accessTokens.values()],
+    refreshTokens: [...refreshTokens.values()],
+    revoked: revokedTokens,
+  };
+}
 
 // --- Persistence ---
 
 function loadStore(): void {
   try {
     const raw = readFileSync(STORE_PATH, "utf8");
+    // Backward compatible: refreshTokens/revoked are optional. An older store
+    // (clients + accessTokens only) loads cleanly with empty refresh/revoked.
     const data = JSON.parse(raw) as {
       clients?: RegisteredClient[];
       accessTokens?: AccessToken[];
+      refreshTokens?: RefreshToken[];
+      revoked?: string[];
     };
     const now = Date.now();
     for (const c of data.clients ?? []) clients.set(c.client_id, c);
+    // EXISTING access tokens keep their stored expiry — read them as-is, only
+    // dropping ones already past their persisted expiry. We do NOT retroactively
+    // shorten any TTL.
     for (const t of data.accessTokens ?? []) {
       if (t.expires_at > now) accessTokens.set(t.token, t);
     }
-    console.log(`[oauth] Loaded ${clients.size} clients, ${accessTokens.size} tokens from disk.`);
+    for (const t of data.refreshTokens ?? []) {
+      if (t.expires_at > now) refreshTokens.set(t.token, t);
+    }
+    for (const tok of data.revoked ?? []) revokedTokens.add(tok);
+    console.log(
+      `[oauth] Loaded ${clients.size} clients, ${accessTokens.size} access tokens, ${refreshTokens.size} refresh tokens, ${revokedTokens.size} revoked from disk.`
+    );
   } catch {
     // First run or missing file — start fresh.
   }
@@ -160,8 +201,18 @@ function saveStore(): void {
     const data = {
       clients: [...clients.values()],
       accessTokens: [...accessTokens.values()],
+      refreshTokens: [...refreshTokens.values()],
+      revoked: [...revokedTokens],
     };
-    writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf8");
+    // oauth-store.json holds bearer secrets (client secrets + live tokens):
+    // restrict to owner read/write. mode on writeFileSync is masked by umask on
+    // create, so chmod afterward to be certain.
+    writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
+    try {
+      chmodSync(STORE_PATH, 0o600);
+    } catch {
+      // chmod best-effort (e.g. non-POSIX fs); the write already used mode 0o600.
+    }
   } catch (err) {
     console.error("[oauth] Failed to persist store:", err);
   }
@@ -170,8 +221,14 @@ function saveStore(): void {
 loadStore();
 
 const CODE_TTL_MS = 5 * 60_000; // 5 minutes
-const TOKEN_TTL_MS = 365 * 24 * 60 * 60_000; // 1 year
 const CSRF_TTL_MS = 5 * 60_000; // 5 minutes
+
+// Configurable, shorter TTL for NEWLY-issued access tokens. Default 24h.
+// EXISTING persisted access tokens keep their stored expiry (loadStore reads
+// them as-is); only freshly-minted tokens use this.
+const ACCESS_TTL_MS = parseInt(process.env.OAUTH_ACCESS_TTL_HOURS ?? "24", 10) * 60 * 60_000;
+// Refresh-token TTL. Default 90 days.
+const REFRESH_TTL_MS = parseInt(process.env.OAUTH_REFRESH_TTL_DAYS ?? "90", 10) * 24 * 60 * 60_000;
 
 // --- Registration enrollment window ---
 // /oauth/register is only open while this timestamp is in the future.
@@ -222,6 +279,9 @@ setInterval(() => {
   for (const [k, v] of accessTokens) {
     if (now > v.expires_at) { accessTokens.delete(k); tokensPruned = true; }
   }
+  for (const [k, v] of refreshTokens) {
+    if (now > v.expires_at) { refreshTokens.delete(k); tokensPruned = true; }
+  }
   for (const [k, v] of csrfTokens) {
     if (now > v) csrfTokens.delete(k);
   }
@@ -234,9 +294,15 @@ setInterval(() => {
 // --- Token lookup ---
 
 export function getAccessTokenInfo(token: string): AccessToken | null {
+  // Reject revoked tokens (additive guard; uses the unit-tested pure helper).
+  // Backward compatible: a pre-existing access token with no refresh token and
+  // no revocation marker validates exactly as before.
+  if (isRevokedPure({ accessTokens: [], refreshTokens: [], revoked: revokedTokens }, token)) {
+    return null;
+  }
   const entry = accessTokens.get(token);
   if (!entry) return null;
-  if (Date.now() > entry.expires_at) {
+  if (isTokenExpired(entry.expires_at, Date.now())) {
     accessTokens.delete(token);
     return null;
   }
@@ -293,6 +359,61 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     res.json({ ok: true });
   });
 
+  // Admin: revoke tokens. Body: { "client_id": "..." } OR { "token": "..." }.
+  // Same bearer-gate pattern as open/close-registration.
+  router.post("/admin/revoke", (req, res) => {
+    if (!bearerToken) {
+      res.status(503).json({ error: "unavailable" });
+      return;
+    }
+    const auth = req.headers["authorization"];
+    if (!auth || !auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), bearerToken)) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
+    const { client_id, token } = req.body ?? {};
+    if (
+      (typeof client_id !== "string" || client_id.length === 0) &&
+      (typeof token !== "string" || token.length === 0)
+    ) {
+      res.status(400).json({
+        error: "invalid_request",
+        error_description: "provide a non-empty client_id or token",
+      });
+      return;
+    }
+
+    let revokedCount = 0;
+    if (typeof token === "string" && token.length > 0) {
+      if (!revokedTokens.has(token)) {
+        revokedTokens.add(token);
+        revokedCount += 1;
+      }
+    }
+    if (typeof client_id === "string" && client_id.length > 0) {
+      for (const t of accessTokens.values()) {
+        if (t.client_id === client_id && !revokedTokens.has(t.token)) {
+          revokedTokens.add(t.token);
+          revokedCount += 1;
+        }
+      }
+      for (const t of refreshTokens.values()) {
+        if (t.client_id === client_id && !revokedTokens.has(t.token)) {
+          revokedTokens.add(t.token);
+          revokedCount += 1;
+        }
+      }
+    }
+
+    saveStore();
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    console.log(
+      `[${new Date().toISOString()}] OAuth: revoked ${revokedCount} token(s) (${client_id ? `client ${client_id}` : `token ${String(token).slice(0, 8)}…`}) by ${ip}`
+    );
+    res.json({ ok: true, revoked: revokedCount });
+  });
+
   // RFC 9728 — Protected Resource Metadata
   router.get("/.well-known/oauth-protected-resource", (_req, res) => {
     res.json({
@@ -310,7 +431,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       token_endpoint: `${baseUrl}/oauth/token`,
       registration_endpoint: `${baseUrl}/oauth/register`,
       response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: [
         "client_secret_post",
         "none",
@@ -614,7 +735,73 @@ ${workspaceCheckboxes}
       client_id,
       client_secret,
       code_verifier,
+      refresh_token,
     } = req.body;
+
+    // --- refresh_token grant (rotation) ---
+    if (grant_type === "refresh_token") {
+      if (!refresh_token || typeof refresh_token !== "string") {
+        res.status(400).json({ error: "invalid_request", error_description: "refresh_token required" });
+        return;
+      }
+      if (!client_id || !clients.has(client_id)) {
+        res.status(400).json({ error: "invalid_client" });
+        return;
+      }
+      // Verify client_secret for confidential clients (same rule as auth_code).
+      const rc = clients.get(client_id);
+      if (rc?.client_secret) {
+        if (!client_secret || !safeEqual(client_secret, rc.client_secret)) {
+          res.status(401).json({ error: "invalid_client", error_description: "invalid client_secret" });
+          return;
+        }
+      }
+
+      const now = Date.now();
+      // Validate via the unit-tested pure helper (exists, matches client, not
+      // expired, not revoked).
+      const validation = validateRefreshTokenPure(snapshotStore(), refresh_token, client_id, now);
+      if (!validation.ok) {
+        res.status(400).json({ error: "invalid_grant", error_description: validation.reason });
+        return;
+      }
+
+      const grantedScopes = validation.record.scopes as Workspace[];
+
+      // ROTATE: mint a new access token + new refresh token (preserving scopes),
+      // invalidate the old refresh token (drop + revoke for replay defense).
+      const newAccess = generateToken();
+      const newRefresh = generateToken();
+      accessTokens.set(newAccess, {
+        token: newAccess,
+        client_id,
+        scopes: grantedScopes,
+        expires_at: now + ACCESS_TTL_MS,
+      });
+      refreshTokens.set(newRefresh, {
+        token: newRefresh,
+        client_id,
+        scopes: grantedScopes,
+        expires_at: now + REFRESH_TTL_MS,
+      });
+      refreshTokens.delete(refresh_token);
+      revokedTokens.add(refresh_token);
+      saveStore();
+
+      const ipR = req.ip || req.socket.remoteAddress || "unknown";
+      console.log(
+        `[${new Date().toISOString()}] OAuth: rotated refresh token for client ${client_id} from ${ipR} (scopes: ${grantedScopes.join(",")})`
+      );
+
+      res.json({
+        access_token: newAccess,
+        token_type: "Bearer",
+        expires_in: ACCESS_TTL_MS / 1000,
+        refresh_token: newRefresh,
+        scope: grantedScopes.join(" "),
+      });
+      return;
+    }
 
     if (grant_type !== "authorization_code") {
       res.status(400).json({ error: "unsupported_grant_type" });
@@ -670,26 +857,40 @@ ${workspaceCheckboxes}
     // Consume the code (one-time use)
     authCodes.delete(code);
 
-    // Issue access token with scopes inherited from the auth code
+    // Issue access token with scopes inherited from the auth code. NEW tokens
+    // use the configurable (shorter) ACCESS_TTL_MS; existing persisted tokens
+    // are untouched.
+    const now = Date.now();
     const token = generateToken();
-    const expiresIn = TOKEN_TTL_MS / 1000;
+    const expiresIn = ACCESS_TTL_MS / 1000;
     accessTokens.set(token, {
       token,
       client_id,
       scopes: authCode.scopes,
-      expires_at: Date.now() + TOKEN_TTL_MS,
+      expires_at: now + ACCESS_TTL_MS,
+    });
+
+    // ALSO mint a refresh token bound to {client_id, scopes}, returned alongside
+    // the access token. Additive — existing clients that ignore it are unaffected.
+    const refreshToken = generateToken();
+    refreshTokens.set(refreshToken, {
+      token: refreshToken,
+      client_id,
+      scopes: authCode.scopes,
+      expires_at: now + REFRESH_TTL_MS,
     });
     saveStore();
 
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     console.log(
-      `[${new Date().toISOString()}] OAuth: issued access token for client ${client_id} from ${ip} (scopes: ${authCode.scopes.join(",")})`
+      `[${new Date().toISOString()}] OAuth: issued access + refresh token for client ${client_id} from ${ip} (scopes: ${authCode.scopes.join(",")})`
     );
 
     res.json({
       access_token: token,
       token_type: "Bearer",
       expires_in: expiresIn,
+      refresh_token: refreshToken,
       scope: authCode.scopes.join(" "),
     });
   });

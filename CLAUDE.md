@@ -69,8 +69,11 @@ it covers multiple calendars across multiple Google accounts. The legacy
 Google-OAuth indexer (`src/rag/calendar-source.ts`, `src/google/`) still works as
 a fallback when `GOOGLE_CAL_ICS` is unset. iCal URLs are secrets — `.env` only.
 
-Migrations: fresh installs run `scripts/init-db.sql`; existing DBs apply
-`scripts/migrate-f2.sql` (verify with `scripts/verify-f2.sql`).
+Migrations: ordered SQL in `scripts/migrations/*.sql`, applied by the idempotent
+runner `npm run migrate` (tracks applied versions in `schema_migrations`). Fresh
+installs and upgrades both just run `npm run migrate`; `--dry` (or `MIGRATE_DRY=1`)
+lists pending migrations without applying. (`scripts/verify-f2.sql` is a manual
+post-migration sanity check.)
 
 ## Notion API version
 

@@ -1,4 +1,4 @@
--- scripts/migrate-f2.sql
+-- scripts/migrations/0002_hnsw_unaccent_pgtrgm.sql
 -- Requires privileges: CREATE EXTENSION needs superuser; CREATE TEXT SEARCH
 -- CONFIGURATION needs config-owner privileges. Run as the DB superuser.
 
