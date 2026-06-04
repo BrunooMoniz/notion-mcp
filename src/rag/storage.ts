@@ -2,6 +2,7 @@
 import pg from "pg";
 import type { ChunkWithEmbedding, Chunk, SearchFilters } from "./types.js";
 import { formatVector } from "./embeddings.js";
+import type { StatusRow } from "./status.js";
 
 let pool: pg.Pool | null = null;
 
@@ -130,6 +131,91 @@ export async function setSyncState(sourceType: string, ts: Date): Promise<void> 
      ON CONFLICT (source_type) DO UPDATE SET last_sync_at = EXCLUDED.last_sync_at`,
     [sourceType, ts],
   );
+}
+
+// --- Observability: status_runs (0003) --------------------------------------
+// recordRun appends one row per worker per source per run; getStatus returns
+// the LATEST row per (worker, source) so a dead/stale source is never silent.
+
+/**
+ * Append a telemetry row for one worker/source run. BEST-EFFORT: never throws
+ * into the caller — a failure to record status must not break a real indexer or
+ * classifier run. On any error we console.warn and swallow.
+ */
+export async function recordRun(run: {
+  worker: string;
+  source: string;
+  ok: boolean;
+  counts?: unknown;
+  error?: string | null;
+  startedAt: Date;
+  endedAt: Date;
+}): Promise<void> {
+  try {
+    const p = getPool();
+    await p.query(
+      `INSERT INTO status_runs (worker, source, ok, counts, error, started_at, ended_at)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`,
+      [
+        run.worker,
+        run.source,
+        run.ok,
+        run.counts === undefined ? null : JSON.stringify(run.counts),
+        run.error ?? null,
+        run.startedAt,
+        run.endedAt,
+      ],
+    );
+  } catch (err: any) {
+    console.warn(`[status] recordRun failed (telemetry only): ${err?.message ?? err}`);
+  }
+}
+
+/**
+ * Latest run per (worker, source), with age_seconds and a best-effort merge of
+ * sync_state.last_sync_at. The status_runs.source uses bare keys ('calendar'),
+ * while sync_state uses dashed keys ('calendar-google'); we normalize that one
+ * mapping so the join lines up (other sources share the same key in both).
+ * Returns raw rows; summarizeStatus() (pure, in status.ts) shapes the payload.
+ */
+export async function getStatus(): Promise<StatusRow[]> {
+  const p = getPool();
+  const { rows } = await p.query<{
+    worker: string;
+    source: string;
+    ok: boolean;
+    counts: unknown;
+    error: string | null;
+    last_run_at: Date;
+    sync_last_at: Date | null;
+  }>(
+    `SELECT
+       sr.worker,
+       sr.source,
+       sr.ok,
+       sr.counts,
+       sr.error,
+       sr.ended_at AS last_run_at,
+       ss.last_sync_at AS sync_last_at
+     FROM (
+       SELECT DISTINCT ON (worker, source)
+         worker, source, ok, counts, error, ended_at
+       FROM status_runs
+       ORDER BY worker, source, ended_at DESC
+     ) sr
+     LEFT JOIN sync_state ss
+       ON ss.source_type = CASE WHEN sr.source = 'calendar' THEN 'calendar-google' ELSE sr.source END
+     ORDER BY sr.worker, sr.source`,
+  );
+  return rows.map((r) => ({
+    worker: r.worker,
+    source: r.source,
+    ok: r.ok,
+    counts: r.counts,
+    error: r.error,
+    last_run_at: r.last_run_at,
+    sync_last_at: r.sync_last_at,
+  }));
 }
 
 interface QueryRow {

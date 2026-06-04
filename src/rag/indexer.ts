@@ -6,7 +6,7 @@ import { fetchIcsCalendarDocuments, hasIcsCalendars } from "./calendar-ics-sourc
 import { hasCreds as hasGoogleCreds } from "../google/oauth.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
-import { upsertChunks, deleteBySource, pruneOrphans, getSyncState, setSyncState } from "./storage.js";
+import { upsertChunks, deleteBySource, pruneOrphans, getSyncState, setSyncState, recordRun } from "./storage.js";
 import { nextGranolaCursor } from "./granola-cursor.js";
 import type { ChunkWithEmbedding, IndexableDocument, Workspace } from "./types.js";
 
@@ -106,9 +106,11 @@ export async function runDeltaSync(opts: {
       console.log(
         `[indexer] workspace=${wsName} documents=${wsDocs} chunks=${wsChunks.length}`,
       );
+      await recordRun({ worker: "indexer", source: sourceType, ok: true, counts: { documents: wsDocs, chunks: wsChunks.length }, startedAt: wsStarted, endedAt: new Date() });
     } catch (err: any) {
       console.error(`[indexer] workspace ${wsName} FAILED:`, err.message ?? err);
       stats.workspaces[wsName] = { documents: wsDocs, chunks: wsChunks.length };
+      await recordRun({ worker: "indexer", source: sourceType, ok: false, error: err?.message ?? String(err), counts: { documents: wsDocs, chunks: wsChunks.length }, startedAt: wsStarted, endedAt: new Date() });
     }
   }
 
@@ -119,6 +121,7 @@ export async function runDeltaSync(opts: {
 
     const sourceType = `granola-${feed.workspace}`;
     const lastSync = opts.fullReindex ? new Date(0) : await getSyncState(sourceType);
+    const gStarted = new Date();
 
     let docs = 0;
     const chunks: ChunkWithEmbedding[] = [];
@@ -168,9 +171,11 @@ export async function runDeltaSync(opts: {
       console.log(
         `[indexer] granola.${feed.workspace} documents=${docs} chunks=${chunks.length}`,
       );
+      await recordRun({ worker: "indexer", source: sourceType, ok: true, counts: { documents: docs, chunks: chunks.length }, startedAt: gStarted, endedAt: new Date() });
     } catch (err: any) {
       console.error(`[indexer] granola ${feed.workspace} FAILED:`, err.message ?? err);
       stats.granola[feed.workspace] = { documents: docs, chunks: chunks.length };
+      await recordRun({ worker: "indexer", source: sourceType, ok: false, error: err?.message ?? String(err), counts: { documents: docs, chunks: chunks.length }, startedAt: gStarted, endedAt: new Date() });
     }
   }
 
@@ -226,9 +231,11 @@ export async function runDeltaSync(opts: {
       stats.apiCalls += Math.ceil(chunks.length / 128);
 
       console.log(`[indexer] calendar (${useIcs ? "ics" : "google-oauth"}) documents=${docs} chunks=${chunks.length}`);
+      await recordRun({ worker: "indexer", source: "calendar", ok: true, counts: { documents: docs, chunks: chunks.length }, startedAt: feedStarted, endedAt: new Date() });
     } catch (err: any) {
       console.error(`[indexer] calendar FAILED:`, err.message ?? err);
       stats.calendar = { documents: docs, chunks: chunks.length };
+      await recordRun({ worker: "indexer", source: "calendar", ok: false, error: err?.message ?? String(err), counts: { documents: docs, chunks: chunks.length }, startedAt: feedStarted, endedAt: new Date() });
     }
   } else {
     console.log("[indexer] calendar skipped — set GOOGLE_CAL_ICS or connect Google (/google/connect)");
