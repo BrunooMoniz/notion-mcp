@@ -158,6 +158,52 @@ function minSimCutoff(): number {
   return Number.isFinite(v) ? v : 0.0;
 }
 
+// Max kept hits per real parent_url before later hits from the same page are
+// dropped (result diversity). Override with BRAIN_MAX_PER_URL (default 3).
+function maxPerUrlConfig(): number {
+  const v = Number(process.env.BRAIN_MAX_PER_URL ?? 3);
+  return Number.isFinite(v) ? v : 3;
+}
+
+/**
+ * Query-time result diversification. Iterates `hits` in their given (already
+ * ranked) order and KEEPS a hit unless:
+ *   - its trimmed `chunk.text` is identical to one already kept (exact-duplicate
+ *     text indexed under multiple URLs — keep the first/highest-ranked), or
+ *   - its `chunk.parent_url` already has `maxPerUrl` hits kept.
+ * Stops once `topK` are kept. Order is preserved. A null/empty parent_url is
+ * treated as un-capped (we don't collapse unknown-origin chunks together).
+ * Recall is preserved: the first occurrence of each url always survives.
+ */
+export function diversifyHits(
+  hits: SearchHit[],
+  opts: { topK: number; maxPerUrl?: number },
+): SearchHit[] {
+  const maxPerUrl = opts.maxPerUrl ?? 3;
+  const kept: SearchHit[] = [];
+  const seenText = new Set<string>();
+  const urlCounts = new Map<string, number>();
+
+  for (const hit of hits) {
+    if (kept.length >= opts.topK) break;
+
+    const text = (hit.chunk.text ?? "").trim();
+    if (text.length > 0 && seenText.has(text)) continue; // exact-duplicate text
+
+    const url = hit.chunk.parent_url?.trim();
+    if (url) {
+      const count = urlCounts.get(url) ?? 0;
+      if (count >= maxPerUrl) continue; // url already at its cap
+      urlCounts.set(url, count + 1);
+    }
+
+    if (text.length > 0) seenText.add(text);
+    kept.push(hit);
+  }
+
+  return kept;
+}
+
 /** Min-max normalize RRF scores into [0,1], cosine as the tie-break. */
 function normalizeFallback(
   pool: SearchHit[],
@@ -188,6 +234,7 @@ export async function brainSearch(
   const mode = opts.mode ?? "hybrid";
   // Over-fetch a candidate pool so the reranker has enough to work with.
   const poolSize = Math.max(30, topK * 4);
+  const maxPerUrl = maxPerUrlConfig();
 
   // F.4.2 — enforce the caller's workspace scope at the SQL layer. We compute the
   // effective allowed-workspace list (token scope intersected with the caller's
@@ -234,33 +281,39 @@ export async function brainSearch(
 
     let reranked = false;
     if (rerankEnabled(opts.rerank)) {
+      // Rank MORE than topK (topK*3, capped to the pool) so diversifyHits has
+      // material to swap in once duplicates/over-represented urls are dropped.
+      const rerankN = Math.min(pool.length, topK * 3);
       const results = await deps.rerankDocuments(
         query,
         pool.map((p) => ({ id: p.chunk.id, text: p.chunk.text })),
-        topK,
+        rerankN,
       );
       const anyScored = results.some((r) => r.relevance_score !== null);
       if (anyScored) {
-        // Use the reranker's relevance_score, in its returned (desc) order.
-        hits = results
+        // Use the reranker's relevance_score, in its returned (desc) order,
+        // then diversify (dedup text + cap per url) down to topK.
+        const ranked = results
           .map((r) => {
             const ph = poolByChunkId.get(r.id);
             if (!ph) return null;
             return { chunk: ph.chunk, score: r.relevance_score as number };
           })
-          .filter((h): h is SearchHit => h !== null)
-          .slice(0, topK);
+          .filter((h): h is SearchHit => h !== null);
+        hits = diversifyHits(ranked, { topK, maxPerUrl });
         reranked = true;
       }
     }
 
     if (!reranked) {
       // Rerank disabled or Voyage returned all-null: min-max normalize the RRF
-      // scores, cosine tie-break, apply the minimum-similarity cutoff, trim.
+      // scores, cosine tie-break, apply the minimum-similarity cutoff, then
+      // diversify (dedup text + cap per url) down to topK.
       const cutoff = minSimCutoff();
-      hits = normalizeFallback(pool, cosineById)
-        .filter((h) => (cosineById.get(h.chunk.id) ?? 1) >= cutoff)
-        .slice(0, topK);
+      const normalized = normalizeFallback(pool, cosineById).filter(
+        (h) => (cosineById.get(h.chunk.id) ?? 1) >= cutoff,
+      );
+      hits = diversifyHits(normalized, { topK, maxPerUrl });
     }
   }
 
