@@ -1,4 +1,5 @@
 // scripts/eval/run-eval.mts
+import "dotenv/config"; // load .env so brainSearch has VOYAGE_API_KEY / POSTGRES_URL
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
