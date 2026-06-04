@@ -12,6 +12,7 @@
     "dev:classifier": "tsx src/index-classifier.ts",
     "test": "tsx --test src/rag/__tests__/*.test.ts",
     "migrate": "tsx scripts/migrate.mts",
+    "doctor": "tsx scripts/doctor.mts",
     "eval": "tsx scripts/eval/run-eval.mts",
     "reindex": "tsx scripts/reindex-all.mts",
     "classify": "tsx scripts/run-classifier.mts",
