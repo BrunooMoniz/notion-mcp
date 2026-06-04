@@ -1,5 +1,5 @@
--- scripts/init-db.sql
--- Run with: psql "$POSTGRES_URL" -f scripts/init-db.sql
+-- scripts/migrations/0001_init.sql
+-- Applied by the migration runner: npm run migrate
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS unaccent;

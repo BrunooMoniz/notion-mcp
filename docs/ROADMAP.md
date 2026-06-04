@@ -25,7 +25,7 @@ pronto para abrir como OSS e depois ganhar uma camada freemium hospedada.
   endpoint `GET /status` (última sync/idade/contagem/erro por fonte); `scripts/doctor.mts`
   (`npm run doctor`) valida Postgres/extensões/Voyage/cada Notion token/cada iCal/Google; alerta de
   fonte parada (loga `[ALERT]` + página Notion "Saúde do Cérebro"). Arquivos: `src/index.ts`,
-  `src/rag/indexer.ts`, `src/classifier/notion-classifier.ts`, `scripts/init-db.sql`.
+  `src/rag/indexer.ts`, `src/classifier/notion-classifier.ts`, `scripts/migrations/`.
 - **F0.2 Eval baseline** — rascunhar `scripts/eval/golden-set.jsonl` (~40 Qs PT-BR), Bruno valida,
   `npm run eval` → congelar `eval-results/baseline-f0.json`.
 - **F0.3 CI** — `.github/workflows/ci.yml`: `npm ci` + build + test em PR; check obrigatório no `main`.
