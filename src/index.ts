@@ -12,7 +12,7 @@ import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
-import { summarizeStatus } from "./rag/status.js";
+import { summarizeStatus, renderStatusHtml } from "./rag/status.js";
 
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
@@ -336,22 +336,45 @@ app.get("/health", (_req, res) => {
 
 // Bearer-protected observability: latest run per source + staleness, so a dead
 // or 0-indexing source is never silent. Not public (auth like /mcp's bearer path).
+// F2.5: content-negotiates — `?format=html` or an Accept: text/html browser gets
+// the mini-dashboard; everything else gets JSON. The bearer token may come from
+// the Authorization header OR a `?token=` query param (so the dashboard opens in
+// a browser over Tailscale — req.path logging excludes the query string).
 app.get("/status", async (req, res) => {
   const auth = req.headers["authorization"];
-  const token = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  const headerToken = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  const queryToken = typeof req.query.token === "string" ? req.query.token : null;
+  const token = headerToken ?? queryToken;
+  const wantsHtml =
+    req.query.format === "html" ||
+    (!req.query.format && (req.headers.accept ?? "").includes("text/html"));
+
   if (!BEARER_TOKEN || token !== BEARER_TOKEN) {
-    res.status(401).json({ error: "Unauthorized" });
+    if (wantsHtml) {
+      res.status(401).type("html").send("<!doctype html><meta charset=utf-8><p>401 — informe ?token=&lt;BEARER_TOKEN&gt;</p>");
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
     return;
   }
   try {
+    const now = new Date().toISOString();
     const sources = summarizeStatus(await getStatus());
+    if (wantsHtml) {
+      res.type("html").send(renderStatusHtml(now, sources));
+      return;
+    }
     res.json({
-      now: new Date().toISOString(),
+      now,
       stale_or_failing: sources.filter((s) => !s.ok || s.stale).map((s) => s.source),
       sources,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message ?? "status query failed" });
+    if (wantsHtml) {
+      res.status(500).type("html").send(`<!doctype html><meta charset=utf-8><p>500 — ${err?.message ?? "status query failed"}</p>`);
+    } else {
+      res.status(500).json({ error: err?.message ?? "status query failed" });
+    }
   }
 });
 
