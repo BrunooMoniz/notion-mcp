@@ -1,6 +1,6 @@
 // src/rag/types.ts
 
-export type SourceType = "notion" | "granola" | "calendar";
+export type SourceType = "notion" | "granola" | "calendar" | "web";
 export type Workspace = "personal" | "globalcripto" | "nora";
 
 export interface Chunk {
@@ -58,4 +58,25 @@ export interface IndexableDocument {
   text: string;                // full document text — chunker splits it
   metadata: Record<string, unknown>;
   source_updated: Date;
+}
+
+// --- F2.2: pluggable connector framework ------------------------------------
+// A `Source` is a self-contained connector that yields IndexableDocuments. The
+// generic pass runner (src/rag/sources/runner.ts) drives any Source through the
+// same chunk→embed→delete→upsert→sync-state→record-run lifecycle the three
+// built-in passes already use — no per-source plumbing in the indexer.
+
+export interface SourcePassOptions {
+  fullReindex?: boolean;
+  modifiedSince?: Date;
+}
+
+export interface Source {
+  /** stable key for sync_state + status_runs, e.g. "web" */
+  readonly name: string;
+  /** bare source_type written to brain_chunks */
+  readonly sourceType: SourceType;
+  /** is this source configured/enabled in the current env? */
+  isConfigured(): boolean;
+  listDocuments(opts: SourcePassOptions): AsyncIterable<IndexableDocument>;
 }

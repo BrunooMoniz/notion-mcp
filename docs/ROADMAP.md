@@ -43,13 +43,13 @@ pronto para abrir como OSS e depois ganhar uma camada freemium hospedada.
 - **F1.4** Skills no repo (`skills/`) + atalhos `/prep-reuniao`, `/follow-up`, `/decisao`, `/status-deal`.
 - **F1.5** Fixes: recorrência iCal (próxima ocorrência), dedup de quase-duplicados no `brain_search`.
 
-## Fase 2 — Escala, diferenciação & resiliência (dias 6–8)
+## Fase 2 — Escala, diferenciação & resiliência (dias 6–8) ✅ COMPLETA
 
-- **F2.1** Docker compose (app + postgres+pgvector) + migrate runner → `docker compose up` roda.
-- **F2.2** Framework de conectores (abstração `Source`) + 1 nova fonte (web capture ou Slack).
-- **F2.3** (Opcional, se eval/uso justificar) fatos temporais leves (`brain_facts`) no Postgres.
-- **F2.4** Resiliência: runbook SPOF, rotação de segredos, restore de backup testado.
-- **F2.5** Mini-dashboard `/status` (HTML simples).
+- **F2.1** ✅ Docker compose (app + postgres+pgvector) + migrate runner → `docker compose up` roda.
+- **F2.2** ✅ Framework de conectores (abstração `Source` + `runSourcePass`, DI-testável) + 1ª fonte nova: **web capture** (`brain_index_web` on-demand + feed periódico via `WEB_SOURCES`, zero dep nova). `indexDocument` extraído para um caminho único compartilhado.
+- **F2.3** ✅ Fatos temporais leves (`brain_facts`, S-P-O + janela de validade) no Postgres — **env-gated OFF** (`FACTS_ENABLED`); prod inalterado até ligar.
+- **F2.4** ✅ Resiliência: runbook SPOF, rotação de segredos, restore de backup testado.
+- **F2.5** ✅ Mini-dashboard `/status` (HTML, content-negotiation, `?token=`, auto-refresh 30s).
 
 ## Fase 3 — Freemium / onboarding simplificado (FUTURO — spec próprio)
 

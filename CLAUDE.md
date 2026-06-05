@@ -54,6 +54,21 @@ Brain MCP tools (registered in `index.ts`):
   `rerank` (default true), `source_type` / `exclude_source_type`, `pessoa`,
   `date_from` / `date_to`, `workspace`.
 - **`brain_index_url`** — on-demand indexing of a Notion URL/ID into the brain.
+- **`brain_index_web`** — on-demand indexing of an arbitrary web page/article by
+  URL (`source_type="web"`). Zero-dep: Node global `fetch` + hand-rolled
+  HTML→text (`src/rag/sources/web-source.ts`), replace-on-write.
+
+**Connector framework (F2.2)** — sources implement the `Source` contract
+(`src/rag/types.ts`) and run through the generic, dependency-injected
+`runSourcePass()` (`src/rag/sources/runner.ts`); the shared doc→chunks transform
+lives in `src/rag/index-document.ts`. The three built-in passes (notion/granola/
+calendar) keep their bespoke logic; new feeds plug in via `Source`. The web feed
+is periodic via `WEB_SOURCES` (JSON `[{url,workspace,label?}]`; unset = no-op).
+
+**Temporal facts (F2.3, OFF by default)** — `brain_facts` (subject-predicate-
+object + `valid_from`/`valid_to`) in plain Postgres (no graph DB). The classifier
+extracts facts (Haiku) ONLY when `FACTS_ENABLED=true`; unset = zero new behavior.
+Helpers in `src/rag/facts.ts` (pure) + `facts-storage.ts` + `facts-extractor.ts`.
 
 **Workspace scoping** — brain reads are workspace-scoped via
 `getAllowedWorkspaces()` (`src/getAllowedWorkspaces.ts`): a scoped OAuth token

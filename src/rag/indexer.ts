@@ -1,15 +1,15 @@
 // src/rag/indexer.ts
-import { fetchWorkspaceDocuments, chunkId } from "./notion-source.js";
+import { fetchWorkspaceDocuments } from "./notion-source.js";
 import { fetchGranolaDocuments } from "./granola-source.js";
 import { fetchCalendarDocuments } from "./calendar-source.js";
 import { fetchIcsCalendarDocuments, hasIcsCalendars } from "./calendar-ics-source.js";
 import { hasCreds as hasGoogleCreds } from "../google/oauth.js";
-import { chunkText } from "./chunker.js";
-import { buildContextHeader } from "./context-header.js";
-import { batchEmbed } from "./embeddings.js";
+import { indexDocument } from "./index-document.js";
 import { upsertChunks, deleteBySource, pruneOrphans, getSyncState, setSyncState, recordRun } from "./storage.js";
 import { nextGranolaCursor } from "./granola-cursor.js";
-import type { ChunkWithEmbedding, IndexableDocument, Workspace } from "./types.js";
+import { runSourcePass } from "./sources/runner.js";
+import { webSource } from "./sources/web-source.js";
+import type { ChunkWithEmbedding, Workspace } from "./types.js";
 
 // F.2.3: re-export the pure cursor helper (extracted to ./granola-cursor.js so
 // it is unit-testable without dragging in the Notion client at import time).
@@ -22,6 +22,7 @@ interface IndexerStats {
   workspaces: Record<string, { documents: number; chunks: number }>;
   granola: Record<string, { documents: number; chunks: number }>;
   calendar?: { documents: number; chunks: number };
+  web?: { documents: number; chunks: number };
   startedAt: Date;
   endedAt: Date;
 }
@@ -242,33 +243,23 @@ export async function runDeltaSync(opts: {
     console.log("[indexer] calendar skipped — set GOOGLE_CAL_ICS or connect Google (/google/connect)");
   }
 
+  // ---- Web pass (F2.2) ----
+  // Pluggable Source connector. No-op unless WEB_SOURCES is set (prod default),
+  // so this is purely additive: configured envs get a periodic web feed, others
+  // skip it. On-demand web capture goes through the brain_index_web MCP tool.
+  if (webSource.isConfigured()) {
+    try {
+      const web = await runSourcePass(webSource, { fullReindex: opts.fullReindex });
+      stats.web = web;
+      stats.documents += web.documents;
+      stats.chunks += web.chunks;
+      stats.apiCalls += Math.ceil(web.chunks / 128);
+      console.log(`[indexer] web documents=${web.documents} chunks=${web.chunks}`);
+    } catch (err: any) {
+      console.error(`[indexer] web FAILED:`, err.message ?? err);
+    }
+  }
+
   stats.endedAt = new Date();
   return stats;
-}
-
-async function indexDocument(doc: IndexableDocument): Promise<ChunkWithEmbedding[]> {
-  const rawChunks = chunkText(doc.text);
-  if (rawChunks.length === 0) return [];
-
-  // Contextual retrieval: prepend a deterministic provenance header to each
-  // chunk so the SAME header+chunk string is both embedded and stored.
-  const header = buildContextHeader(doc);
-  const texts = header
-    ? rawChunks.map((c) => `${header}\n\n${c}`)
-    : rawChunks;
-
-  const embeddings = await batchEmbed(texts);
-  return texts.map((text, idx) => ({
-    id: chunkId(doc.source_id, idx),
-    source_type: doc.source_type,
-    source_id: doc.source_id,
-    workspace: doc.workspace,
-    db_name: doc.db_name,
-    parent_url: doc.parent_url,
-    chunk_index: idx,
-    text,
-    embedding: embeddings[idx],
-    metadata: doc.metadata,
-    source_updated: doc.source_updated,
-  }));
 }
