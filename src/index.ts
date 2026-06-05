@@ -13,7 +13,7 @@ import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
-import { summarizeStatus, renderStatusHtml } from "./rag/status.js";
+import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
 
 const BASE_URL = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
@@ -374,7 +374,7 @@ app.get("/status", async (req, res) => {
     });
   } catch (err: any) {
     if (wantsHtml) {
-      res.status(500).type("html").send(`<!doctype html><meta charset=utf-8><p>500 — ${err?.message ?? "status query failed"}</p>`);
+      res.status(500).type("html").send(`<!doctype html><meta charset=utf-8><p>500 — ${escapeHtml(err?.message ?? "status query failed")}</p>`);
     } else {
       res.status(500).json({ error: err?.message ?? "status query failed" });
     }

@@ -99,6 +99,45 @@ test("normalizeFact clamps confidence to [0,1]", () => {
   assert.equal(normalizeFact({ subject: "a", predicate: "b", object: "c" }, CTX)!.confidence, null);
 });
 
+test("normalizeFact treats empty/whitespace confidence as null, not 0 (C5)", () => {
+  // Number("") === 0 and Number("   ") === 0 — must NOT silently become 0.
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", confidence: "" }, CTX)!.confidence,
+    null,
+  );
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", confidence: "   " }, CTX)!.confidence,
+    null,
+  );
+  // A real numeric string still parses.
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", confidence: "0.5" }, CTX)!.confidence,
+    0.5,
+  );
+  // 0 as an actual number is still 0 (not null).
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", confidence: 0 }, CTX)!.confidence,
+    0,
+  );
+});
+
+test("normalizeFact rejects impossible ISO-shaped dates (C6)", () => {
+  // Regex-shaped but not real dates → null.
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", valid_from: "2026-13-45" }, CTX)!.valid_from,
+    null,
+  );
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", valid_from: "2026-02-30" }, CTX)!.valid_from,
+    null,
+  );
+  // Real date is kept.
+  assert.equal(
+    normalizeFact({ subject: "a", predicate: "b", object: "c", valid_from: "2026-02-28" }, CTX)!.valid_from,
+    "2026-02-28",
+  );
+});
+
 test("normalizeFact rejects non-ISO dates (sets null), keeps valid ones", () => {
   const ok = normalizeFact(
     { subject: "a", predicate: "b", object: "c", valid_from: "2026-01-15", valid_to: "2026-06-01" },
