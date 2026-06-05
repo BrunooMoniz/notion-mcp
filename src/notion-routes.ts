@@ -14,6 +14,24 @@ import {
   onboardPat,
 } from "./notion-oauth.js";
 import { escapeHtml } from "./rag/status.js";
+import { indexAccount } from "./rag/index-account.js";
+
+// Kick off the first index for a freshly-onboarded account without blocking the
+// HTTP response. Best-effort: failures are logged, never surfaced to the user.
+// Dedupe: skip if an index for this account is already running (avoids double
+// embed cost on repeat/concurrent onboards).
+const indexInFlight = new Set<string>();
+function kickoffIndex(accountId: string): void {
+  if (indexInFlight.has(accountId)) {
+    console.log(`[notion-onboard] index already in flight for ${accountId}, skipping`);
+    return;
+  }
+  indexInFlight.add(accountId);
+  void indexAccount(accountId)
+    .then((r) => console.log(`[notion-onboard] indexed ${accountId}: ${r.documents} docs / ${r.chunks} chunks`))
+    .catch((e) => console.error(`[notion-onboard] index ${accountId} failed: ${e?.message ?? e}`))
+    .finally(() => indexInFlight.delete(accountId));
+}
 
 const STATE_TTL_MS = 10 * 60_000; // 10 min to complete the consent
 
@@ -69,6 +87,7 @@ export function createNotionOnboardRouter(): express.Router {
       const identity = await validatePat(pat);
       const { accountId } = await onboardPat(pat, identity);
       console.log(`[notion-onboard] PAT account=${accountId} ("${identity.name}") connected`);
+      kickoffIndex(accountId);
       res.type("html").send(
         page(
           "Conectado",
@@ -118,6 +137,7 @@ export function createNotionOnboardRouter(): express.Router {
       const { accountId } = await onboardAccount(tok);
       const wsName = tok.workspace_name ?? tok.workspace_id;
       console.log(`[notion-onboard] account=${accountId} workspace="${wsName}" connected`);
+      kickoffIndex(accountId);
       res.type("html").send(
         page(
           "Conectado",
