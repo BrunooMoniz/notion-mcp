@@ -1,0 +1,74 @@
+# Self-hosting stack for notion-mcp.
+#
+#   cp .env.example .env   # fill in tokens/keys
+#   docker compose up -d   # db -> migrate -> server + indexer + classifier
+#
+# This is an ADDITIVE, OSS-friendly alternative to the PM2 flow
+# (ecosystem.config.cjs). The production VPS keeps using PM2; this lets a fresh
+# install get Postgres + pgvector + all app processes with one command.
+#
+# The app containers ALWAYS talk to the compose `db` service: the POSTGRES_URL
+# below overrides whatever is in .env so nothing points at a host Postgres.
+
+# Shared config for the built app services (server / indexer / classifier).
+# `command` and `depends_on` are set per service.
+x-app: &app
+  build: .
+  image: notion-mcp:latest
+  env_file: .env
+  environment:
+    # Override POSTGRES_URL to point at the compose `db` service (NOT host).
+    POSTGRES_URL: postgresql://brain:${POSTGRES_PASSWORD:-brain}@db:5432/brain
+  restart: unless-stopped
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: brain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brain}
+      POSTGRES_DB: brain
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brain -d brain"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Runs the idempotent migration runner once, then exits. Everything that
+  # writes to the DB waits for this to complete successfully.
+  migrate:
+    <<: *app
+    command: npm run migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    <<: *app
+    command: node dist/index.js
+    ports:
+      - "3456:3456"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  indexer:
+    <<: *app
+    command: node dist/index-indexer.js
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  classifier:
+    <<: *app
+    command: node dist/index-classifier.js
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:
