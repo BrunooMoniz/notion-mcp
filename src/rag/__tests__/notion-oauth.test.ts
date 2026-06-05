@@ -151,3 +151,75 @@ test("onboardAccount stores only the access token when no refresh token", async 
   assert.equal(secretInserts.length, 1);
   assert.match(String(secretInserts[0].params[1]), /^notion_access:/);
 });
+
+// --- PAT path (advanced onboarding) -----------------------------------------
+
+import { validatePat, onboardPat } from "../../notion-oauth.js";
+
+test("validatePat returns identity from /v1/users/me (owner user id + workspace name)", async () => {
+  let captured: any = null;
+  const fetchImpl = (async (url: string, init: any) => {
+    captured = { url, init };
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          object: "user",
+          id: "bot-1",
+          bot: { workspace_name: "Acme HQ", owner: { type: "user", user: { id: "user-9" } } },
+        }),
+    };
+  }) as unknown as typeof fetch;
+  const id = await validatePat("ntn_pat_token", { fetchImpl });
+  assert.deepEqual(id, { id: "user-9", name: "Acme HQ" });
+  assert.equal(captured.url, "https://api.notion.com/v1/users/me");
+  assert.equal(captured.init.headers.Authorization, "Bearer ntn_pat_token");
+  assert.equal(captured.init.headers["Notion-Version"], "2025-09-03");
+});
+
+test("validatePat throws on 401", async () => {
+  const fetchImpl = (async () => ({
+    ok: false,
+    status: 401,
+    text: async () => JSON.stringify({ code: "unauthorized", message: "API token is invalid." }),
+  })) as unknown as typeof fetch;
+  await assert.rejects(() => validatePat("bad", { fetchImpl }), /token inválido.*unauthorized/);
+});
+
+test("validatePat falls back to top-level id when no owner.user.id", async () => {
+  const fetchImpl = (async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ id: "bot-xyz", name: "My Bot" }),
+  })) as unknown as typeof fetch;
+  const id = await validatePat("t", { fetchImpl });
+  assert.equal(id.id, "bot-xyz");
+});
+
+test("onboardPat creates a notion-pat account and stores the PAT encrypted", async () => {
+  const queries: { sql: string; params: unknown[] }[] = [];
+  __setPoolForTest({
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 1 };
+    },
+  } as never);
+  const prev = process.env.SECRETS_KEY;
+  process.env.SECRETS_KEY = HEXKEY;
+  let out;
+  try {
+    out = await onboardPat("ntn_secret_pat", { id: "user-9", name: "Acme" });
+  } finally {
+    if (prev === undefined) delete process.env.SECRETS_KEY;
+    else process.env.SECRETS_KEY = prev;
+  }
+  assert.deepEqual(out, { accountId: "notion-pat:user-9", workspace: "user-9" });
+  const sqls = queries.map((q) => q.sql).join("\n");
+  assert.match(sqls, /INSERT INTO account .*'notion-pat'/is);
+  const secret = queries.find((q) => /INSERT INTO account_secrets/i.test(q.sql))!;
+  assert.equal(secret.params[0], "notion-pat:user-9");
+  assert.match(String(secret.params[1]), /^notion_pat:/);
+  assert.match(String(secret.params[2]), /^v1:/);
+  assert.doesNotMatch(String(secret.params[2]), /ntn_secret_pat/);
+});
