@@ -10,6 +10,8 @@ import {
   searchKeyword,
   pruneOrphans,
   buildFilterClauses,
+  getNeighbors,
+  getStatus,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -173,9 +175,56 @@ test("pruneOrphans scopes DELETE by source_type AND workspace", async () => {
   const deleted = await pruneOrphans("granola", "personal", ["s1", "s2"]);
   assert.equal(deleted, 2);
   assert.match(sql, /source_type\s*=\s*\$1/i);
-  assert.match(sql, /workspace\s*=\s*\$2/i);
-  assert.match(sql, /source_id\s*<>\s*ALL\(\$3\)/i);
-  assert.deepEqual(params, ["granola", "personal", ["s1", "s2"]]);
+  // F3.0: account_id is $2 (defaults to 'bruno'); workspace shifts to $3, liveIds $4.
+  assert.match(sql, /account_id\s*=\s*\$2/i);
+  assert.match(sql, /workspace\s*=\s*\$3/i);
+  assert.match(sql, /source_id\s*<>\s*ALL\(\$4\)/i);
+  assert.deepEqual(params, ["granola", "bruno", "personal", ["s1", "s2"]]);
+});
+
+test("pruneOrphans account-scopes by an explicit accountId when given", async () => {
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (_q: string, p: unknown[]) => {
+      params = p;
+      return { rowCount: 0, rows: [] };
+    },
+  } as never);
+  await pruneOrphans("granola", "personal", ["s1"], "acme");
+  assert.deepEqual(params, ["granola", "acme", "personal", ["s1"]]);
+  __setPoolForTest(null);
+});
+
+// --- F3.0 account_id isolation guard (buildFilterClauses) --------------------
+
+test("buildFilterClauses: _accountId emits account_id = $n (tenant guard)", () => {
+  const { sql, params } = buildFilterClauses({ _accountId: "bruno" });
+  assert.match(sql, /account_id\s*=\s*\$1/i);
+  assert.deepEqual(params, ["bruno"]);
+});
+
+test("buildFilterClauses: _accountId AND _allowedWorkspaces both emitted (defense in depth)", () => {
+  const { sql, params } = buildFilterClauses({
+    _accountId: "bruno",
+    _allowedWorkspaces: ["personal"],
+  });
+  assert.match(sql, /account_id\s*=\s*\$1/i);
+  assert.match(sql, /workspace\s*=\s*ANY\(\$2\)/i);
+  assert.deepEqual(params, ["bruno", ["personal"]]);
+});
+
+test("buildFilterClauses: no _accountId -> no account clause (unchanged for cron/eval)", () => {
+  const { sql } = buildFilterClauses({ workspace: "personal" });
+  assert.doesNotMatch(sql, /account_id/i);
+});
+
+test("buildFilterClauses: a second account's filter cannot select the first's rows", () => {
+  const a = buildFilterClauses({ _accountId: "bruno" });
+  const b = buildFilterClauses({ _accountId: "acme" });
+  assert.deepEqual(a.params, ["bruno"]);
+  assert.deepEqual(b.params, ["acme"]);
+  // Same clause shape, different bound param -> SQL can never cross accounts.
+  assert.equal(a.sql, b.sql);
 });
 
 test("pruneOrphans throws if granola/calendar called without workspace", async () => {
@@ -266,4 +315,92 @@ test("_allowedWorkspaces coexists with caller workspace filter (both emitted)", 
   assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i); // hard scope
   assert.ok(params.includes("personal"));
   assert.ok(params.some((p) => Array.isArray(p) && p[0] === "personal"));
+});
+
+// --- F3.0 getNeighbors account/workspace scoping (fix M1) -------------------
+
+test("getNeighbors scopes by account_id and workspace (no cross-tenant neighbor leak)", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getNeighbors("src-1", 5, "bruno", "personal");
+  assert.match(sql, /source_id=\$1/i);
+  assert.match(sql, /chunk_index IN \(\$2, \$3\)/i);
+  assert.match(sql, /account_id=\$4/i);
+  assert.match(sql, /workspace IS NOT DISTINCT FROM \$5/i);
+  assert.deepEqual(params, ["src-1", 4, 6, "bruno", "personal"]);
+  __setPoolForTest(null);
+});
+
+test("getNeighbors defaults accountId to 'bruno' and omits workspace clause when not given", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getNeighbors("src-9", 2);
+  assert.match(sql, /account_id=\$4/i);
+  // 'workspace' appears in the SELECT column list; assert no WHERE workspace clause.
+  assert.doesNotMatch(sql, /IS NOT DISTINCT FROM/i);
+  assert.deepEqual(params, ["src-9", 1, 3, "bruno"]);
+  __setPoolForTest(null);
+});
+
+// --- F3.0 metering wiring + getStatus account scope -------------------------
+
+test("upsertChunks meters 'chunks' to usage_log (wiring proof)", async () => {
+  const sqls: string[] = [];
+  const allParams: unknown[][] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sqls.push(q);
+      allParams.push(p);
+      return { rows: [], rowCount: 1 };
+    },
+  } as never);
+  const chunk: ChunkWithEmbedding = {
+    id: "u1",
+    source_type: "web",
+    source_id: "s",
+    workspace: "personal",
+    db_name: null,
+    parent_url: null,
+    chunk_index: 0,
+    text: "t",
+    embedding: [0.1, 0.2],
+    metadata: {},
+    source_updated: null,
+  };
+  await upsertChunks([chunk]);
+  const usageIdx = sqls.findIndex((s) => /INSERT INTO usage_log/i.test(s));
+  assert.ok(usageIdx >= 0, "expected a usage_log INSERT from upsertChunks");
+  assert.deepEqual(allParams[usageIdx], ["bruno", "chunks", 1]);
+  __setPoolForTest(null);
+});
+
+test("getStatus scopes status_runs and the sync_state join by account_id", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getStatus();
+  assert.match(sql, /FROM status_runs\s+WHERE account_id = \$1/i);
+  assert.match(sql, /ss\.account_id = \$1/i);
+  assert.deepEqual(params, ["bruno"]);
+  __setPoolForTest(null);
 });

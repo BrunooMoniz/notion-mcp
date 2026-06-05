@@ -34,5 +34,6 @@ export async function indexDocument(doc: IndexableDocument): Promise<ChunkWithEm
     embedding: embeddings[idx],
     metadata: doc.metadata,
     source_updated: doc.source_updated,
+    account_id: doc.account_id, // F3.0: propagate tenant (undefined -> 'bruno' at write)
   }));
 }

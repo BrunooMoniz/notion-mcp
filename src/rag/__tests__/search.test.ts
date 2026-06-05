@@ -241,3 +241,40 @@ test("brainSearch with no context (null allowed) leaves _allowedWorkspaces undef
   await brainSearch("q", { topK: 3 });
   assert.equal(semFilters?._allowedWorkspaces, undefined);
 });
+
+// --- F3.0 tenant guard: brainSearch threads _accountId from context ----------
+
+test("brainSearch threads _accountId='bruno' (default account) into storage filters", async () => {
+  let semFilters: SearchFilters | undefined;
+  __setSearchDepsForTest({
+    getAllowedWorkspaces: () => null,
+    searchSemantic: async (_e, filters, limit: number) => {
+      semFilters = filters;
+      return Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1));
+    },
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  await brainSearch("q", { topK: 3 });
+  assert.equal(semFilters?._accountId, "bruno");
+});
+
+test("brainSearch ignores a caller-supplied _accountId (set server-side only)", async () => {
+  let semFilters: SearchFilters | undefined;
+  __setSearchDepsForTest({
+    getAllowedWorkspaces: () => null,
+    searchSemantic: async (_e, filters, limit: number) => {
+      semFilters = filters;
+      return Array.from({ length: limit }, (_, i) => mkScored(`s${i}`, 1 - i / limit, i + 1));
+    },
+    searchKeyword: async () => [],
+    embedQuery: async () => [0.1],
+    rerankDocuments: async (_q, docs, topN) =>
+      docs.slice(0, topN).map((d) => ({ id: d.id, relevance_score: null })),
+  });
+  // A malicious caller tries to pose as another tenant via filters — must be ignored.
+  await brainSearch("q", { topK: 3, filters: { _accountId: "acme" } as never });
+  assert.equal(semFilters?._accountId, "bruno");
+});

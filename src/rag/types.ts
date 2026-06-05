@@ -14,6 +14,7 @@ export interface Chunk {
   text: string;
   metadata: Record<string, unknown>;
   source_updated: Date | null;
+  account_id?: string;         // F3.0 tenant; defaults to 'bruno' at write time
 }
 
 export interface ChunkWithEmbedding extends Chunk {
@@ -39,6 +40,13 @@ export interface SearchFilters {
    * untrusted input.
    */
   _allowedWorkspaces?: Workspace[];
+  /**
+   * INTERNAL (F3.0) — tenant isolation. brainSearch sets this from the trusted
+   * request context (getAccountId), NEVER from tool input. When present, the SQL
+   * AND-restricts to `account_id = $N` ALONGSIDE the workspace guard (defense in
+   * depth). When undefined, no account restriction (cron/eval/tests).
+   */
+  _accountId?: string;
 }
 
 export type SearchMode = "hybrid" | "semantic" | "keyword";
@@ -58,6 +66,7 @@ export interface IndexableDocument {
   text: string;                // full document text — chunker splits it
   metadata: Record<string, unknown>;
   source_updated: Date;
+  account_id?: string;         // F3.0 tenant; defaults to 'bruno' at write time
 }
 
 // --- F2.2: pluggable connector framework ------------------------------------
