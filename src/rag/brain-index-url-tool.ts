@@ -5,7 +5,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getClient, notionFetch, type Workspace } from "../clients.js";
-import { assertWorkspaceScope } from "../context.js";
+import { assertWorkspaceScope, getAccountId } from "../context.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
@@ -54,6 +54,7 @@ async function indexSinglePage(
 
   const texts = chunkText(text);
   if (texts.length === 0) return result;
+  const accountId = getAccountId(); // F3.0: attribute to the caller's tenant
   const embeddings = await batchEmbed(texts);
   const chunks: ChunkWithEmbedding[] = texts.map((t, idx) => ({
     id: chunkId(page.id, idx),
@@ -67,8 +68,9 @@ async function indexSinglePage(
     embedding: embeddings[idx],
     metadata: extractMetadata(page),
     source_updated: new Date(page.last_edited_time),
+    account_id: accountId,
   }));
-  await deleteBySource("notion", page.id);
+  await deleteBySource("notion", page.id, accountId);
   await upsertChunks(chunks);
   result.chunks = chunks.length;
   return result;

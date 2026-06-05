@@ -332,7 +332,12 @@ export async function brainSearch(
 
   if (opts.includeNeighbors) {
     for (const hit of hits) {
-      hit.neighbors = await getNeighbors(hit.chunk.source_id, hit.chunk.chunk_index);
+      hit.neighbors = await getNeighbors(
+        hit.chunk.source_id,
+        hit.chunk.chunk_index,
+        accountId,
+        hit.chunk.workspace,
+      );
     }
   }
 

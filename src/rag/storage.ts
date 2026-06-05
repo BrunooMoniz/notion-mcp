@@ -414,15 +414,30 @@ export async function searchKeyword(
   return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
 
-export async function getNeighbors(sourceId: string, chunkIndex: number): Promise<Chunk[]> {
+export async function getNeighbors(
+  sourceId: string,
+  chunkIndex: number,
+  accountId = "bruno",
+  workspace?: string | null,
+): Promise<Chunk[]> {
   const p = getPool();
+  // F3.0 (fix M1): account-scope neighbors — and workspace-scope them too — so
+  // the neighbor expansion can never surface another tenant's (or another
+  // workspace's) adjacent chunk that happens to share a source_id. The parent
+  // hit was already account+workspace scoped by the search; neighbors match it.
+  const params: unknown[] = [sourceId, chunkIndex - 1, chunkIndex + 1, accountId];
+  let where = "source_id=$1 AND chunk_index IN ($2, $3) AND account_id=$4";
+  if (workspace !== undefined) {
+    params.push(workspace);
+    where += ` AND workspace IS NOT DISTINCT FROM $${params.length}`;
+  }
   const { rows } = await p.query<QueryRow>(
     `SELECT id, source_type, source_id, workspace, db_name, parent_url, chunk_index,
             text, metadata, source_updated
      FROM brain_chunks
-     WHERE source_id=$1 AND chunk_index IN ($2, $3)
+     WHERE ${where}
      ORDER BY chunk_index`,
-    [sourceId, chunkIndex - 1, chunkIndex + 1],
+    params,
   );
   return rows.map(rowToChunk);
 }

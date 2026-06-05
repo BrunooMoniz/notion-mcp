@@ -10,6 +10,7 @@ import {
   searchKeyword,
   pruneOrphans,
   buildFilterClauses,
+  getNeighbors,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -313,4 +314,43 @@ test("_allowedWorkspaces coexists with caller workspace filter (both emitted)", 
   assert.match(sql, /workspace\s*=\s*ANY\(\$\d\)/i); // hard scope
   assert.ok(params.includes("personal"));
   assert.ok(params.some((p) => Array.isArray(p) && p[0] === "personal"));
+});
+
+// --- F3.0 getNeighbors account/workspace scoping (fix M1) -------------------
+
+test("getNeighbors scopes by account_id and workspace (no cross-tenant neighbor leak)", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getNeighbors("src-1", 5, "bruno", "personal");
+  assert.match(sql, /source_id=\$1/i);
+  assert.match(sql, /chunk_index IN \(\$2, \$3\)/i);
+  assert.match(sql, /account_id=\$4/i);
+  assert.match(sql, /workspace IS NOT DISTINCT FROM \$5/i);
+  assert.deepEqual(params, ["src-1", 4, 6, "bruno", "personal"]);
+  __setPoolForTest(null);
+});
+
+test("getNeighbors defaults accountId to 'bruno' and omits workspace clause when not given", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getNeighbors("src-9", 2);
+  assert.match(sql, /account_id=\$4/i);
+  // 'workspace' appears in the SELECT column list; assert no WHERE workspace clause.
+  assert.doesNotMatch(sql, /IS NOT DISTINCT FROM/i);
+  assert.deepEqual(params, ["src-9", 1, 3, "bruno"]);
+  __setPoolForTest(null);
 });
