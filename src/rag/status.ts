@@ -91,6 +91,10 @@ export function escapeHtml(s: string): string {
 
 /** Humanize an age in seconds to a compact "2h 3m" / "45s" string. */
 export function humanizeAge(seconds: number): string {
+  // Defensive: the render path clamps age to a non-negative int, but this is
+  // exported — a raw/negative/NaN/fractional input must not produce "NaNd"/"-5s".
+  if (!Number.isFinite(seconds) || seconds < 0) return "0s";
+  seconds = Math.floor(seconds);
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
   if (m < 60) return `${m}m`;

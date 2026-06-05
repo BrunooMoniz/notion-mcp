@@ -46,16 +46,45 @@ function nonEmptyString(value: unknown): string | null {
   return trimmed.length ? trimmed : null;
 }
 
-/** Keep an ISO `YYYY-MM-DD` string, else null. */
+/**
+ * Keep a REAL ISO `YYYY-MM-DD` date, else null. The regex only checks the shape;
+ * impossible dates like `2026-13-45` or `2026-02-30` pass the regex but would
+ * make Postgres throw (silently dropping the whole batch), so we also validate
+ * the components round-trip through a real Date (C6).
+ */
 function isoDateOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return ISO_DATE_RE.test(trimmed) ? trimmed : null;
+  if (!ISO_DATE_RE.test(trimmed)) return null;
+  const [y, m, d] = trimmed.split("-").map((n) => parseInt(n, 10));
+  // Construct in UTC and require every component to round-trip — this rejects
+  // overflow normalization (e.g. month 13 -> next year, day 30 of Feb -> March).
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return trimmed;
 }
 
-/** Clamp a numeric confidence to [0,1]; non-numbers → null. */
+/**
+ * Clamp a numeric confidence to [0,1]; non-numbers → null. An empty or
+ * whitespace-only string is "unknown" → null, NOT 0 — `Number("")` and
+ * `Number("   ")` are both 0, which would silently fabricate a confidence (C5).
+ */
 function clampConfidence(value: unknown): number | null {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  let n: number;
+  if (typeof value === "number") {
+    n = value;
+  } else if (typeof value === "string") {
+    if (value.trim() === "") return null; // empty/whitespace = unknown, not 0
+    n = Number(value);
+  } else {
+    n = NaN;
+  }
   if (!Number.isFinite(n)) return null;
   if (n < 0) return 0;
   if (n > 1) return 1;

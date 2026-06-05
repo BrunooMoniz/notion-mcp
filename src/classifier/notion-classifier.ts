@@ -96,12 +96,17 @@ export async function runClassifier(opts: { sinceDays?: number; limit?: number }
         if (process.env.FACTS_ENABLED === "true") {
           try {
             const { extractFactsFromText } = await import("../rag/facts-extractor.js");
-            const { insertFacts } = await import("../rag/facts-storage.js");
+            const { insertFacts, deleteFactsBySource } = await import("../rag/facts-storage.js");
             const facts = await extractFactsFromText(`${page.title}\n\n${page.body}`, {
               workspace: page.workspace,
               source_id: page.page_id,
               source_type: page.db === "Reunioes" ? "reuniao" : "insight",
             });
+            // Replace-on-write (S1): drop this page's prior facts before
+            // re-inserting so re-runs / edited pages don't accumulate duplicate
+            // triples (mirrors how chunks use deleteBySource). Runs even at 0
+            // facts to clear stale ones.
+            await deleteFactsBySource(page.page_id);
             if (facts.length) {
               const inserted = await insertFacts(facts);
               console.log(`[classifier:facts] ${page.page_id.slice(0, 8)}: +${inserted} facts`);
