@@ -41,6 +41,36 @@ At minimum you need one Notion token (`NOTION_<WORKSPACE>_TOKEN`) and a
 
 ---
 
+## Run with Docker
+
+Prefer not to install Node, Postgres, and pgvector by hand? The included
+`docker compose` stack brings the whole thing up from zero — Postgres + pgvector,
+the MCP server, the brain indexer, and the classifier — and runs the DB
+migrations automatically.
+
+```bash
+cp .env.example .env        # then fill in tokens/keys (see Configuration below)
+docker compose up -d        # builds the image, starts db -> migrate -> app
+```
+
+The server is then on **http://localhost:3456** (`GET /health` to check).
+
+- **Postgres is provided for you.** The compose stack runs a `pgvector/pgvector:pg16`
+  database; you don't need to install or manage Postgres. Compose sets
+  `POSTGRES_URL` for the app containers automatically (pointing at the bundled
+  `db` service), so it overrides whatever `POSTGRES_URL` is in your `.env`.
+  Set `POSTGRES_PASSWORD` in `.env` to change the default DB password (`brain`).
+- **Migrations run on startup.** A one-shot `migrate` service applies the schema
+  (idempotently) and the app services wait for it before booting — so a fresh
+  install is fully provisioned by `docker compose up`.
+- You still fill in the Notion tokens, `BEARER_TOKEN`, `VOYAGE_API_KEY`, etc. in
+  `.env` as described under [Configuration](#configuration).
+
+> Production on the VPS uses PM2 (see [Production (PM2)](#production-pm2)); Docker
+> is the alternative for fresh / self-hosted installs.
+
+---
+
 ## Connect to Claude
 
 ### Claude Code (bearer token)
