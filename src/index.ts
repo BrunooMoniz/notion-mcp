@@ -12,6 +12,7 @@ import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
+import { resolveBearer } from "./account-bearer.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
@@ -188,7 +189,7 @@ app.use(createGoogleRouter());
 // Additive: no-op (503) unless NOTION_OAUTH_CLIENT_ID/SECRET are set.
 app.use(createNotionOnboardRouter());
 
-app.use("/mcp", (req, res, next) => {
+app.use("/mcp", async (req, res, next) => {
   const auth = req.headers["authorization"];
 
   if (!auth || !auth.startsWith("Bearer ")) {
@@ -217,6 +218,21 @@ app.use("/mcp", (req, res, next) => {
       authType: "oauth",
       scopes: info.scopes,
       clientId: info.client_id,
+      ip,
+    };
+    requestContext.run(ctx, () => next());
+    return;
+  }
+
+  // F3.2c — per-account bearer (onboarded users querying their OWN brain). The
+  // token maps to an account; we pin ctx.accountId so brain_search is scoped to
+  // that account (account_id guard) and its workspaces (workspace guard).
+  const acct = await resolveBearer(token);
+  if (acct) {
+    const ctx: RequestContext = {
+      authType: "bearer",
+      scopes: acct.workspaces as unknown as RequestContext["scopes"],
+      accountId: acct.accountId,
       ip,
     };
     requestContext.run(ctx, () => next());

@@ -15,6 +15,25 @@ import {
 } from "./notion-oauth.js";
 import { escapeHtml } from "./rag/status.js";
 import { indexAccount } from "./rag/index-account.js";
+import { issueBearer } from "./account-bearer.js";
+
+/** Render the post-connect page: issues a per-account MCP bearer (shown once) and
+ *  the Claude Code setup command so the user can query their own brain. */
+async function connectedPageHtml(displayName: string, accountId: string, baseUrl: string): Promise<string> {
+  const token = await issueBearer(accountId, "onboarding");
+  const mcpUrl = `${baseUrl}/mcp`;
+  const cmd = `claude mcp add --transport http segundo-cerebro ${mcpUrl} --header "Authorization: Bearer ${token}"`;
+  return page(
+    "Conectado",
+    `<h1 class="ok">✓ Conectado</h1>
+     <p><strong>${escapeHtml(displayName)}</strong> conectado ao Segundo Cérebro. A indexação do seu Notion já começou (pode levar alguns minutos).</p>
+     <h2 style="font-size:16px;margin-top:24px">Pergunte ao seu cérebro pelo Claude Code</h2>
+     <p>Rode no terminal:</p>
+     <pre style="background:#8881;padding:12px;border-radius:8px;overflow:auto;font-size:13px;white-space:pre-wrap;word-break:break-all">${escapeHtml(cmd)}</pre>
+     <p>Depois é só perguntar — ex.: <em>"busca no meu cérebro: ..."</em> (ferramenta <code>brain_search</code>).</p>
+     <p style="color:#d83a3a;font-size:13px;margin-top:16px">⚠️ Guarde este token agora — ele aparece <strong>só uma vez</strong> e dá acesso de leitura ao seu cérebro.</p>`,
+  );
+}
 
 // Kick off the first index for a freshly-onboarded account without blocking the
 // HTTP response. Best-effort: failures are logged, never surfaced to the user.
@@ -88,12 +107,7 @@ export function createNotionOnboardRouter(): express.Router {
       const { accountId } = await onboardPat(pat, identity);
       console.log(`[notion-onboard] PAT account=${accountId} ("${identity.name}") connected`);
       kickoffIndex(accountId);
-      res.type("html").send(
-        page(
-          "Conectado",
-          `<h1 class="ok">✓ Conectado via token</h1><p><strong>${escapeHtml(identity.name)}</strong> conectado ao Segundo Cérebro. A indexação começa em breve.</p>`,
-        ),
-      );
+      res.type("html").send(await connectedPageHtml(identity.name, accountId, BASE_URL));
     } catch (e: any) {
       console.error(`[notion-onboard] PAT failed: ${e?.message ?? e}`);
       res.status(400).type("html").send(page("Falha", `<h1 class="bad">Token inválido</h1><p>${escapeHtml(e?.message ?? "erro")}</p>`));
@@ -138,12 +152,7 @@ export function createNotionOnboardRouter(): express.Router {
       const wsName = tok.workspace_name ?? tok.workspace_id;
       console.log(`[notion-onboard] account=${accountId} workspace="${wsName}" connected`);
       kickoffIndex(accountId);
-      res.type("html").send(
-        page(
-          "Conectado",
-          `<h1 class="ok">✓ Notion conectado</h1><p>Workspace <strong>${escapeHtml(String(wsName))}</strong> conectado ao Segundo Cérebro. A indexação começa em breve.</p>`,
-        ),
-      );
+      res.type("html").send(await connectedPageHtml(String(wsName), accountId, BASE_URL));
     } catch (e: any) {
       console.error(`[notion-onboard] FAILED: ${e?.message ?? e}`);
       res.status(500).type("html").send(page("Falha", `<h1 class="bad">Falha ao conectar</h1><p>${escapeHtml(e?.message ?? "erro desconhecido")}</p>`));
