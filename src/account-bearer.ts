@@ -16,10 +16,22 @@ export function hashBearer(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// token_hash -> resolved account (cache; per-account bearers are long-lived)
-const cache = new Map<string, { accountId: string; workspaces: string[] }>();
+// token_hash -> resolved account (short-TTL cache so a revoked/deleted token
+// stops working within TTL_MS without a process restart — see resolveBearer/revoke).
+const TTL_MS = 60_000;
+const cache = new Map<string, { accountId: string; workspaces: string[]; exp: number }>();
 export function __clearBearerCache(): void {
   cache.clear();
+}
+
+/** Revoke ALL bearers for an account (delete rows + drop cache). Returns the
+ *  number of tokens revoked. A revoked token stops resolving immediately (cache
+ *  cleared) and is gone from the DB. */
+export async function revokeBearersForAccount(accountId: string): Promise<number> {
+  const p = getPool();
+  const res = await p.query(`DELETE FROM account_api_tokens WHERE account_id=$1`, [accountId]);
+  cache.clear(); // simplest correct invalidation (cache is tiny)
+  return res.rowCount ?? 0;
 }
 
 /** Issue a fresh per-account bearer; store ONLY its hash. Returns the plaintext
@@ -43,7 +55,8 @@ export async function resolveBearer(
   if (!token || !token.startsWith(PREFIX)) return null;
   const hash = hashBearer(token);
   const cached = cache.get(hash);
-  if (cached) return cached;
+  if (cached && cached.exp > Date.now()) return { accountId: cached.accountId, workspaces: cached.workspaces };
+  if (cached) cache.delete(hash); // expired
   const p = getPool();
   const { rows } = await p.query<{ account_id: string }>(
     `SELECT account_id FROM account_api_tokens WHERE token_hash=$1`,
@@ -56,6 +69,6 @@ export async function resolveBearer(
     [accountId],
   );
   const resolved = { accountId, workspaces: ws.rows.map((r) => r.workspace) };
-  cache.set(hash, resolved);
+  cache.set(hash, { ...resolved, exp: Date.now() + TTL_MS });
   return resolved;
 }

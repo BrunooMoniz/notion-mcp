@@ -75,3 +75,21 @@ test("resolveBearer returns null for an unknown account token", async () => {
   __setPoolForTest({ query: async () => ({ rows: [] }) } as never);
   assert.equal(await resolveBearer("acct_unknown"), null);
 });
+
+import { revokeBearersForAccount } from "../../account-bearer.js";
+
+test("revokeBearersForAccount deletes the account's tokens and returns the count", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [], rowCount: 2 };
+    },
+  } as never);
+  const n = await revokeBearersForAccount("notion:ws-1");
+  assert.match(sql, /DELETE FROM account_api_tokens WHERE account_id=\$1/i);
+  assert.deepEqual(params, ["notion:ws-1"]);
+  assert.equal(n, 2);
+});
