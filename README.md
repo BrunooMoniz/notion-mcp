@@ -117,6 +117,7 @@ pulls content from your sources, embeds it, and `brain_search` retrieves it.
 | **Notion** (any workspace) | the indexer crawls shared data sources; `brain_index_url` adds a specific page/DB on demand |
 | **Granola** meeting notes | via the Granola API (summary by default; raw transcript opt-in) |
 | **Calendars** | from each calendar's private **iCal URL** — multiple calendars, even across Google accounts, no Google Cloud |
+| **Web pages / articles** | `brain_index_web` adds any URL on demand; an optional periodic feed via `WEB_SOURCES`. Pluggable via the `Source` connector framework — no new deps |
 
 **How retrieval works:** vector similarity (Voyage `voyage-3-large` embeddings) +
 accent-insensitive Portuguese full-text, fused with Reciprocal Rank Fusion over an
@@ -234,6 +235,7 @@ every write, and `confirm: true` guard rails on destructive tools.
 |------|-------------|
 | `brain_search` | Hybrid semantic + keyword search, fused via RRF and reranked. Workspace-scoped. Options: `rerank`, `source_type` / `exclude_source_type`, `pessoa`, `date_from` / `date_to`, `workspace`. |
 | `brain_index_url` | On-demand indexing of a Notion URL/ID (pages, data sources, databases). |
+| `brain_index_web` | On-demand indexing of an arbitrary web page/article by URL (`source_type="web"`). |
 
 `brain_search` vs `notion_search`: `notion_search` hits Notion's live `/v1/search`
 (title/keyword, current contents); `brain_search` queries the local semantic index
