@@ -11,6 +11,7 @@ import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
+import { createNotionOnboardRouter } from "./notion-routes.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
@@ -152,6 +153,9 @@ const oauthLimiter = rateLimit({
 
 app.use("/mcp", corsMiddleware, mcpLimiter);
 app.use("/oauth", oauthLimiter);
+// F3.2: throttle the public onboarding endpoints (unauthenticated) — same strict
+// budget as /oauth. Prevents flooding /notion/connect (state-map growth + 302s).
+app.use("/notion", oauthLimiter);
 
 // Parse JSON for all routes, URL-encoded for OAuth consent form
 app.use(express.json());
@@ -179,6 +183,10 @@ app.use(createOAuthRouter(BASE_URL, BEARER_TOKEN));
 
 // Google OAuth + status — for connecting calendar.readonly to the indexer
 app.use(createGoogleRouter());
+
+// F3.2 — Notion public-integration onboarding (/notion/connect, /notion/callback).
+// Additive: no-op (503) unless NOTION_OAUTH_CLIENT_ID/SECRET are set.
+app.use(createNotionOnboardRouter());
 
 app.use("/mcp", (req, res, next) => {
   const auth = req.headers["authorization"];
