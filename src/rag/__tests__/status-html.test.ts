@@ -45,6 +45,19 @@ test("humanizeAge: seconds / minutes / hours / days", () => {
   assert.equal(humanizeAge(25 * 3600), "1d 1h");
 });
 
+test("humanizeAge: boundaries 60/3600/86400 are exact", () => {
+  assert.equal(humanizeAge(60), "1m");
+  assert.equal(humanizeAge(3600), "1h");
+  assert.equal(humanizeAge(86400), "1d");
+});
+
+test("humanizeAge: negative / NaN / fractional are guarded (C4)", () => {
+  assert.equal(humanizeAge(-5), "0s");
+  assert.equal(humanizeAge(NaN), "0s");
+  assert.equal(humanizeAge(Infinity), "0s");
+  assert.equal(humanizeAge(45.9), "45s"); // floored, no fraction leak
+});
+
 // --- renderStatusHtml --------------------------------------------------------
 
 test("renderStatusHtml: healthy sources -> green banner, no problem state", () => {

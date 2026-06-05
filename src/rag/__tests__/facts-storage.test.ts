@@ -6,7 +6,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { __setPoolForTest } from "../storage.js";
-import { insertFacts, queryFacts } from "../facts-storage.js";
+import { insertFacts, queryFacts, deleteFactsBySource } from "../facts-storage.js";
 import type { Fact } from "../facts.js";
 
 afterEach(() => {
@@ -239,4 +239,35 @@ test("queryFacts maps rows back to Fact, including metadata", async () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].object, "Nora");
   assert.deepEqual(out[0].metadata, { src: "x" });
+});
+
+// --- deleteFactsBySource (S1 replace-on-write) ------------------------------
+
+test("deleteFactsBySource no-ops (returns 0) on empty id, issues no query", async () => {
+  let called = false;
+  __setPoolForTest({
+    query: async () => {
+      called = true;
+      return { rows: [], rowCount: 0 };
+    },
+  } as never);
+  const n = await deleteFactsBySource("");
+  assert.equal(n, 0);
+  assert.equal(called, false);
+});
+
+test("deleteFactsBySource emits a parameterized DELETE by source_id", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [], rowCount: 3 };
+    },
+  } as never);
+  const n = await deleteFactsBySource("page-42");
+  assert.equal(n, 3);
+  assert.match(sql, /DELETE FROM brain_facts WHERE source_id = \$1/i);
+  assert.deepEqual(params, ["page-42"]);
 });

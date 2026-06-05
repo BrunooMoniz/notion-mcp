@@ -56,6 +56,19 @@ export async function insertFacts(facts: Fact[]): Promise<number> {
   return res.rowCount ?? facts.length;
 }
 
+/**
+ * Delete all facts extracted from a given source document. Returns rows deleted.
+ * Used for REPLACE-ON-WRITE (S1): the classifier deletes a page's prior facts
+ * before re-inserting, so re-running on the same page (or editing it) doesn't
+ * accumulate duplicate triples — mirroring how chunks use deleteBySource.
+ */
+export async function deleteFactsBySource(sourceId: string): Promise<number> {
+  if (!sourceId) return 0;
+  const p = getPool();
+  const res = await p.query(`DELETE FROM brain_facts WHERE source_id = $1`, [sourceId]);
+  return res.rowCount ?? 0;
+}
+
 export interface QueryFactsOpts {
   subject?: string;
   predicate?: string;
@@ -81,8 +94,9 @@ interface FactRow {
  * Query facts with parameterized filters:
  *   - subject / predicate  → case-insensitive equality (lower() match)
  *   - workspace            → equality
- *   - activeOn (a date)    → fact valid on that date:
- *       valid_from <= $ AND (valid_to IS NULL OR valid_to >= $)
+ *   - activeOn (a date)    → fact valid on that date (null valid_from = unknown
+ *       start, doesn't exclude):
+ *       (valid_from IS NULL OR valid_from <= $) AND (valid_to IS NULL OR valid_to >= $)
  * Default limit 50. All values stay parameterized.
  */
 export async function queryFacts(opts: QueryFactsOpts = {}): Promise<Fact[]> {

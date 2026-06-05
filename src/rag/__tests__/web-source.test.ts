@@ -9,6 +9,7 @@ import {
   extractTitle,
   normalizeWebId,
   fetchWebDocument,
+  isBlockedHost,
 } from "../sources/web-source.js";
 
 // --- htmlToText -------------------------------------------------------------
@@ -21,6 +22,50 @@ test("htmlToText strips script/style/noscript blocks and their contents", () => 
   assert.ok(!out.includes("var x"));
   assert.ok(!out.includes("color:red"));
   assert.ok(!out.includes("nope"));
+});
+
+test("htmlToText keeps a bare '<' in prose (does not strip to next '>') (C1)", () => {
+  // The naive /<[^>]+>/ stripper deletes everything between a literal '<' and
+  // the next '>'. Real tags must still be stripped, but prose like "a < 5" must
+  // survive intact (including the break between paragraphs).
+  const out = htmlToText("<p>a < 5</p><p>next</p>");
+  assert.ok(out.includes("a < 5"), `expected "a < 5" in: ${JSON.stringify(out)}`);
+  assert.ok(out.includes("next"));
+});
+
+test("htmlToText keeps math-like comparisons in prose (C1)", () => {
+  const out = htmlToText("<p>3 < 5 and 5 > 3</p>");
+  assert.ok(out.includes("3 < 5 and 5 > 3"), JSON.stringify(out));
+});
+
+test("htmlToText keeps 'a < b > c' while still stripping real tags (C1)", () => {
+  const out = htmlToText("<div class=x>a < b > c</div>");
+  assert.ok(out.includes("a < b > c"), JSON.stringify(out));
+  assert.ok(!out.includes("class=x"));
+  assert.ok(!out.includes("div"));
+});
+
+test("htmlToText strips normal tags including attributes and self-closing (C1)", () => {
+  const out = htmlToText('<p>x</p><br/><div class="y" id=z>w</div>');
+  assert.ok(!out.includes("class"));
+  assert.ok(!out.includes("<br"));
+  assert.ok(!out.includes("<div"));
+  assert.ok(out.includes("x"));
+  assert.ok(out.includes("w"));
+});
+
+test("htmlToText strips an UNCLOSED <script> to end of input (C2)", () => {
+  const out = htmlToText("<p>before</p><script>var s=1; leak()");
+  assert.ok(out.includes("before"));
+  assert.ok(!out.includes("var s"), `JS leaked: ${JSON.stringify(out)}`);
+  assert.ok(!out.includes("leak()"), `JS leaked: ${JSON.stringify(out)}`);
+});
+
+test("htmlToText strips an UNCLOSED <style> to end of input (C2)", () => {
+  const out = htmlToText("<p>before</p><style>.a{color:red} body{margin:0}");
+  assert.ok(out.includes("before"));
+  assert.ok(!out.includes("color:red"), JSON.stringify(out));
+  assert.ok(!out.includes("margin"), JSON.stringify(out));
 });
 
 test("htmlToText turns block tags and <br> into newlines", () => {
@@ -68,6 +113,16 @@ test("extractTitle decodes entities in the title", () => {
   assert.equal(extractTitle(html), "A & B");
 });
 
+test("extractTitle keeps an apostrophe inside a double-quoted og:title (C3)", () => {
+  const html = `<meta property="og:title" content="A 'b' c">`;
+  assert.equal(extractTitle(html), "A 'b' c");
+});
+
+test("extractTitle keeps a double-quote inside a single-quoted og:title (C3)", () => {
+  const html = `<meta property='og:title' content='A "b" c'>`;
+  assert.equal(extractTitle(html), 'A "b" c');
+});
+
 test("extractTitle returns null when neither present", () => {
   assert.equal(extractTitle("<head></head>"), null);
 });
@@ -104,9 +159,22 @@ function stubFetch(status: number, html: string): typeof fetch {
       ok: status >= 200 && status < 300,
       status,
       statusText: status === 200 ? "OK" : "Error",
+      headers: { get: (_k: string) => null },
       text: async () => html,
     }) as unknown as Response) as unknown as typeof fetch;
 }
+
+// Hermetic DNS: resolve every name to a public IP so the SSRF guard's resolution
+// check passes without touching the network.
+const fakeLookup = (async (_h: string, _o: { all: true }) => [
+  { address: "93.184.216.34", family: 4 },
+]) as any;
+
+// A fetch that fails the test if it is ever called — proves the SSRF guard
+// rejects BEFORE any network call.
+const failIfCalled = (async () => {
+  throw new Error("fetch should not be called for a blocked target");
+}) as unknown as typeof fetch;
 
 test("fetchWebDocument builds the IndexableDocument shape from canned HTML", async () => {
   const html =
@@ -114,6 +182,7 @@ test("fetchWebDocument builds the IndexableDocument shape from canned HTML", asy
   const doc = await fetchWebDocument("https://example.com/post/", {
     workspace: "personal",
     fetchImpl: stubFetch(200, html),
+    lookupImpl: fakeLookup,
   });
 
   assert.equal(doc.source_type, "web");
@@ -135,6 +204,7 @@ test("fetchWebDocument falls back to body-only text when no title", async () => 
   const doc = await fetchWebDocument("https://example.com/x", {
     workspace: null,
     fetchImpl: stubFetch(200, html),
+    lookupImpl: fakeLookup,
   });
   assert.equal(doc.metadata.title, null);
   assert.equal(doc.text.trim(), "Just a body.");
@@ -146,7 +216,68 @@ test("fetchWebDocument throws a clear error on non-2xx", async () => {
       fetchWebDocument("https://example.com/404", {
         workspace: "personal",
         fetchImpl: stubFetch(404, ""),
+        lookupImpl: fakeLookup,
       }),
     /HTTP 404/,
+  );
+});
+
+// --- SSRF guard (M1) --------------------------------------------------------
+
+test("isBlockedHost: literal private/loopback/link-local IPs are blocked", () => {
+  assert.equal(isBlockedHost("127.0.0.1"), true);
+  assert.equal(isBlockedHost("10.0.0.1"), true);
+  assert.equal(isBlockedHost("172.16.5.4"), true);
+  assert.equal(isBlockedHost("192.168.1.1"), true);
+  assert.equal(isBlockedHost("169.254.169.254"), true); // cloud metadata
+  assert.equal(isBlockedHost("::1"), true);
+  assert.equal(isBlockedHost("[::1]"), true);
+  assert.equal(isBlockedHost("fe80::1"), true);
+  assert.equal(isBlockedHost("fd00::1"), true);
+});
+
+test("isBlockedHost: localhost and own-tailnet names are blocked", () => {
+  assert.equal(isBlockedHost("localhost"), true);
+  assert.equal(isBlockedHost("foo.localhost"), true);
+  assert.equal(isBlockedHost("vps-1200754.tail30b723.ts.net"), true);
+});
+
+test("isBlockedHost: public hosts/IPs are allowed", () => {
+  assert.equal(isBlockedHost("example.com"), false);
+  assert.equal(isBlockedHost("8.8.8.8"), false);
+  assert.equal(isBlockedHost("172.32.0.1"), false); // just outside 172.16/12
+});
+
+test("fetchWebDocument rejects a non-http(s) scheme before fetching", async () => {
+  await assert.rejects(
+    () => fetchWebDocument("file:///etc/passwd", { workspace: "personal", fetchImpl: failIfCalled, lookupImpl: fakeLookup }),
+    /blocked_scheme/,
+  );
+  await assert.rejects(
+    () => fetchWebDocument("ftp://example.com/x", { workspace: "personal", fetchImpl: failIfCalled, lookupImpl: fakeLookup }),
+    /blocked_scheme/,
+  );
+});
+
+test("fetchWebDocument rejects a literal private/loopback target before fetching", async () => {
+  for (const u of [
+    "http://169.254.169.254/latest/meta-data/",
+    "http://localhost:5432/",
+    "http://127.0.0.1/admin",
+    "http://10.0.0.5/",
+  ]) {
+    await assert.rejects(
+      () => fetchWebDocument(u, { workspace: "personal", fetchImpl: failIfCalled, lookupImpl: fakeLookup }),
+      /blocked_host/,
+      `expected ${u} to be blocked`,
+    );
+  }
+});
+
+test("fetchWebDocument rejects a public name that RESOLVES to a private IP (DNS-rebind)", async () => {
+  const rebindLookup = (async () => [{ address: "10.1.2.3", family: 4 }]) as any;
+  await assert.rejects(
+    () => fetchWebDocument("https://evil.example/", { workspace: "personal", fetchImpl: failIfCalled, lookupImpl: rebindLookup }),
+    /private/,
   );
 });
