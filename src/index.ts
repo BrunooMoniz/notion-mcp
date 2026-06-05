@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { registerTools } from "./tools.js";
 import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
+import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { requestContext, type RequestContext } from "./context.js";
@@ -96,6 +97,7 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 - **brain_search** — Hybrid semantic+keyword search over the indexed second brain.
 - **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no cérebro", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
+- **brain_index_web** — On-demand indexing of an arbitrary web page/article by URL into the brain. Use for non-Notion links (articles, docs, posts) the user wants queryable in brain_search. Fetches the URL, extracts readable text, chunks/embeds it, and stores it under source_type "web". Re-indexing the same URL refreshes it.
 `.trim();
 
 const app = express();
@@ -306,6 +308,7 @@ app.post("/mcp", async (req, res) => {
   registerTools(server);
   registerBrainSearchTool(server);
   registerBrainIndexUrlTool(server);
+  registerBrainIndexWebTool(server);
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
