@@ -173,9 +173,56 @@ test("pruneOrphans scopes DELETE by source_type AND workspace", async () => {
   const deleted = await pruneOrphans("granola", "personal", ["s1", "s2"]);
   assert.equal(deleted, 2);
   assert.match(sql, /source_type\s*=\s*\$1/i);
-  assert.match(sql, /workspace\s*=\s*\$2/i);
-  assert.match(sql, /source_id\s*<>\s*ALL\(\$3\)/i);
-  assert.deepEqual(params, ["granola", "personal", ["s1", "s2"]]);
+  // F3.0: account_id is $2 (defaults to 'bruno'); workspace shifts to $3, liveIds $4.
+  assert.match(sql, /account_id\s*=\s*\$2/i);
+  assert.match(sql, /workspace\s*=\s*\$3/i);
+  assert.match(sql, /source_id\s*<>\s*ALL\(\$4\)/i);
+  assert.deepEqual(params, ["granola", "bruno", "personal", ["s1", "s2"]]);
+});
+
+test("pruneOrphans account-scopes by an explicit accountId when given", async () => {
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (_q: string, p: unknown[]) => {
+      params = p;
+      return { rowCount: 0, rows: [] };
+    },
+  } as never);
+  await pruneOrphans("granola", "personal", ["s1"], "acme");
+  assert.deepEqual(params, ["granola", "acme", "personal", ["s1"]]);
+  __setPoolForTest(null);
+});
+
+// --- F3.0 account_id isolation guard (buildFilterClauses) --------------------
+
+test("buildFilterClauses: _accountId emits account_id = $n (tenant guard)", () => {
+  const { sql, params } = buildFilterClauses({ _accountId: "bruno" });
+  assert.match(sql, /account_id\s*=\s*\$1/i);
+  assert.deepEqual(params, ["bruno"]);
+});
+
+test("buildFilterClauses: _accountId AND _allowedWorkspaces both emitted (defense in depth)", () => {
+  const { sql, params } = buildFilterClauses({
+    _accountId: "bruno",
+    _allowedWorkspaces: ["personal"],
+  });
+  assert.match(sql, /account_id\s*=\s*\$1/i);
+  assert.match(sql, /workspace\s*=\s*ANY\(\$2\)/i);
+  assert.deepEqual(params, ["bruno", ["personal"]]);
+});
+
+test("buildFilterClauses: no _accountId -> no account clause (unchanged for cron/eval)", () => {
+  const { sql } = buildFilterClauses({ workspace: "personal" });
+  assert.doesNotMatch(sql, /account_id/i);
+});
+
+test("buildFilterClauses: a second account's filter cannot select the first's rows", () => {
+  const a = buildFilterClauses({ _accountId: "bruno" });
+  const b = buildFilterClauses({ _accountId: "acme" });
+  assert.deepEqual(a.params, ["bruno"]);
+  assert.deepEqual(b.params, ["acme"]);
+  // Same clause shape, different bound param -> SQL can never cross accounts.
+  assert.equal(a.sql, b.sql);
 });
 
 test("pruneOrphans throws if granola/calendar called without workspace", async () => {

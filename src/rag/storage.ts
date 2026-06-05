@@ -19,6 +19,12 @@ export function __setPoolForTest(p: PoolLike | null): void {
   injectedPool = p;
 }
 
+/** True when a test pool is injected (used by best-effort writers to no-op in
+ *  unit tests that have neither POSTGRES_URL nor an injected pool). */
+export function hasInjectedPool(): boolean {
+  return injectedPool !== null;
+}
+
 export function getPool(): pg.Pool {
   if (injectedPool) return injectedPool as pg.Pool;
   if (!pool) {
@@ -40,9 +46,9 @@ export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> 
   const sql = `
     INSERT INTO brain_chunks
       (id, source_type, source_id, workspace, db_name, parent_url, chunk_index,
-       text, embedding, metadata, source_updated, indexed_at)
+       text, embedding, metadata, source_updated, account_id, indexed_at)
     VALUES
-      ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10::jsonb, $11, now())
+      ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10::jsonb, $11, $12, now())
     ON CONFLICT (id) DO UPDATE SET
       source_type    = EXCLUDED.source_type,
       source_id      = EXCLUDED.source_id,
@@ -54,6 +60,7 @@ export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> 
       embedding      = EXCLUDED.embedding,
       metadata       = EXCLUDED.metadata,
       source_updated = EXCLUDED.source_updated,
+      account_id     = EXCLUDED.account_id,
       indexed_at     = now()
   `;
   for (const c of chunks) {
@@ -69,16 +76,21 @@ export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> 
       formatVector(c.embedding),
       JSON.stringify(c.metadata),
       c.source_updated,
+      c.account_id ?? "bruno",
     ]);
   }
 }
 
-export async function deleteBySource(sourceType: string, sourceId: string): Promise<void> {
+export async function deleteBySource(
+  sourceType: string,
+  sourceId: string,
+  accountId = "bruno",
+): Promise<void> {
   const p = getPool();
-  await p.query(`DELETE FROM brain_chunks WHERE source_type=$1 AND source_id=$2`, [
-    sourceType,
-    sourceId,
-  ]);
+  await p.query(
+    `DELETE FROM brain_chunks WHERE source_type=$1 AND source_id=$2 AND account_id=$3`,
+    [sourceType, sourceId, accountId],
+  );
 }
 
 /**
@@ -97,13 +109,16 @@ export async function pruneOrphans(
   sourceType: "notion" | "granola" | "calendar",
   workspace: string | null,
   liveIds: string[],
+  accountId = "bruno",
 ): Promise<number> {
   if ((sourceType === "granola" || sourceType === "calendar") && !workspace) {
     throw new Error("workspace required for granola/calendar prune");
   }
   const p = getPool();
-  const params: unknown[] = [sourceType];
-  let where = "source_type = $1";
+  // F3.0: account-scope the prune so a future second account's chunks of the
+  // same source_type/workspace are never collateral-deleted.
+  const params: unknown[] = [sourceType, accountId];
+  let where = "source_type = $1 AND account_id = $2";
   if (workspace) {
     params.push(workspace);
     where += ` AND workspace = $${params.length}`;
@@ -114,22 +129,23 @@ export async function pruneOrphans(
   return res.rowCount ?? 0;
 }
 
-export async function getSyncState(sourceType: string): Promise<Date> {
+export async function getSyncState(sourceType: string, accountId = "bruno"): Promise<Date> {
   const p = getPool();
   const { rows } = await p.query<{ last_sync_at: Date }>(
-    `SELECT last_sync_at FROM sync_state WHERE source_type=$1`,
-    [sourceType],
+    `SELECT last_sync_at FROM sync_state WHERE account_id=$1 AND source_type=$2`,
+    [accountId, sourceType],
   );
   return rows[0]?.last_sync_at ?? new Date(0);
 }
 
-export async function setSyncState(sourceType: string, ts: Date): Promise<void> {
+export async function setSyncState(sourceType: string, ts: Date, accountId = "bruno"): Promise<void> {
   const p = getPool();
+  // F3.0: sync_state PK is now (account_id, source_type) — conflict target matches.
   await p.query(
-    `INSERT INTO sync_state (source_type, last_sync_at)
-     VALUES ($1, $2)
-     ON CONFLICT (source_type) DO UPDATE SET last_sync_at = EXCLUDED.last_sync_at`,
-    [sourceType, ts],
+    `INSERT INTO sync_state (account_id, source_type, last_sync_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (account_id, source_type) DO UPDATE SET last_sync_at = EXCLUDED.last_sync_at`,
+    [accountId, sourceType, ts],
   );
 }
 
@@ -150,13 +166,15 @@ export async function recordRun(run: {
   error?: string | null;
   startedAt: Date;
   endedAt: Date;
+  accountId?: string;
 }): Promise<void> {
   try {
     const p = getPool();
     await p.query(
-      `INSERT INTO status_runs (worker, source, ok, counts, error, started_at, ended_at)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`,
+      `INSERT INTO status_runs (account_id, worker, source, ok, counts, error, started_at, ended_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)`,
       [
+        run.accountId ?? "bruno",
         run.worker,
         run.source,
         run.ok,
@@ -265,6 +283,14 @@ export function buildFilterClauses(
   const clauses: string[] = [];
   const params: unknown[] = [];
   let i = startIdx;
+  // F3.0 — hard tenant-scope guard. brainSearch threads `_accountId` from the
+  // trusted request context (getAccountId), never from input. AND-ed with the
+  // workspace guard below (defense in depth): even if one guard is misset, the
+  // other still isolates. `undefined` = no account restriction (cron/eval/tests).
+  if (filters._accountId !== undefined) {
+    clauses.push(`account_id = $${i++}`);
+    params.push(filters._accountId);
+  }
   // F.4.2 — hard workspace-scope guard. When brainSearch threads an
   // _allowedWorkspaces list (from the OAuth scope, intersected with the caller's
   // requested workspace), restrict every query to those workspaces. An empty
