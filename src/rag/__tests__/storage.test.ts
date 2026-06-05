@@ -11,6 +11,7 @@ import {
   pruneOrphans,
   buildFilterClauses,
   getNeighbors,
+  getStatus,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -352,5 +353,54 @@ test("getNeighbors defaults accountId to 'bruno' and omits workspace clause when
   // 'workspace' appears in the SELECT column list; assert no WHERE workspace clause.
   assert.doesNotMatch(sql, /IS NOT DISTINCT FROM/i);
   assert.deepEqual(params, ["src-9", 1, 3, "bruno"]);
+  __setPoolForTest(null);
+});
+
+// --- F3.0 metering wiring + getStatus account scope -------------------------
+
+test("upsertChunks meters 'chunks' to usage_log (wiring proof)", async () => {
+  const sqls: string[] = [];
+  const allParams: unknown[][] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sqls.push(q);
+      allParams.push(p);
+      return { rows: [], rowCount: 1 };
+    },
+  } as never);
+  const chunk: ChunkWithEmbedding = {
+    id: "u1",
+    source_type: "web",
+    source_id: "s",
+    workspace: "personal",
+    db_name: null,
+    parent_url: null,
+    chunk_index: 0,
+    text: "t",
+    embedding: [0.1, 0.2],
+    metadata: {},
+    source_updated: null,
+  };
+  await upsertChunks([chunk]);
+  const usageIdx = sqls.findIndex((s) => /INSERT INTO usage_log/i.test(s));
+  assert.ok(usageIdx >= 0, "expected a usage_log INSERT from upsertChunks");
+  assert.deepEqual(allParams[usageIdx], ["bruno", "chunks", 1]);
+  __setPoolForTest(null);
+});
+
+test("getStatus scopes status_runs and the sync_state join by account_id", async () => {
+  let sql = "";
+  let params: unknown[] = [];
+  __setPoolForTest({
+    query: async (q: string, p: unknown[]) => {
+      sql = q;
+      params = p;
+      return { rows: [] };
+    },
+  } as never);
+  await getStatus();
+  assert.match(sql, /FROM status_runs\s+WHERE account_id = \$1/i);
+  assert.match(sql, /ss\.account_id = \$1/i);
+  assert.deepEqual(params, ["bruno"]);
   __setPoolForTest(null);
 });

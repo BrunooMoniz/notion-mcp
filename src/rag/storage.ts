@@ -3,6 +3,8 @@ import pg from "pg";
 import type { ChunkWithEmbedding, Chunk, SearchFilters } from "./types.js";
 import { formatVector } from "./embeddings.js";
 import type { StatusRow } from "./status.js";
+import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
+import { recordUsage } from "./usage.js";
 
 let pool: pg.Pool | null = null;
 
@@ -76,15 +78,17 @@ export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> 
       formatVector(c.embedding),
       JSON.stringify(c.metadata),
       c.source_updated,
-      c.account_id ?? "bruno",
+      c.account_id ?? DEFAULT_ACCOUNT_ID,
     ]);
   }
+  // F3.0 passive metering: count chunks written for the current tenant.
+  await recordUsage(getAccountId(), "chunks", chunks.length);
 }
 
 export async function deleteBySource(
   sourceType: string,
   sourceId: string,
-  accountId = "bruno",
+  accountId = DEFAULT_ACCOUNT_ID,
 ): Promise<void> {
   const p = getPool();
   await p.query(
@@ -109,7 +113,7 @@ export async function pruneOrphans(
   sourceType: "notion" | "granola" | "calendar",
   workspace: string | null,
   liveIds: string[],
-  accountId = "bruno",
+  accountId = DEFAULT_ACCOUNT_ID,
 ): Promise<number> {
   if ((sourceType === "granola" || sourceType === "calendar") && !workspace) {
     throw new Error("workspace required for granola/calendar prune");
@@ -129,7 +133,7 @@ export async function pruneOrphans(
   return res.rowCount ?? 0;
 }
 
-export async function getSyncState(sourceType: string, accountId = "bruno"): Promise<Date> {
+export async function getSyncState(sourceType: string, accountId = DEFAULT_ACCOUNT_ID): Promise<Date> {
   const p = getPool();
   const { rows } = await p.query<{ last_sync_at: Date }>(
     `SELECT last_sync_at FROM sync_state WHERE account_id=$1 AND source_type=$2`,
@@ -138,7 +142,7 @@ export async function getSyncState(sourceType: string, accountId = "bruno"): Pro
   return rows[0]?.last_sync_at ?? new Date(0);
 }
 
-export async function setSyncState(sourceType: string, ts: Date, accountId = "bruno"): Promise<void> {
+export async function setSyncState(sourceType: string, ts: Date, accountId = DEFAULT_ACCOUNT_ID): Promise<void> {
   const p = getPool();
   // F3.0: sync_state PK is now (account_id, source_type) — conflict target matches.
   await p.query(
@@ -174,7 +178,7 @@ export async function recordRun(run: {
       `INSERT INTO status_runs (account_id, worker, source, ok, counts, error, started_at, ended_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)`,
       [
-        run.accountId ?? "bruno",
+        run.accountId ?? DEFAULT_ACCOUNT_ID,
         run.worker,
         run.source,
         run.ok,
@@ -196,8 +200,13 @@ export async function recordRun(run: {
  * mapping so the join lines up (other sources share the same key in both).
  * Returns raw rows; summarizeStatus() (pure, in status.ts) shapes the payload.
  */
-export async function getStatus(): Promise<StatusRow[]> {
+export async function getStatus(accountId = DEFAULT_ACCOUNT_ID): Promise<StatusRow[]> {
   const p = getPool();
+  // F3.0: scope to one account. The migration made sync_state PK (account_id,
+  // source_type), so the join MUST also match on account_id — otherwise, once a
+  // second account exists, one status_runs row would fan out across every
+  // account's sync_state row (duplicate /status rows + wrong sync_last_at). At
+  // N=1 (account 'bruno') this returns exactly the same rows as before.
   const { rows } = await p.query<{
     worker: string;
     source: string;
@@ -219,11 +228,14 @@ export async function getStatus(): Promise<StatusRow[]> {
        SELECT DISTINCT ON (worker, source)
          worker, source, ok, counts, error, ended_at
        FROM status_runs
+       WHERE account_id = $1
        ORDER BY worker, source, ended_at DESC
      ) sr
      LEFT JOIN sync_state ss
-       ON ss.source_type = CASE WHEN sr.source = 'calendar' THEN 'calendar-google' ELSE sr.source END
+       ON ss.account_id = $1
+      AND ss.source_type = CASE WHEN sr.source = 'calendar' THEN 'calendar-google' ELSE sr.source END
      ORDER BY sr.worker, sr.source`,
+    [accountId],
   );
   return rows.map((r) => ({
     worker: r.worker,
@@ -417,7 +429,7 @@ export async function searchKeyword(
 export async function getNeighbors(
   sourceId: string,
   chunkIndex: number,
-  accountId = "bruno",
+  accountId = DEFAULT_ACCOUNT_ID,
   workspace?: string | null,
 ): Promise<Chunk[]> {
   const p = getPool();

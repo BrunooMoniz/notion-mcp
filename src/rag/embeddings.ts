@@ -1,6 +1,8 @@
 // src/rag/embeddings.ts
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { getAccountId } from "../context.js";
+import { recordUsage } from "./usage.js";
 
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const MODEL = process.env.EMBEDDING_MODEL ?? "voyage-3-large";
@@ -15,7 +17,7 @@ interface VoyageResponse {
   usage: { total_tokens: number };
 }
 
-async function callVoyage(inputs: string[]): Promise<number[][]> {
+async function callVoyage(inputs: string[]): Promise<{ vectors: number[][]; tokens: number }> {
   const apiKey = process.env.VOYAGE_API_KEY;
   if (!apiKey) throw new Error("VOYAGE_API_KEY not set");
 
@@ -38,10 +40,11 @@ async function callVoyage(inputs: string[]): Promise<number[][]> {
     throw new Error(`Voyage API ${res.status}: ${body}`);
   }
   const json = (await res.json()) as VoyageResponse;
-  return json.data
+  const vectors = json.data
     .slice()
     .sort((a, b) => a.index - b.index)
     .map((d) => d.embedding);
+  return { vectors, tokens: json.usage?.total_tokens ?? 0 };
 }
 
 let pgPool: pg.Pool | null = null;
@@ -87,9 +90,11 @@ export async function batchEmbed(
     texts.forEach((t, i) => toFetch.push({ idx: i, text: t, hash: hashText(t) }));
   }
 
+  let totalTokens = 0;
   for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
     const chunk = toFetch.slice(i, i + BATCH_SIZE);
-    const vectors = await callVoyage(chunk.map((c) => c.text));
+    const { vectors, tokens } = await callVoyage(chunk.map((c) => c.text));
+    totalTokens += tokens;
     chunk.forEach((c, j) => {
       results[c.idx] = vectors[j];
     });
@@ -102,6 +107,10 @@ export async function batchEmbed(
       );
     }
   }
+
+  // F3.0 passive metering: bill the tenant for newly-embedded tokens (cache hits
+  // cost nothing). Best-effort, never blocks indexing.
+  if (totalTokens > 0) await recordUsage(getAccountId(), "embed_tokens", totalTokens);
 
   return results.map((r) => {
     if (!r) throw new Error("embedding missing — internal bug");
