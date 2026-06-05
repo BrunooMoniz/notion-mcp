@@ -11,6 +11,10 @@ import { getPool } from "./rag/storage.js";
 
 const AUTHORIZE_URL = "https://api.notion.com/v1/oauth/authorize";
 const TOKEN_URL = "https://api.notion.com/v1/oauth/token";
+const ME_URL = "https://api.notion.com/v1/users/me";
+// Keep in sync with NOTION_API_VERSION in clients.ts (not imported — clients.ts
+// process.exit()s at load when NOTION_*_TOKEN are unset, which breaks unit tests).
+const NOTION_VERSION = "2025-09-03";
 
 /** Stable account id for a connected Notion workspace (P1: account = a Notion
  *  OAuth identity). Prefixed so it never collides with the built-in 'bruno'. */
@@ -110,5 +114,67 @@ export async function onboardAccount(
   if (tok.refresh_token) {
     await setAccountSecret(accountId, `notion_refresh:${workspace}`, tok.refresh_token);
   }
+  return { accountId, workspace };
+}
+
+// --- PAT path (advanced) ----------------------------------------------------
+// Some users prefer a Personal Access Token for full-workspace read coverage
+// (no per-page picker). Tradeoff: PATs return 0 for /v1/search, so the indexer
+// can't auto-discover content — those accounts index by explicit page/DB IDs
+// (handled in F3.2b). We validate the PAT against /v1/users/me to confirm it
+// works and to derive a stable account identity.
+
+export interface PatIdentity {
+  id: string; // stable per Notion user/bot — the account key
+  name: string; // workspace/bot name for display
+}
+
+/** Validate a Notion token by calling /v1/users/me; returns a stable identity.
+ *  Throws if the token is invalid/unauthorized. fetchImpl injectable for tests. */
+export async function validatePat(
+  pat: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<PatIdentity> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(ME_URL, {
+    headers: { Authorization: `Bearer ${pat}`, "Notion-Version": NOTION_VERSION },
+  });
+  const text = await res.text();
+  let me: any;
+  try {
+    me = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`token inválido (resposta não-JSON do Notion, HTTP ${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`token inválido: ${me?.code ?? `HTTP ${res.status}`} ${me?.message ?? ""}`.trim());
+  }
+  const id: string | undefined = me?.bot?.owner?.user?.id ?? me?.id;
+  if (!id) throw new Error("não consegui identificar a conta a partir do token");
+  const name: string =
+    me?.bot?.workspace_name ?? me?.name ?? me?.bot?.owner?.user?.name ?? "Notion";
+  return { id, name };
+}
+
+/** Onboard a PAT account: create the account + workspace and store the PAT
+ *  ENCRYPTED. Idempotent on (account_id). accountId is namespaced 'notion-pat:'. */
+export async function onboardPat(
+  pat: string,
+  identity: PatIdentity,
+): Promise<{ accountId: string; workspace: string }> {
+  const accountId = `notion-pat:${identity.id}`;
+  const workspace = identity.id;
+  const p = getPool();
+  await p.query(
+    `INSERT INTO account (id, kind, status) VALUES ($1, 'notion-pat', 'active')
+     ON CONFLICT (id) DO UPDATE SET status = 'active'`,
+    [accountId],
+  );
+  await p.query(
+    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [accountId, workspace],
+  );
+  await setAccountSecret(accountId, `notion_pat:${workspace}`, pat);
   return { accountId, workspace };
 }
