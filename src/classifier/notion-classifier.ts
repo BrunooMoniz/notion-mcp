@@ -86,6 +86,31 @@ export async function runClassifier(opts: { sinceDays?: number; limit?: number }
         console.log(
           `[classifier] ${dbName}/${page.page_id.slice(0, 8)}: frente=${result.frente ?? "-"} tipo=${result.tipo ?? "-"} cat=${result.categoria ?? "-"} pessoas=${result.pessoas.length} orgs=${result.organizacoes.length}`,
         );
+
+        // F2.3 — GATED temporal-fact extraction. OFF by default: when
+        // FACTS_ENABLED !== "true" this block does NOTHING (no LLM call, no DB
+        // write, no module load), so production behaves exactly as before. The
+        // facts modules are imported DYNAMICALLY so they (and the SDK they wrap)
+        // are never even loaded while the gate is off. Its own try/catch ensures
+        // a facts failure NEVER breaks classification.
+        if (process.env.FACTS_ENABLED === "true") {
+          try {
+            const { extractFactsFromText } = await import("../rag/facts-extractor.js");
+            const { insertFacts } = await import("../rag/facts-storage.js");
+            const facts = await extractFactsFromText(`${page.title}\n\n${page.body}`, {
+              workspace: page.workspace,
+              source_id: page.page_id,
+              source_type: page.db === "Reunioes" ? "reuniao" : "insight",
+            });
+            if (facts.length) {
+              const inserted = await insertFacts(facts);
+              console.log(`[classifier:facts] ${page.page_id.slice(0, 8)}: +${inserted} facts`);
+            }
+          } catch (factErr: any) {
+            // Best-effort: facts extraction never affects the classifier outcome.
+            console.warn(`[classifier:facts] FAILED ${page.page_id}:`, factErr?.message ?? factErr);
+          }
+        }
       } catch (err: any) {
         stats.errors++;
         console.error(`[classifier] FAILED ${page.page_id}:`, err.message ?? err);
