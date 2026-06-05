@@ -8,12 +8,31 @@ export interface RequestContext {
   scopes: TokenScopes;
   clientId?: string;
   ip?: string;
+  /**
+   * F3.0 — the tenant this request belongs to. Set from the auth layer (never
+   * from tool input). Absent today (single-account); resolved by getAccountId()
+   * to the default account so current behavior is unchanged.
+   */
+  accountId?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();
 
+/** The single current account until Fase 3 onboarding lands real tenants. */
+export const DEFAULT_ACCOUNT_ID = "bruno";
+
 export function getContext(): RequestContext | undefined {
   return requestContext.getStore();
+}
+
+/**
+ * F3.0 — the account_id to scope storage reads/writes by. Mirrors the workspace
+ * model: out-of-request contexts (startup/cron/eval/tests) and any request
+ * without an explicit account fall back to the default account. NEVER derive
+ * this from tool arguments — it must come from the trusted auth context.
+ */
+export function getAccountId(): string {
+  return requestContext.getStore()?.accountId ?? DEFAULT_ACCOUNT_ID;
 }
 
 /**

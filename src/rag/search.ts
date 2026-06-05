@@ -12,6 +12,8 @@ import {
 } from "./rerank.js";
 import type { Chunk, SearchFilters, SearchHit, SearchMode, Workspace } from "./types.js";
 import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedWorkspaces.js";
+import { getAccountId } from "../context.js";
+import { recordUsage } from "./usage.js";
 
 export interface RankedChunk {
   chunk: Chunk;
@@ -246,10 +248,21 @@ export async function brainSearch(
     deps.getAllowedWorkspaces(),
     opts.filters,
   );
-  const filters: SearchFilters | undefined =
-    allowedWorkspaces !== undefined
-      ? { ...(opts.filters ?? {}), _allowedWorkspaces: allowedWorkspaces }
-      : opts.filters;
+  // F3.0 — tenant guard. account_id comes from the trusted request context
+  // (getAccountId → default account for cron/eval/tests), NEVER from input; strip
+  // any caller-supplied internal guards before threading the server-side ones.
+  const accountId = getAccountId();
+  const callerFilters = { ...(opts.filters ?? {}) } as SearchFilters;
+  delete callerFilters._accountId;
+  delete callerFilters._allowedWorkspaces;
+  const filters: SearchFilters = {
+    ...callerFilters,
+    _accountId: accountId,
+    ...(allowedWorkspaces !== undefined ? { _allowedWorkspaces: allowedWorkspaces } : {}),
+  };
+
+  // F3.0 — passive metering (best-effort, never blocks the search).
+  await recordUsage(accountId, "search", 1);
 
   let hits: SearchHit[] = [];
 
@@ -319,7 +332,12 @@ export async function brainSearch(
 
   if (opts.includeNeighbors) {
     for (const hit of hits) {
-      hit.neighbors = await getNeighbors(hit.chunk.source_id, hit.chunk.chunk_index);
+      hit.neighbors = await getNeighbors(
+        hit.chunk.source_id,
+        hit.chunk.chunk_index,
+        accountId,
+        hit.chunk.workspace,
+      );
     }
   }
 

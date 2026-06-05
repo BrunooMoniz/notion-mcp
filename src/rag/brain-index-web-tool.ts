@@ -6,7 +6,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Workspace } from "../clients.js";
-import { assertWorkspaceScope } from "../context.js";
+import { assertWorkspaceScope, getAccountId } from "../context.js";
 import { indexDocument } from "./index-document.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
 import { fetchWebDocument } from "./sources/web-source.js";
@@ -40,9 +40,11 @@ Returns counts and the resolved title/source_id.`,
       assertWorkspaceScope(workspace as Workspace);
 
       try {
+        const accountId = getAccountId();
         const doc = await fetchWebDocument(url, { workspace: workspace as Workspace });
+        doc.account_id = accountId; // F3.0: attribute to the caller's tenant
         const chunks = await indexDocument(doc);
-        await deleteBySource("web", doc.source_id);
+        await deleteBySource("web", doc.source_id, accountId);
         await upsertChunks(chunks);
         return {
           content: [
