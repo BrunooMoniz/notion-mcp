@@ -1,5 +1,6 @@
 import { Client } from "@notionhq/client";
-import { assertWorkspaceScope } from "./context.js";
+import { assertWorkspaceScope, getAccountId, DEFAULT_ACCOUNT_ID } from "./context.js";
+import { getAccountToken } from "./account-tokens.js";
 
 // PAT tokens — used for ALL operations except /v1/search.
 // PATs inherit the creator user's permissions (full read/write by ID) but
@@ -97,9 +98,29 @@ export const ALL_WORKSPACES: Workspace[] = ["globalcripto", "personal", "nora"];
 
 export type TokenKind = "pat" | "search";
 
-export function getClient(workspace: Workspace): Client {
+// F3.2b — per-account Client cache for onboarded (non-'bruno') accounts. Built
+// from vault tokens warmed by account-tokens.ts. 'bruno' uses the env singletons.
+const accountClientCache = new Map<string, Client>();
+
+function resolveAccountClient(accountId: string, workspace: string, kind: TokenKind): Client {
+  const key = `${accountId}:${kind}:${workspace}`;
+  const cached = accountClientCache.get(key);
+  if (cached) return cached;
+  const token = getAccountToken(accountId, workspace, kind);
+  if (!token) {
+    throw new Error(
+      `no ${kind} token for account "${accountId}" workspace "${workspace}" (warmAccount first)`,
+    );
+  }
+  const client = new Client({ auth: token, notionVersion: NOTION_API_VERSION });
+  accountClientCache.set(key, client);
+  return client;
+}
+
+export function getClient(workspace: Workspace, accountId: string = getAccountId()): Client {
   // Per-request scope enforcement (no-op when there's no HTTP context).
   assertWorkspaceScope(workspace);
+  if (accountId !== DEFAULT_ACCOUNT_ID) return resolveAccountClient(accountId, workspace, "pat");
   switch (workspace) {
     case "globalcripto":
       return globalcriptoClient;
@@ -107,15 +128,14 @@ export function getClient(workspace: Workspace): Client {
       return personalClient;
     case "nora":
       return noraClient;
-    default: {
-      const _exhaustive: never = workspace;
-      throw new Error(`Unknown workspace: ${_exhaustive}`);
-    }
+    default:
+      throw new Error(`Unknown workspace: ${workspace}`);
   }
 }
 
-export function getSearchClient(workspace: Workspace): Client {
+export function getSearchClient(workspace: Workspace, accountId: string = getAccountId()): Client {
   assertWorkspaceScope(workspace);
+  if (accountId !== DEFAULT_ACCOUNT_ID) return resolveAccountClient(accountId, workspace, "search");
   switch (workspace) {
     case "globalcripto":
       return globalcriptoSearchClient;
@@ -123,15 +143,26 @@ export function getSearchClient(workspace: Workspace): Client {
       return personalSearchClient;
     case "nora":
       return noraSearchClient;
-    default: {
-      const _exhaustive: never = workspace;
-      throw new Error(`Unknown workspace: ${_exhaustive}`);
-    }
+    default:
+      throw new Error(`Unknown workspace: ${workspace}`);
   }
 }
 
-export function getToken(workspace: Workspace, kind: TokenKind = "pat"): string {
+export function getToken(
+  workspace: Workspace,
+  kind: TokenKind = "pat",
+  accountId: string = getAccountId(),
+): string {
   assertWorkspaceScope(workspace);
+  if (accountId !== DEFAULT_ACCOUNT_ID) {
+    const token = getAccountToken(accountId, workspace, kind);
+    if (!token) {
+      throw new Error(
+        `no ${kind} token for account "${accountId}" workspace "${workspace}" (warmAccount first)`,
+      );
+    }
+    return token;
+  }
   if (kind === "search") {
     switch (workspace) {
       case "globalcripto":
@@ -140,10 +171,8 @@ export function getToken(workspace: Workspace, kind: TokenKind = "pat"): string 
         return process.env.NOTION_PERSONAL_SEARCH_TOKEN ?? process.env.NOTION_PERSONAL_TOKEN!;
       case "nora":
         return process.env.NOTION_NORA_SEARCH_TOKEN ?? process.env.NOTION_NORA_TOKEN!;
-      default: {
-        const _exhaustive: never = workspace;
-        throw new Error(`Unknown workspace: ${_exhaustive}`);
-      }
+      default:
+        throw new Error(`Unknown workspace: ${workspace}`);
     }
   }
   switch (workspace) {
@@ -153,10 +182,8 @@ export function getToken(workspace: Workspace, kind: TokenKind = "pat"): string 
       return process.env.NOTION_PERSONAL_TOKEN!;
     case "nora":
       return process.env.NOTION_NORA_TOKEN!;
-    default: {
-      const _exhaustive: never = workspace;
-      throw new Error(`Unknown workspace: ${_exhaustive}`);
-    }
+    default:
+      throw new Error(`Unknown workspace: ${workspace}`);
   }
 }
 
