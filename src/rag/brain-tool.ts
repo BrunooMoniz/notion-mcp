@@ -20,7 +20,7 @@ const filtersSchema = z
 export function registerBrainSearchTool(server: McpServer): void {
   server.tool(
     "brain_search",
-    `Search Bruno's second brain — indexed Notion pages, Granola meeting notes, and Calendar events across his workspaces.
+    `Search your Zinom (second brain) — indexed Notion pages, Granola meeting notes, and Calendar events across your connected sources.
 Hybrid retrieval combines semantic vector search with PT-BR full-text, then a cross-encoder reranker (Voyage rerank) reorders the candidate pool by relevance. Scores are real relevance scores (reranker relevance_score, or normalized hybrid fusion when rerank is off/unavailable). Results are scoped to the caller's allowed workspaces. Returns chunks with metadata, scores, and source URLs.
 
 Use cases:

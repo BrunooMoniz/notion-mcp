@@ -92,7 +92,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string): stri
 
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin — Segundo Cérebro</title>
+<title>Zinom.ai — Admin</title>
 <style>
   body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px}
   h1{font-size:20px;margin:0 0 4px} .sub{color:#888;margin:0 0 20px;font-size:13px}
@@ -105,7 +105,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string): stri
   td.small{font-size:12px;color:#bbb} code{font:12px ui-monospace,monospace;color:#7fd1b9}
   tr:hover td{background:#20242d}
 </style></head><body>
-<h1>🧠 Admin — Segundo Cérebro</h1>
+<h1>🧠 Zinom.ai — Admin</h1>
 <p class="sub">${now}</p>
 <div class="cards">
   <div class="card"><div class="n">${data.accounts.length}</div><div class="l">contas</div></div>

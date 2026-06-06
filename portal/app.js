@@ -140,7 +140,7 @@ document.getElementById("mcp-gen").onclick = async () => {
   const { token, mcp_url } = await res.json();
   document.getElementById("mcp-token").value = token;
   document.getElementById("mcp-cmd").value =
-    `claude mcp add --transport http segundo-cerebro ${mcp_url} --header "Authorization: Bearer ${token}"`;
+    `claude mcp add --transport http zinom ${mcp_url} --header "Authorization: Bearer ${token}"`;
   document.getElementById("mcp-result").classList.remove("hidden");
   document.getElementById("mcp-gen").textContent = "Gerar novo token";
 };

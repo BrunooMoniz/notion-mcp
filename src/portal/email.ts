@@ -20,7 +20,7 @@ export function isDevEmail(): boolean {
 
 function magicLinkHtml(link: string): string {
   return `<!doctype html><html><body style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#222">
-  <h2 style="font-size:18px">🧠 Seu acesso ao Segundo Cérebro</h2>
+  <h2 style="font-size:18px">🧠 Seu acesso ao Zinom.ai</h2>
   <p>Clique no botão abaixo para entrar. O link vale por 15 minutos e só funciona uma vez.</p>
   <p style="margin:24px 0">
     <a href="${link}" style="background:#1f8b4c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Entrar</a>
@@ -60,7 +60,7 @@ export async function sendLoginCodeEmail(
       to,
       subject: `Seu código de acesso: ${code}`,
       html: `<!doctype html><html><body style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#222">
-      <h2 style="font-size:18px">🧠 Código de acesso ao Segundo Cérebro</h2>
+      <h2 style="font-size:18px">🧠 Código de acesso ao Zinom.ai</h2>
       <p>Use este código para conectar seu assistente:</p>
       <p style="font-size:32px;font-weight:700;letter-spacing:4px;margin:16px 0">${code}</p>
       <p style="color:#888;font-size:13px">Vale por 10 minutos. Se você não pediu, ignore.</p>
@@ -96,7 +96,7 @@ export async function sendMagicLinkEmail(
     body: JSON.stringify({
       from,
       to,
-      subject: "Seu link de acesso ao Segundo Cérebro",
+      subject: "Seu link de acesso ao Zinom.ai",
       html: magicLinkHtml(link),
     }),
   });
