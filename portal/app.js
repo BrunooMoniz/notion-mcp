@@ -60,6 +60,8 @@ async function load() {
     row.appendChild(btn);
     list.appendChild(row);
   }
+
+  await renderActivation(s);
 }
 
 function statusLine(src) {
@@ -151,6 +153,126 @@ document.getElementById("reindex").onclick = async () => {
   el.classList.remove("hidden");
   el.className = "notice";
   el.textContent = res.ok ? "Indexação iniciada. Volte daqui a pouco." : "Indexação indisponível neste ambiente.";
+};
+
+// --- Ativação (checklist one-time) ------------------------------------------
+const ACT_LABELS = { tasks: "Tarefas no Notion", granola: "Granola", ical: "Calendário", ask: "Pergunte ao Zinom" };
+
+async function renderActivation(sources) {
+  const res = await api("/portal/activation");
+  if (!res.ok) return;
+  const st = await res.json();
+  const card = document.getElementById("activation");
+  if (st.complete) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+
+  const ul = document.getElementById("activation-items");
+  ul.innerHTML = "";
+  for (const k of ["tasks", "granola", "ical", "ask"]) {
+    const li = document.createElement("li");
+    li.style.padding = "3px 0";
+    li.textContent = `${st.items[k] ? "✅" : "⬜️"} ${ACT_LABELS[k]}`;
+    ul.appendChild(li);
+  }
+
+  // Tarefas: se ainda não feito, oferecer detectar/criar.
+  const taskBox = document.getElementById("act-tasks");
+  if (st.items.tasks) {
+    taskBox.classList.add("hidden");
+  } else {
+    taskBox.classList.remove("hidden");
+    const notion = sources && sources.notion && sources.notion.connected;
+    const msg = document.getElementById("act-tasks-msg");
+    const actions = document.getElementById("act-tasks-actions");
+    actions.innerHTML = "";
+    if (!notion) {
+      msg.textContent = "Conecte seu Notion acima primeiro — aí eu organizo suas tarefas.";
+    } else {
+      msg.textContent = "Vou procurar (ou criar) uma base de Tarefas no seu Notion.";
+      const detectBtn = document.createElement("button");
+      detectBtn.className = "small";
+      detectBtn.textContent = "Procurar / criar Tarefas";
+      detectBtn.onclick = () => detectTasks();
+      actions.appendChild(detectBtn);
+    }
+  }
+
+  // Pergunte ao Zinom: prompts calibrados; permite marcar como testado.
+  const askBox = document.getElementById("act-ask");
+  if (st.items.ask) {
+    askBox.classList.add("hidden");
+  } else {
+    askBox.classList.remove("hidden");
+    const prompts = document.getElementById("act-prompts");
+    prompts.innerHTML = "";
+    const list = ["o que rolou nas minhas últimas reuniões?", "o que ficou pendente sobre [meu projeto]?"];
+    if (st.items.tasks) list.push("planeje meu dia");
+    for (const p of list) {
+      const li = document.createElement("li");
+      li.textContent = `“${p}”`;
+      prompts.appendChild(li);
+    }
+  }
+}
+
+async function detectTasks() {
+  const actions = document.getElementById("act-tasks-actions");
+  const msg = document.getElementById("act-tasks-msg");
+  msg.textContent = "Procurando no seu Notion…";
+  actions.innerHTML = "";
+  const res = await apiJSON("/portal/tasks/detect", "POST");
+  const det = await res.json().catch(() => ({ status: "error" }));
+  if (det.status === "no-notion") {
+    msg.textContent = "Conecte seu Notion acima primeiro.";
+    return;
+  }
+  if (det.status === "none" || det.status === "error") {
+    msg.textContent = "Não achei uma base de tarefas. Quero criar uma pra você (“🧠 Zinom › Tarefas”)?";
+    const create = document.createElement("button");
+    create.className = "small";
+    create.textContent = "Criar Tarefas pra mim";
+    create.onclick = createTasks;
+    actions.appendChild(create);
+    return;
+  }
+  // one/many: deixar a pessoa escolher usar uma existente, ou criar nova.
+  msg.textContent = "Encontrei isto no seu Notion. Use uma, ou crie uma nova:";
+  for (const c of det.candidates) {
+    const b = document.createElement("button");
+    b.className = "small";
+    b.textContent = `Usar “${c.title}”`;
+    b.onclick = () => useTasks(c.id);
+    actions.appendChild(b);
+  }
+  const create = document.createElement("button");
+  create.className = "small secondary";
+  create.textContent = "Criar nova";
+  create.onclick = createTasks;
+  actions.appendChild(create);
+}
+
+async function createTasks() {
+  const msg = document.getElementById("act-tasks-msg");
+  msg.textContent = "Criando…";
+  const res = await apiJSON("/portal/tasks/create", "POST");
+  if (res.ok) { load(); } else {
+    const b = await res.json().catch(() => ({}));
+    msg.textContent = b.error || "Não consegui criar. Tente o token (PAT) no card do Notion.";
+  }
+}
+
+async function useTasks(id) {
+  await apiJSON("/portal/tasks/use", "POST", { data_source_id: id });
+  load();
+}
+
+document.getElementById("act-ask-done").onclick = async () => {
+  await apiJSON("/portal/activation/ask", "POST");
+  load();
+};
+document.getElementById("act-dismiss").onclick = async () => {
+  await apiJSON("/portal/activation/dismiss", "POST");
+  load();
 };
 
 notionNotice();
