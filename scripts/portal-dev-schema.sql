@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS account_secrets (
   PRIMARY KEY (account_id, kind)
 );
 
+-- Per-account MCP bearer tokens (mirror of migration 0006).
+CREATE TABLE IF NOT EXISTS account_api_tokens (
+  token_hash   text PRIMARY KEY,
+  account_id   text NOT NULL,
+  label        text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS account_api_tokens_acct_idx ON account_api_tokens (account_id);
+
 CREATE TABLE IF NOT EXISTS status_runs (
   id          bigserial PRIMARY KEY,
   account_id  text NOT NULL DEFAULT 'bruno',

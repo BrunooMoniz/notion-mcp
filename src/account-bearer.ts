@@ -47,6 +47,17 @@ export async function issueBearer(accountId: string, label?: string): Promise<st
   return token;
 }
 
+/** True iff the account already has at least one MCP bearer issued. Lets the
+ *  portal show "token gerado" vs "gerar token" without revealing the token. */
+export async function accountHasBearer(accountId: string): Promise<boolean> {
+  const p = getPool();
+  const { rows } = await p.query(
+    `SELECT 1 FROM account_api_tokens WHERE account_id=$1 LIMIT 1`,
+    [accountId],
+  );
+  return rows.length > 0;
+}
+
 /** Resolve a presented bearer to its account + workspaces, or null. Fast-rejects
  *  anything without the account prefix (so BEARER_TOKEN/OAuth never hit the DB). */
 export async function resolveBearer(
