@@ -5,6 +5,7 @@
 // "notion-pat:" identities minted by the standalone Notion onboarding.
 import { randomBytes } from "node:crypto";
 import { getPool } from "../rag/storage.js";
+import { hashInvite } from "./invites.js";
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -40,6 +41,59 @@ export async function createFriendAccount(
     [id, normalizeEmail(email)],
   );
   return id;
+}
+
+/**
+ * Atomically redeem an unused invite AND create the friend account bound to it,
+ * in ONE transaction. Either both happen or neither: if the account INSERT fails
+ * (e.g. a concurrent registration won the unique-email race, or a transient DB
+ * error), the redeem rolls back so the single-use invite is NOT burned and the
+ * friend can retry. Returns "created" on success, "lost-race" if the invite was
+ * already used/unknown (no rows updated), and THROWS on a real failure (the
+ * caller treats a throw as a generic retryable response, invite intact).
+ *
+ * Uses a dedicated client (real pg.Pool). Under the test-injected PoolLike
+ * (__setPoolForTest, which has no connect()), it falls back to two sequential
+ * statements — the atomicity matters only against a real DB.
+ */
+export async function redeemInviteAndCreateAccount(
+  code: string,
+  id: string,
+  email: string,
+): Promise<"created" | "lost-race"> {
+  const pool = getPool();
+  const redeemSql = `UPDATE invite_codes SET redeemed_at=now(), redeemed_account_id=$2
+                     WHERE code_hash=$1 AND redeemed_at IS NULL`;
+  const insertSql = `INSERT INTO account (id, kind, status, email)
+                     VALUES ($1, 'friend', 'active', $2)`;
+  const redeemParams = [hashInvite(code), id];
+  const insertParams = [id, normalizeEmail(email)];
+
+  // Test path: injected PoolLike has no connect() — run sequentially.
+  if (typeof pool.connect !== "function") {
+    const r = await pool.query(redeemSql, redeemParams);
+    if ((r.rowCount ?? 0) !== 1) return "lost-race";
+    await pool.query(insertSql, insertParams);
+    return "created";
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const r = await client.query(redeemSql, redeemParams);
+    if ((r.rowCount ?? 0) !== 1) {
+      await client.query("ROLLBACK");
+      return "lost-race";
+    }
+    await client.query(insertSql, insertParams);
+    await client.query("COMMIT");
+    return "created";
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /** True iff the account has at least one connected Notion workspace. */

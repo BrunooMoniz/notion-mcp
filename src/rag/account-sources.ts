@@ -4,8 +4,17 @@
 // index-account.ts boots notion-source -> clients.ts, which process.exit()s
 // without NOTION_* env).
 import { getPool } from "./storage.js";
-import type { IcsCalendarConfig } from "./calendar-ics-source.js";
+import { VALID_WORKSPACES, type IcsCalendarConfig } from "./calendar-ics-source.js";
 import type { Workspace } from "./types.js";
+
+/** Coerce a friend-supplied workspace to the known enum, defaulting otherwise, so
+ *  an arbitrary string never reaches account_workspaces (the bearer-scope table)
+ *  or gets tagged on chunks. */
+export function coerceWorkspace(ws: unknown): Workspace {
+  return typeof ws === "string" && (VALID_WORKSPACES as string[]).includes(ws)
+    ? (ws as Workspace)
+    : FRIEND_WORKSPACE;
+}
 
 // A friend has one Granola key and many iCal links, all conceptually their own
 // single space. Tag them with this workspace AND register it in account_workspaces
@@ -31,7 +40,7 @@ export function accountIcalConfigs(raw: string | null): IcsCalendarConfig[] {
       out.push({
         url: e.url,
         label: typeof e.label === "string" && e.label ? e.label : "Calendário",
-        workspace: (typeof e.workspace === "string" ? e.workspace : FRIEND_WORKSPACE) as Workspace,
+        workspace: coerceWorkspace(e.workspace),
       });
     }
   }

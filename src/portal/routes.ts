@@ -14,12 +14,12 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
 } from "./session.js";
-import { isInviteValid, redeemInvite } from "./invites.js";
+import { isInviteValid } from "./invites.js";
 import { issueMagicLink, consumeMagicLink } from "./magic-link.js";
 import { sendMagicLinkEmail } from "./email.js";
 import {
   findAccountByEmail,
-  createFriendAccount,
+  redeemInviteAndCreateAccount,
   generateFriendAccountId,
   getAccountEmail,
   hasNotionWorkspace,
@@ -96,20 +96,22 @@ export function createPortalRouter(): express.Router {
     try {
       let accountId = await findAccountByEmail(email);
       if (!accountId) {
-        // New email: require a valid, unused invite. Redeem atomically bound to a
-        // pre-generated id; only the single winner then creates that account.
+        // New email: require a valid, unused invite. Redeem + create the account
+        // in ONE transaction so the single-use invite is never burned without its
+        // account (e.g. on a unique-email race or a transient DB error → throws →
+        // generic 200, invite stays valid for retry).
         if (!(await isInviteValid(code))) {
           res.json({ ok: true }); // generic — no account, no email
           return;
         }
         const id = generateFriendAccountId();
-        if (!(await redeemInvite(code, id))) {
-          res.json({ ok: true }); // lost the race / used meanwhile
+        if ((await redeemInviteAndCreateAccount(code, id, email)) === "lost-race") {
+          res.json({ ok: true }); // used / lost the race meanwhile
           return;
         }
-        accountId = await createFriendAccount(email, id);
+        accountId = id;
       }
-      await issueAndSend(email, accountId, req);
+      await issueAndSend(email, accountId);
     } catch (err: any) {
       console.error(`[portal] register failed: ${err?.message ?? err}`);
     }
@@ -125,7 +127,7 @@ export function createPortalRouter(): express.Router {
     }
     try {
       const accountId = await findAccountByEmail(email);
-      if (accountId) await issueAndSend(email, accountId, req);
+      if (accountId) await issueAndSend(email, accountId);
     } catch (err: any) {
       console.error(`[portal] login failed: ${err?.message ?? err}`);
     }
@@ -257,15 +259,24 @@ export function createPortalRouter(): express.Router {
   });
 
   // Trigger a per-account index over all three sources (US3) ------------------
-  router.post("/portal/reindex", requireSession, async (req, res) => {
+  // Dedup by account so a friend can't spam concurrent full re-embeds (each runs
+  // paid Voyage embeddings) — same in-flight guard the onboarding path uses.
+  const reindexInFlight = new Set<string>();
+  router.post("/portal/reindex", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
+    if (reindexInFlight.has(accountId)) {
+      res.status(202).json({ started: true, alreadyRunning: true });
+      return;
+    }
     try {
       const { indexAccount } = await import("../rag/index-account.js");
-      void indexAccount(accountId).catch((e) =>
-        console.error(`[portal] reindex ${accountId} failed: ${e?.message ?? e}`),
-      );
+      reindexInFlight.add(accountId);
+      void indexAccount(accountId)
+        .catch((e) => console.error(`[portal] reindex ${accountId} failed: ${e?.message ?? e}`))
+        .finally(() => reindexInFlight.delete(accountId));
       res.status(202).json({ started: true });
     } catch (err: any) {
+      reindexInFlight.delete(accountId);
       console.error(`[portal] reindex unavailable: ${err?.message ?? err}`);
       res.status(503).json({ error: "indexação indisponível neste ambiente" });
     }
@@ -275,11 +286,18 @@ export function createPortalRouter(): express.Router {
 }
 
 /** Issue a magic link for (email, account) and send it. The verify link points at
- *  the API origin so the cookie is set on the API host. */
-async function issueAndSend(email: string, accountId: string, req: express.Request): Promise<void> {
+ *  the API origin so the cookie is set on the API host. The send is fire-and-forget
+ *  (not awaited) so the public endpoints respond in the same DB-bound time whether
+ *  or not the email exists — closing a response-timing enumeration oracle (the
+ *  Resend round-trip is hundreds of ms and would otherwise only happen for known
+ *  emails). The link token is already persisted, so a send failure just means no
+ *  email; a re-request issues a fresh link. */
+async function issueAndSend(email: string, accountId: string): Promise<void> {
   const token = await issueMagicLink(email, accountId);
   const link = `${BASE_URL}/portal/verify?token=${token}`;
-  await sendMagicLinkEmail(email, link);
+  void sendMagicLinkEmail(email, link).catch((e) =>
+    console.error(`[portal] magic-link send failed: ${e?.message ?? e}`),
+  );
 }
 
 /** Derived per-source status for /me and /sources: vault presence + last run. */

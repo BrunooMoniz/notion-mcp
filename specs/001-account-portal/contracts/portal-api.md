@@ -54,12 +54,14 @@ Account summary for the dashboard. → `200`:
 Derived from vault presence + `status_runs` (FR-014). Never includes any secret value.
 
 ### GET /portal/sources
-Masked credential inventory. → `200`:
+Masked credential inventory. Intentionally shares the same builder (and shape) as
+`GET /portal/me`'s `sources` object — `ical` is `{ links: [...], count }`, and each
+source carries its last run status: → `200`:
 ```json
 {
-  "notion":  { "connected": true, "workspaces": ["ws-id"] },
+  "notion":  { "connected": true },
   "granola": { "set": true, "masked": "••••abcd" },
-  "ical":    [ { "id": "k3x9", "label": "Pessoal", "workspace": "personal", "masked_url": "https://…/…ab12.ics" } ]
+  "ical":    { "links": [ { "id": "k3x9", "label": "Pessoal", "workspace": "personal", "masked_url": "https://…/…ab12.ics" } ], "count": 1 }
 }
 ```
 

@@ -24,7 +24,7 @@ export interface IcsCalendarConfig {
 
 const PAST_WINDOW_MS = 180 * 24 * 60 * 60_000; // keep recent past one-off events
 const FUTURE_WINDOW_MS = 365 * 24 * 60 * 60_000; // and up to a year ahead
-const VALID_WORKSPACES: Workspace[] = ["personal", "globalcripto", "nora"];
+export const VALID_WORKSPACES: Workspace[] = ["personal", "globalcripto", "nora"];
 
 export function parseIcsConfig(
   raw: string | undefined = process.env.GOOGLE_CAL_ICS,
