@@ -41,16 +41,19 @@
       <a id="notion-connect" href="#"><button class="small">Conectar / reconectar</button></a>
     </div>
     <p class="muted" id="notion-status"></p>
-    <details style="margin-top:8px">
-      <summary style="cursor:pointer;font-weight:600;font-size:13px">Avançado: usar um Personal Access Token</summary>
-      <p class="muted">Dá acesso de leitura a tudo que você vê no Notion (sem escolher páginas). Crie em
-        <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a>
-        → <em>Personal Access Tokens</em> (começa com <code>ntn_</code>). Obs.: o OAuth acima indexa automaticamente; o PAT dá acesso mas a indexação automática é limitada.</p>
+    <details style="margin-top:10px" open>
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">Conectar com um token (mais simples) — tutorial</summary>
+      <ol class="muted" style="padding-left:18px;margin:8px 0;line-height:1.6">
+        <li>Abra <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> → <strong>New integration</strong> (tipo <em>Internal</em>). Dê o nome <strong>Zinom</strong> e salve. Copie o <strong>Internal Integration Secret</strong> (começa com <code>ntn_</code>).</li>
+        <li><strong>Importante:</strong> abra a página (ou a raiz do seu workspace) que você quer no Zinom, clique no menu <strong>•••</strong> (canto superior direito) → <strong>Connections / Conexões</strong> → adicione a integração <strong>Zinom</strong>. Sem esse passo, o Zinom não enxerga nem indexa nada.</li>
+        <li>Cole o token aqui e conecte:</li>
+      </ol>
       <form id="pat-form">
         <input type="password" id="pat" placeholder="ntn_..." autocomplete="off">
         <button class="small" type="submit">Conectar com token</button>
       </form>
       <p class="muted hidden" id="pat-msg"></p>
+      <p class="muted" style="margin-top:6px;font-size:12px">O token é mais fácil de configurar que o OAuth (botão acima) e fica guardado cifrado. Você compartilha só as páginas que quiser conectando-as à integração.</p>
     </details>
   </div>
 
