@@ -16,6 +16,7 @@ import {
 } from "./session.js";
 import { isInviteValid } from "./invites.js";
 import { issueMagicLink, consumeMagicLink } from "./magic-link.js";
+import { issueBearer, revokeBearersForAccount, accountHasBearer } from "../account-bearer.js";
 import { sendMagicLinkEmail } from "./email.js";
 import {
   findAccountByEmail,
@@ -37,6 +38,9 @@ import {
 } from "./sources.js";
 
 const BASE_URL = process.env.PORTAL_BASE_URL ?? process.env.BASE_URL ?? "http://localhost:3456";
+// The canonical server origin where the MCP endpoint (/mcp) lives — what a friend
+// puts in their AI client. Always the real server URL, not a Pages front.
+const MCP_BASE = process.env.BASE_URL ?? BASE_URL;
 
 /** Parse a single cookie value out of the Cookie header (no cookie-parser dep). */
 function readCookie(req: express.Request, name: string): string | null {
@@ -173,10 +177,11 @@ export function createPortalRouter(): express.Router {
 
   router.get("/portal/me", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
-    const out: any = { account_id: accountId, email: null, sources: {} };
+    const out: any = { account_id: accountId, email: null, sources: {}, mcp: { url: `${MCP_BASE}/mcp`, configured: false } };
     try {
       out.email = await getAccountEmail(accountId);
       out.sources = await sourcesSummary(accountId);
+      out.mcp.configured = await accountHasBearer(accountId);
     } catch (err: any) {
       console.error(`[portal] /me partial: ${err?.message ?? err}`);
     }
@@ -186,6 +191,16 @@ export function createPortalRouter(): express.Router {
   router.get("/portal/sources", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
     res.json(await sourcesSummary(accountId));
+  });
+
+  // Generate (or regenerate) the per-account MCP bearer the friend puts in their
+  // AI client. Shown ONCE; only its hash is stored. Regenerating revokes the old
+  // one so there's a single active token (the friend updates their client).
+  router.post("/portal/mcp-token", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    await revokeBearersForAccount(accountId);
+    const token = await issueBearer(accountId, "portal");
+    res.json({ token, mcp_url: `${MCP_BASE}/mcp` });
   });
 
   // iCal links (multiple) ----------------------------------------------------

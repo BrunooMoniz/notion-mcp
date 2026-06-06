@@ -13,6 +13,24 @@
   </div>
   <p class="sub" id="who">Carregando…</p>
 
+  <!-- Conectar ao assistente de IA (MCP) — como o amigo realmente usa o cérebro -->
+  <div class="card">
+    <strong>🔌 Conectar ao seu assistente (Claude, Cursor…)</strong>
+    <p class="muted">Seu cérebro vira uma ferramenta no seu assistente de IA. Gere seu token e cole o comando — depois é só pedir "busca no meu cérebro: …".</p>
+    <div class="row" style="border:none">
+      <span class="muted">Endereço MCP: <code id="mcp-url">—</code></span>
+      <button class="small" id="mcp-gen">Gerar token de acesso</button>
+    </div>
+    <div id="mcp-result" class="hidden">
+      <div class="notice err" style="margin-top:10px">⚠️ Copie agora: o token aparece <strong>uma única vez</strong>. Se perder, é só gerar outro (o anterior deixa de valer).</div>
+      <label>Seu token de acesso</label>
+      <input type="text" id="mcp-token" readonly onclick="this.select()">
+      <label style="margin-top:12px">Claude Code (terminal) — cole e rode:</label>
+      <textarea id="mcp-cmd" readonly rows="3" onclick="this.select()" style="width:100%;font:13px/1.4 monospace;padding:10px;border:1px solid #ccc;border-radius:8px"></textarea>
+      <p class="muted">Outros clientes MCP (Cursor, etc.): use o endereço acima com o cabeçalho <code>Authorization: Bearer &lt;seu token&gt;</code>.</p>
+    </div>
+  </div>
+
   <div id="notion-notice" class="notice hidden"></div>
 
   <!-- Notion -->

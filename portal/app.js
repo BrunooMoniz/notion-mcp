@@ -27,6 +27,11 @@ async function load() {
   const me = await res.json();
   document.getElementById("who").textContent = me.email ? `Conectado como ${me.email}` : "Conectado";
 
+  // MCP connection
+  const mcp = me.mcp || {};
+  document.getElementById("mcp-url").textContent = mcp.url || "—";
+  document.getElementById("mcp-gen").textContent = mcp.configured ? "Gerar novo token" : "Gerar token de acesso";
+
   const s = me.sources || {};
   // Notion
   tag(document.getElementById("notion-tag"), s.notion && s.notion.connected, "conectado", "desconectado");
@@ -109,6 +114,17 @@ document.getElementById("granola-form").addEventListener("submit", async (e) => 
 document.getElementById("granola-remove").onclick = async () => {
   await api("/portal/granola", { method: "DELETE" });
   load();
+};
+
+document.getElementById("mcp-gen").onclick = async () => {
+  const res = await apiJSON("/portal/mcp-token", "POST");
+  if (!res.ok) return;
+  const { token, mcp_url } = await res.json();
+  document.getElementById("mcp-token").value = token;
+  document.getElementById("mcp-cmd").value =
+    `claude mcp add --transport http segundo-cerebro ${mcp_url} --header "Authorization: Bearer ${token}"`;
+  document.getElementById("mcp-result").classList.remove("hidden");
+  document.getElementById("mcp-gen").textContent = "Gerar novo token";
 };
 
 document.getElementById("reindex").onclick = async () => {
