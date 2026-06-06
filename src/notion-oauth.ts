@@ -144,11 +144,11 @@ export async function associateNotionToAccount(
 
 /**
  * 001-account-portal — associate a Notion Personal Access Token to an EXISTING
- * portal account (advanced path; the recommended path is OAuth). Stores the PAT
- * encrypted and registers its workspace. NOTE: PATs return 0 for /v1/search, so
- * the per-account indexer can't auto-discover their pages — PAT gives full read
- * access by ID but limited auto-indexing (an OAuth connect is recommended for
- * automatic indexing). Idempotent.
+ * portal account. A PAT grants the integration the user's FULL workspace access
+ * (no per-page sharing) AND returns results from /v1/search (verified), so the
+ * per-account indexer auto-discovers and indexes the workspace normally — it's
+ * the easiest path to integrate. Stores the PAT encrypted + registers its
+ * workspace. Idempotent.
  */
 export async function associatePatToAccount(
   accountId: string,

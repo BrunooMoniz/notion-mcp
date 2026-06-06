@@ -255,8 +255,9 @@ export function createPortalRouter(): express.Router {
   const notionClientId = process.env.NOTION_OAUTH_CLIENT_ID;
   const notionBase = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
-  // Advanced: connect Notion with a Personal Access Token (full read by ID, but
-  // limited auto-indexing — see associatePatToAccount). Bound to the session account.
+  // Connect Notion with a Personal Access Token: full workspace access + /v1/search
+  // works (verified), so it auto-indexes normally — the easiest path. Bound to the
+  // session account (see associatePatToAccount).
   router.post("/portal/notion/pat", requireSession, async (req, res) => {
     const pat = typeof req.body?.pat === "string" ? req.body.pat.trim() : "";
     if (!pat) {
