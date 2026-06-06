@@ -3,12 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Segundo Cérebro — Entrar</title>
+  <title>Zinom.ai — um segundo cérebro para a sua IA</title>
+  <meta name="description" content="Zinom.ai: um segundo cérebro poderoso para a sua IA preferida. Entregue o contexto certo e tenha o melhor assistente onde você quiser.">
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    .hero { text-align: center; margin: 8px 0 28px; }
+    .brand { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
+    .tagline { font-size: 18px; font-weight: 600; margin: 8px 0 6px; }
+    .pitch { color: var(--muted); font-size: 15px; max-width: 520px; margin: 0 auto; }
+    .feats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 22px 0 4px; }
+    .feat { border: 1px solid #eee; border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+    .feat b { display: block; font-size: 13px; }
+    .feat span { color: var(--muted); font-size: 13px; }
+    @media (max-width: 480px) { .feats { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-  <h1>🧠 Segundo Cérebro</h1>
-  <p class="sub">Acesse seu segundo cérebro. Sem senha: a gente te manda um link por e-mail.</p>
+  <div class="hero">
+    <div class="brand">🧠 Zinom.ai</div>
+    <p class="tagline">Um segundo cérebro poderoso para a sua IA preferida.</p>
+    <p class="pitch">Entregue o contexto certo e tenha o melhor assistente onde você preferir. O Zinom une suas reuniões, suas anotações e sua rotina, e ainda cria tarefas, páginas e sistemas pra você.</p>
+  </div>
+
+  <div class="feats">
+    <div class="feat"><b>🎙️ Reuniões</b><span>Granola: resumos e decisões</span></div>
+    <div class="feat"><b>📚 Conhecimento</b><span>Notion: notas e bases</span></div>
+    <div class="feat"><b>📅 Rotina</b><span>Calendar: sua agenda</span></div>
+    <div class="feat"><b>⚡ Ações</b><span>cria tarefas e páginas no Notion</span></div>
+  </div>
+
+  <hr>
 
   <div id="error" class="notice err hidden"></div>
   <div id="sent" class="notice hidden">
@@ -18,12 +42,12 @@
   <div id="forms">
     <!-- Registro por convite -->
     <form id="register-form">
-      <h2>Tenho um convite</h2>
+      <h2>Entrar com convite</h2>
       <label for="invite">Código de convite</label>
       <input type="text" id="invite" name="invite_code" autocomplete="off" required>
       <label for="reg-email">Seu e-mail</label>
       <input type="email" id="reg-email" name="email" required>
-      <button type="submit">Entrar com convite</button>
+      <button type="submit">Acessar o Zinom</button>
     </form>
 
     <hr>

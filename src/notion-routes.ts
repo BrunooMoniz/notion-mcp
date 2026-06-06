@@ -24,16 +24,16 @@ import { issueBearer } from "./account-bearer.js";
 async function connectedPageHtml(displayName: string, accountId: string, baseUrl: string): Promise<string> {
   const token = await issueBearer(accountId, "onboarding");
   const mcpUrl = `${baseUrl}/mcp`;
-  const cmd = `claude mcp add --transport http segundo-cerebro ${mcpUrl} --header "Authorization: Bearer ${token}"`;
+  const cmd = `claude mcp add --transport http zinom ${mcpUrl} --header "Authorization: Bearer ${token}"`;
   return page(
     "Conectado",
     `<h1 class="ok">✓ Conectado</h1>
-     <p><strong>${escapeHtml(displayName)}</strong> conectado ao Segundo Cérebro. A indexação do seu Notion já começou (pode levar alguns minutos).</p>
-     <h2 style="font-size:16px;margin-top:24px">Pergunte ao seu cérebro pelo Claude Code</h2>
+     <p><strong>${escapeHtml(displayName)}</strong> conectado ao Zinom. A indexação do seu Notion já começou (pode levar alguns minutos).</p>
+     <h2 style="font-size:16px;margin-top:24px">Pergunte ao seu Zinom pelo Claude Code</h2>
      <p>Rode no terminal:</p>
      <pre style="background:#8881;padding:12px;border-radius:8px;overflow:auto;font-size:13px;white-space:pre-wrap;word-break:break-all">${escapeHtml(cmd)}</pre>
-     <p>Depois é só perguntar — ex.: <em>"busca no meu cérebro: ..."</em> (ferramenta <code>brain_search</code>).</p>
-     <p style="color:#d83a3a;font-size:13px;margin-top:16px">⚠️ Guarde este token agora — ele aparece <strong>só uma vez</strong> e dá acesso de leitura ao seu cérebro.</p>`,
+     <p>Depois é só perguntar — ex.: <em>"busca no meu Zinom: ..."</em> (ferramenta <code>brain_search</code>).</p>
+     <p style="color:#d83a3a;font-size:13px;margin-top:16px">⚠️ Guarde este token agora — ele aparece <strong>só uma vez</strong> e dá acesso de leitura ao seu Zinom.</p>`,
   );
 }
 
@@ -78,8 +78,8 @@ export function createNotionOnboardRouter(): express.Router {
   // and an advanced "paste a Personal Access Token" form.
   const landing = () =>
     page(
-      "Conectar — Segundo Cérebro",
-      `<h1>🧠 Segundo Cérebro</h1>
+      "Conectar — Zinom",
+      `<h1>🧠 Zinom</h1>
        <p>Conecte seu Notion para começar. Recomendado: <strong>Conectar com Notion</strong> (1 clique, você escolhe o que compartilhar).</p>
        <p><a href="/notion/connect" style="display:inline-block;background:#1f8b4c;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">Conectar com Notion</a></p>
        <hr style="margin:28px 0;border:none;border-top:1px solid #8884">

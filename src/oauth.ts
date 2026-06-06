@@ -419,9 +419,9 @@ function operatorFormBody(clientLabel: string, p: OAuthParams, csrf: string): st
 }
 
 function renderFriendEmail(clientLabel: string, p: OAuthParams, csrf: string, err = ""): string {
-  return authShell("Conectar — Segundo Cérebro", `
+  return authShell("Conectar — Zinom", `
     <h1>🧠 Conectar ${escapeHtml(clientLabel)}</h1>
-    <p class="subtitle">Entre com seu e-mail para autorizar o acesso ao <span class="client-name">seu segundo cérebro</span>.</p>
+    <p class="subtitle">Entre com seu e-mail para autorizar o acesso ao <span class="client-name">seu Zinom</span>.</p>
     ${err ? `<p class="err">${escapeHtml(err)}</p>` : ""}
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="flow" value="friend_email">
@@ -437,7 +437,7 @@ function renderFriendEmail(clientLabel: string, p: OAuthParams, csrf: string, er
 }
 
 function renderFriendCode(clientLabel: string, p: OAuthParams, csrf: string, email: string, msg = ""): string {
-  return authShell("Código — Segundo Cérebro", `
+  return authShell("Código — Zinom", `
     <h1>Digite o código</h1>
     <p class="subtitle">Enviamos um código de 6 dígitos para <span class="client-name">${escapeHtml(email)}</span> (se houver uma conta). Vale 10 minutos.</p>
     ${msg ? `<p class="err">${escapeHtml(msg)}</p>` : ""}
@@ -453,9 +453,9 @@ function renderFriendCode(clientLabel: string, p: OAuthParams, csrf: string, ema
 }
 
 function renderFriendConsent(clientLabel: string, p: OAuthParams, csrf: string, email: string): string {
-  return authShell("Autorizar — Segundo Cérebro", `
+  return authShell("Autorizar — Zinom", `
     <h1>Autorizar acesso</h1>
-    <p class="subtitle"><span class="client-name">${escapeHtml(clientLabel)}</span> quer acessar o segundo cérebro de <strong>${escapeHtml(email)}</strong>.</p>
+    <p class="subtitle"><span class="client-name">${escapeHtml(clientLabel)}</span> quer acessar o Zinom de <strong>${escapeHtml(email)}</strong>.</p>
     <div class="perm">Permite buscar (<code>brain_search</code>) apenas no SEU conteúdo. Nenhuma outra conta é acessível.</div>
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="flow" value="friend_consent">

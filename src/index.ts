@@ -34,7 +34,7 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ### "personal"
 - **What it is:** Bruno's personal Notion workspace ("Caderno Moniz"). Hosts the "Cérebro" PKM (Reuniões, Insights, Pessoas, Organizações, Tasks Tracker, Diário Semanal, Revisitar).
-- **When to use:** Personal notes, projects, tasks, journaling, reading lists, second-brain queries that aren't company-scoped.
+- **When to use:** Personal notes, projects, tasks, journaling, reading lists, Zinom queries that aren't company-scoped.
 
 ### "nora"
 - **What it is:** The workspace for Nora Finance, a fintech company. Shared with the founding partners (Jean, Luigi, Moniz, Victor).
@@ -101,8 +101,8 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ## Brain RAG tools
 
-- **brain_search** — Hybrid semantic+keyword search over the indexed second brain.
-- **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no cérebro", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
+- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom.
+- **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no Zinom", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
 - **brain_index_web** — On-demand indexing of an arbitrary web page/article by URL into the brain. Use for non-Notion links (articles, docs, posts) the user wants queryable in brain_search. Fetches the URL, extracts readable text, chunks/embeds it, and stores it under source_type "web". Re-indexing the same URL refreshes it.
 `.trim();
 
@@ -384,7 +384,7 @@ app.post("/mcp", async (req, res) => {
 
   const server = new McpServer(
     {
-      name: "notion-mcp",
+      name: "zinom",
       version: "1.0.0",
     },
     {
