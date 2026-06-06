@@ -213,6 +213,16 @@ const portalPublicLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  // Key on the target email, not the IP: behind the Tailscale funnel every
+  // request arrives from loopback, so an IP key would bucket all callers into one
+  // global window. Per-email caps magic-link spam at a single address; the
+  // anti-enumeration property comes from the constant-time responses (the email
+  // send is fire-and-forget), not from this limiter.
+  keyGenerator: (req) =>
+    typeof req.body?.email === "string" && req.body.email.trim()
+      ? req.body.email.trim().toLowerCase()
+      : "anon",
+  validate: { keyGeneratorIpFallback: false },
   message: { error: "Too many requests, try again later" },
 });
 app.use(["/portal/register", "/portal/login"], portalPublicLimiter);

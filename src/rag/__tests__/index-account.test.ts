@@ -8,7 +8,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { prefixChunkIds } from "../account-chunks.js";
-import { accountIcalConfigs, ensureAccountWorkspace } from "../account-sources.js";
+import { accountIcalConfigs, ensureAccountWorkspace, coerceWorkspace } from "../account-sources.js";
 import { __setPoolForTest } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
 
@@ -61,6 +61,22 @@ test("accountIcalConfigs is safe on null/garbage input", () => {
   assert.deepEqual(accountIcalConfigs(null), []);
   assert.deepEqual(accountIcalConfigs("not json"), []);
   assert.deepEqual(accountIcalConfigs(JSON.stringify({ not: "an array" })), []);
+});
+
+test("coerceWorkspace: known values pass, everything else falls back to personal", () => {
+  assert.equal(coerceWorkspace("personal"), "personal");
+  assert.equal(coerceWorkspace("globalcripto"), "globalcripto");
+  assert.equal(coerceWorkspace("nora"), "nora");
+  assert.equal(coerceWorkspace("evil-workspace"), "personal"); // arbitrary string coerced
+  assert.equal(coerceWorkspace(undefined), "personal");
+  assert.equal(coerceWorkspace(42 as unknown), "personal");
+});
+
+test("accountIcalConfigs coerces an arbitrary friend-supplied workspace to personal", () => {
+  const raw = JSON.stringify([{ url: "https://x/1.ics", label: "L", workspace: "../etc/passwd" }]);
+  const out = accountIcalConfigs(raw);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].workspace, "personal"); // never the arbitrary string
 });
 
 test("ensureAccountWorkspace registers the workspace idempotently for the account", async () => {

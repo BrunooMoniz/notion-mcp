@@ -6,6 +6,7 @@
 // returned in plaintext (FR-008, SC-002).
 import { randomBytes } from "node:crypto";
 import { setAccountSecret, getAccountSecret, deleteAccountSecret } from "../secrets.js";
+import { coerceWorkspace } from "../rag/account-sources.js";
 
 const ICAL_KIND = "ical";
 const GRANOLA_KIND = "granola";
@@ -72,7 +73,7 @@ export async function addIcalLink(
     id,
     url: input.url,
     label: input.label ?? "",
-    workspace: input.workspace ?? "personal",
+    workspace: coerceWorkspace(input.workspace),
   });
   await saveIcalLinks(accountId, entries);
   return id;
@@ -89,7 +90,7 @@ export async function updateIcalLink(
   if (!e) return false;
   if (patch.url !== undefined) e.url = patch.url;
   if (patch.label !== undefined) e.label = patch.label;
-  if (patch.workspace !== undefined) e.workspace = patch.workspace;
+  if (patch.workspace !== undefined) e.workspace = coerceWorkspace(patch.workspace);
   await saveIcalLinks(accountId, entries);
   return true;
 }
