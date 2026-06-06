@@ -127,3 +127,10 @@ Required: `NOTION_PERSONAL_TOKEN`, `NOTION_GLOBALCRIPTO_TOKEN`, `NOTION_NORA_TOK
 Optional: `BEARER_TOKEN`, `BASE_URL`, `PORT`, `NORA_READONLY`, `AUDIT_LOG_PATH`, `ENROLLMENT_WINDOW_MINUTES`.
 
 Generate password hash: `node scripts/hash-password.mjs 'password'`
+
+<!-- SPECKIT START -->
+Active feature plan: `specs/001-account-portal/plan.md` (Friend Account Portal —
+self-service onboarding on the existing multi-tenant backend). See also
+`research.md`, `data-model.md`, `contracts/portal-api.md`, `quickstart.md` in the
+same directory for technical context, structure, and validation steps.
+<!-- SPECKIT END -->
