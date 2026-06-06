@@ -255,6 +255,24 @@ export function createPortalRouter(): express.Router {
   const notionClientId = process.env.NOTION_OAUTH_CLIENT_ID;
   const notionBase = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
+  // Advanced: connect Notion with a Personal Access Token (full read by ID, but
+  // limited auto-indexing — see associatePatToAccount). Bound to the session account.
+  router.post("/portal/notion/pat", requireSession, async (req, res) => {
+    const pat = typeof req.body?.pat === "string" ? req.body.pat.trim() : "";
+    if (!pat) {
+      res.status(400).json({ error: "cole um Personal Access Token" });
+      return;
+    }
+    try {
+      const { validatePat, associatePatToAccount } = await import("../notion-oauth.js");
+      const identity = await validatePat(pat);
+      await associatePatToAccount(res.locals.accountId, pat, identity);
+      res.json({ ok: true, name: identity.name });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "token inválido" });
+    }
+  });
+
   router.get("/portal/notion/connect", requireSession, async (_req, res) => {
     if (!notionClientId) {
       res.status(503).json({ error: "Notion OAuth não configurado" });

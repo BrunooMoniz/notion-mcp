@@ -15,6 +15,7 @@ import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
 import { createPortalRouter } from "./portal/routes.js";
+import { createAdminRouter } from "./admin/routes.js";
 import { resolveBearer } from "./account-bearer.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
@@ -227,6 +228,10 @@ const portalPublicLimiter = rateLimit({
 });
 app.use(["/portal/register", "/portal/login"], portalPublicLimiter);
 app.use(createPortalRouter());
+
+// Operator admin dashboard (/admin) — bearer-gated, read-only. Mounted before the
+// static front so /admin isn't shadowed by a static file.
+app.use(createAdminRouter(BEARER_TOKEN));
 
 // Static portal front — replaces the old onboarding landing (FR-012). Served at
 // the site root: /, /app.html, /styles.css, /auth.js, /app.js resolve here.

@@ -58,6 +58,15 @@ CREATE TABLE IF NOT EXISTS sync_state (
   PRIMARY KEY (account_id, source_type)
 );
 
+-- Passive usage metering (mirror of migration 0005) — read by the admin panel.
+CREATE TABLE IF NOT EXISTS usage_log (
+  id          bigserial PRIMARY KEY,
+  account_id  text NOT NULL,
+  metric      text NOT NULL,
+  qty         bigint NOT NULL,
+  ts          timestamptz NOT NULL DEFAULT now()
+);
+
 -- Portal tables (mirror of migration 0007).
 CREATE TABLE IF NOT EXISTS invite_codes (
   code_hash           text PRIMARY KEY,
