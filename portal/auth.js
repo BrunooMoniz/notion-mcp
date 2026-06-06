@@ -53,4 +53,27 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   if (res.ok) onSent();
 });
 
+// Request access (lead) — feeds the admin leads list.
+document.getElementById("request-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const res = await post("/portal/request-invite", {
+    email: document.getElementById("req-email").value,
+    name: document.getElementById("req-name").value,
+  });
+  if (res.ok) {
+    document.getElementById("request-form").classList.add("hidden");
+    document.getElementById("req-sent").classList.remove("hidden");
+  }
+});
+
+// Prefill the invite code + email from an emailed invite link (?invite=&email=).
+function prefillFromInvite() {
+  const p = new URLSearchParams(location.search);
+  const code = p.get("invite");
+  const email = p.get("email");
+  if (code) document.getElementById("invite").value = code;
+  if (email) document.getElementById("reg-email").value = email;
+}
+
+prefillFromInvite();
 showError();

@@ -226,7 +226,7 @@ const portalPublicLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   message: { error: "Too many requests, try again later" },
 });
-app.use(["/portal/register", "/portal/login"], portalPublicLimiter);
+app.use(["/portal/register", "/portal/login", "/portal/request-invite"], portalPublicLimiter);
 app.use(createPortalRouter());
 
 // Operator admin dashboard (/admin) — bearer-gated, read-only. Mounted before the

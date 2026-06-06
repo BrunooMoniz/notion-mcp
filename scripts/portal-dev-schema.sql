@@ -94,3 +94,17 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   last_seen_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS portal_sessions_acct_idx ON portal_sessions (account_id);
+
+-- Leads / invite requests (mirror of migration 0008).
+CREATE TABLE IF NOT EXISTS invite_requests (
+  id               bigserial PRIMARY KEY,
+  email            text NOT NULL,
+  name             text,
+  note             text,
+  status           text NOT NULL DEFAULT 'pending',
+  requested_at     timestamptz NOT NULL DEFAULT now(),
+  invited_at       timestamptz,
+  invite_code_hash text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS invite_requests_email_uniq ON invite_requests (email);
+CREATE INDEX IF NOT EXISTS invite_requests_status_idx ON invite_requests (status, requested_at DESC);

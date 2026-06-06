@@ -73,6 +73,56 @@ export async function sendLoginCodeEmail(
   }
 }
 
+let lastInvite: { to: string; code: string } | null = null;
+/** Test/e2e seam: the last invite "sent" (or captured in dev mode). */
+export function __getLastInvite(): { to: string; code: string } | null {
+  return lastInvite;
+}
+
+/** Send (or, in dev, capture) an invite: the single-use code + a prefilled link
+ *  to the portal. Used by the operator from /admin to invite a lead. */
+export async function sendInviteEmail(
+  to: string,
+  code: string,
+  baseUrl: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  lastInvite = { to, code };
+  const link = `${baseUrl}/?invite=${encodeURIComponent(code)}&email=${encodeURIComponent(to)}`;
+  if (isDevEmail()) {
+    console.log(`[portal-email] DEV mode (no send) — invite for ${to}: code=${code} link=${link}`);
+    return;
+  }
+  const doFetch = opts.fetchImpl ?? fetch;
+  const from = process.env.PORTAL_EMAIL_FROM ?? "onboarding@resend.dev";
+  const res = await doFetch(RESEND_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject: "Seu convite para o Zinom.ai 🧠",
+      html: `<!doctype html><html><body style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#222">
+      <h2 style="font-size:18px">🧠 Você foi convidado para o Zinom.ai</h2>
+      <p>Um segundo cérebro poderoso para a sua IA preferida. Use o botão abaixo para entrar (seu código já vai preenchido):</p>
+      <p style="margin:24px 0">
+        <a href="${link}" style="background:#1f8b4c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Acessar o Zinom</a>
+      </p>
+      <p style="color:#666;font-size:14px">Ou entre em <a href="${baseUrl}">${baseUrl.replace(/^https?:\/\//, "")}</a> com este código de convite:</p>
+      <p style="font-size:20px;font-weight:700;letter-spacing:2px;margin:8px 0">${code}</p>
+      <p style="color:#888;font-size:13px">O convite é de uso único.</p>
+      </body></html>`,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`resend send failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+}
+
 /** Send (or, in dev, capture) the magic-link email. Throws on a real-send failure
  *  so the route can surface a retryable state. fetchImpl injectable for tests. */
 export async function sendMagicLinkEmail(
