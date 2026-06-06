@@ -117,6 +117,31 @@ export async function onboardAccount(
   return { accountId, workspace };
 }
 
+/**
+ * 001-account-portal — associate a freshly-connected Notion workspace to an
+ * EXISTING portal account (instead of minting a `notion:<workspace>` identity).
+ * Used when a signed-in friend connects Notion from the portal: the OAuth state
+ * carries their account_id, and the workspace + encrypted tokens attach to it.
+ * The standalone onboardAccount() path above is unchanged. Idempotent.
+ */
+export async function associateNotionToAccount(
+  accountId: string,
+  tok: NotionTokenResponse,
+): Promise<{ accountId: string; workspace: string }> {
+  const workspace = tok.workspace_id;
+  const p = getPool();
+  await p.query(
+    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [accountId, workspace],
+  );
+  await setAccountSecret(accountId, `notion_access:${workspace}`, tok.access_token);
+  if (tok.refresh_token) {
+    await setAccountSecret(accountId, `notion_refresh:${workspace}`, tok.refresh_token);
+  }
+  return { accountId, workspace };
+}
+
 // --- PAT path (advanced) ----------------------------------------------------
 // Some users prefer a Personal Access Token for full-workspace read coverage
 // (no per-page picker). Tradeoff: PATs return 0 for /v1/search, so the indexer

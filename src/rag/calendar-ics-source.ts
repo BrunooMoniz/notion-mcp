@@ -219,12 +219,14 @@ export function icsToDocuments(
 }
 
 export async function* fetchIcsCalendarDocuments(
-  _opts: { modifiedSince?: Date } = {},
+  opts: { modifiedSince?: Date; configs?: IcsCalendarConfig[] } = {},
 ): AsyncGenerator<IndexableDocument> {
   // iCal has no server-side delta filter, so each run re-fetches the whole
   // calendar. delete-then-upsert by source_id keeps it consistent, and the
   // embedding cache makes unchanged events free to re-process.
-  const configs = parseIcsConfig();
+  // Operator path reads configs from GOOGLE_CAL_ICS; per-account path (portal)
+  // passes the friend's vault-stored iCal list directly via `configs`.
+  const configs = opts.configs ?? parseIcsConfig();
   if (configs.length === 0) return;
   const now = new Date();
   for (const cfg of configs) {

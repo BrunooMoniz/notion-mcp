@@ -79,3 +79,13 @@ export async function getAccountSecret(accountId: string, kind: string): Promise
   if (!rows[0]) return null;
   return decryptSecret(rows[0].enc_value);
 }
+
+/** Remove a stored secret for an account (no-op if absent). Used when a friend
+ *  removes a credential from the portal (e.g. their Granola key or all iCal). */
+export async function deleteAccountSecret(accountId: string, kind: string): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `DELETE FROM account_secrets WHERE account_id=$1 AND kind=$2`,
+    [accountId, kind],
+  );
+}

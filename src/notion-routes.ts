@@ -10,9 +10,11 @@ import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
   onboardAccount,
+  associateNotionToAccount,
   validatePat,
   onboardPat,
 } from "./notion-oauth.js";
+import { takePortalNotionState } from "./portal/notion-link.js";
 import { escapeHtml } from "./rag/status.js";
 import { indexAccount } from "./rag/index-account.js";
 import { issueBearer } from "./account-bearer.js";
@@ -93,8 +95,10 @@ export function createNotionOnboardRouter(): express.Router {
          </form>
        </details>`,
     );
-  router.get("/", (_req, res) => res.redirect("/onboard"));
-  router.get("/onboard", (_req, res) => res.type("html").send(landing()));
+  // 001-account-portal — the friend portal (static front, served at site root)
+  // replaces this onboarding landing (FR-012). Keep /onboard/connect-pat working
+  // as an advanced fallback, but send the landing routes to the portal.
+  router.get("/onboard", (_req, res) => res.redirect("/"));
 
   router.post("/notion/connect-pat", async (req, res) => {
     const pat = typeof req.body?.pat === "string" ? req.body.pat.trim() : "";
@@ -139,15 +143,29 @@ export function createNotionOnboardRouter(): express.Router {
       res.status(400).type("html").send(page("Erro", `<p class="bad">Faltou o parâmetro <code>code</code>.</p>`));
       return;
     }
-    // CSRF: only accept a state we issued (and not yet used).
-    sweep();
-    if (typeof state !== "string" || !states.has(state)) {
-      res.status(400).type("html").send(page("Erro", `<p class="bad">State inválido ou expirado (proteção CSRF). Recomece em <code>/notion/connect</code>.</p>`));
-      return;
+    // 001-account-portal — a portal-initiated connect carries a state we stashed
+    // with the signed-in account; if so, associate the workspace to THAT account
+    // (not a new notion:<ws> identity) and bounce back to the portal dashboard.
+    const portalAccount = typeof state === "string" ? takePortalNotionState(state) : null;
+    if (!portalAccount) {
+      // CSRF: only accept a standalone state we issued (and not yet used).
+      sweep();
+      if (typeof state !== "string" || !states.has(state)) {
+        res.status(400).type("html").send(page("Erro", `<p class="bad">State inválido ou expirado (proteção CSRF). Recomece em <code>/notion/connect</code>.</p>`));
+        return;
+      }
+      states.delete(state);
     }
-    states.delete(state);
     try {
       const tok = await exchangeCodeForToken(code, redirectUri, { clientId, clientSecret });
+      if (portalAccount) {
+        await associateNotionToAccount(portalAccount, tok);
+        const wsName = tok.workspace_name ?? tok.workspace_id;
+        console.log(`[notion-onboard] portal account=${portalAccount} workspace="${wsName}" connected`);
+        kickoffIndex(portalAccount);
+        res.redirect("/app.html?notion=connected");
+        return;
+      }
       const { accountId } = await onboardAccount(tok);
       const wsName = tok.workspace_name ?? tok.workspace_id;
       console.log(`[notion-onboard] account=${accountId} workspace="${wsName}" connected`);

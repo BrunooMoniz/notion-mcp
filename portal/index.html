@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Segundo Cérebro — Entrar</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <h1>🧠 Segundo Cérebro</h1>
+  <p class="sub">Acesse seu segundo cérebro. Sem senha: a gente te manda um link por e-mail.</p>
+
+  <div id="error" class="notice err hidden"></div>
+  <div id="sent" class="notice hidden">
+    Pronto! Se o e-mail estiver certo, enviamos um link de acesso. Confira sua caixa de entrada.
+  </div>
+
+  <div id="forms">
+    <!-- Registro por convite -->
+    <form id="register-form">
+      <h2>Tenho um convite</h2>
+      <label for="invite">Código de convite</label>
+      <input type="text" id="invite" name="invite_code" autocomplete="off" required>
+      <label for="reg-email">Seu e-mail</label>
+      <input type="email" id="reg-email" name="email" required>
+      <button type="submit">Entrar com convite</button>
+    </form>
+
+    <hr>
+
+    <p>Já tem conta? <button type="button" class="toggle" id="show-login">Entrar sem convite</button></p>
+
+    <!-- Login (sem convite) -->
+    <form id="login-form" class="hidden">
+      <h2>Entrar</h2>
+      <label for="login-email">Seu e-mail</label>
+      <input type="email" id="login-email" name="email" required>
+      <button type="submit">Mandar link de acesso</button>
+    </form>
+  </div>
+
+  <script src="/auth.js"></script>
+</body>
+</html>

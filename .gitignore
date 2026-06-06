@@ -3,6 +3,10 @@
 node_modules/
 dist/
 logs/
+# Playwright e2e artifacts (generated)
+test-results/
+playwright-report/
+.playwright/
 audit.log
 data/
 # Eval golden set + results contain real private questions/content — keep local/VPS only.

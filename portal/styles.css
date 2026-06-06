@@ -1,0 +1,32 @@
+:root { --green: #1f8b4c; --bad: #d83a3a; --ink: #222; --muted: #888; }
+* { box-sizing: border-box; }
+body {
+  font: 16px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif;
+  color: var(--ink); max-width: 560px; margin: 56px auto; padding: 0 20px;
+}
+h1 { font-size: 24px; margin-bottom: 4px; }
+h2 { font-size: 16px; margin-top: 28px; }
+p.sub { color: var(--muted); margin-top: 0; }
+label { display: block; font-weight: 600; margin: 14px 0 4px; font-size: 14px; }
+input[type=text], input[type=email], input[type=password] {
+  width: 100%; padding: 11px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px;
+}
+button {
+  background: var(--green); color: #fff; border: none; padding: 11px 18px;
+  border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer; margin-top: 14px;
+}
+button.secondary { background: #444; }
+button.danger { background: var(--bad); padding: 6px 12px; font-size: 13px; margin: 0; }
+button.small { padding: 6px 12px; font-size: 13px; margin: 0; }
+a { color: var(--green); }
+hr { border: none; border-top: 1px solid #eee; margin: 28px 0; }
+.card { border: 1px solid #eee; border-radius: 10px; padding: 16px; margin-top: 14px; }
+.muted { color: var(--muted); font-size: 13px; }
+.tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eee; }
+.tag.ok { background: #d8f0e0; color: var(--green); }
+.tag.off { background: #f0d8d8; color: var(--bad); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+.hidden { display: none; }
+.notice { padding: 10px 12px; border-radius: 8px; background: #f4f4f4; font-size: 14px; }
+.notice.err { background: #f8e0e0; color: var(--bad); }
+.toggle { background: none; color: var(--green); padding: 0; font-weight: 600; }

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Segundo Cérebro — Minhas fontes</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1>🧠 Minhas fontes</h1>
+    <button class="secondary small" id="logout">Sair</button>
+  </div>
+  <p class="sub" id="who">Carregando…</p>
+
+  <div id="notion-notice" class="notice hidden"></div>
+
+  <!-- Notion -->
+  <div class="card">
+    <div class="row" style="border:none">
+      <div><strong>Notion</strong> <span id="notion-tag" class="tag off">desconectado</span></div>
+      <a id="notion-connect" href="#"><button class="small">Conectar / reconectar</button></a>
+    </div>
+    <p class="muted" id="notion-status"></p>
+  </div>
+
+  <!-- Calendários (iCal) -->
+  <div class="card">
+    <strong>Calendários (links iCal secretos)</strong>
+    <div id="ical-list"></div>
+    <form id="ical-form">
+      <label for="ical-url">Adicionar link iCal</label>
+      <input type="text" id="ical-url" placeholder="https://…/basic.ics" required>
+      <label for="ical-label">Nome (opcional)</label>
+      <input type="text" id="ical-label" placeholder="Pessoal">
+      <button class="small" type="submit">Adicionar calendário</button>
+    </form>
+  </div>
+
+  <!-- Granola -->
+  <div class="card">
+    <strong>Granola</strong> <span id="granola-tag" class="tag off">sem chave</span>
+    <form id="granola-form">
+      <label for="granola-key">Chave da API Granola</label>
+      <input type="password" id="granola-key" autocomplete="off" placeholder="••••">
+      <button class="small" type="submit">Salvar / trocar</button>
+      <button class="small danger" type="button" id="granola-remove">Remover</button>
+    </form>
+  </div>
+
+  <hr>
+  <button id="reindex">Indexar meu cérebro agora</button>
+  <p class="muted">A primeira indexação pode levar alguns minutos. Status aparece acima.</p>
+
+  <script src="/app.js"></script>
+</body>
+</html>
