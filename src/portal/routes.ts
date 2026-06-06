@@ -50,11 +50,21 @@ function readCookie(req: express.Request, name: string): string | null {
   return null;
 }
 
+/** Secure cookie behind TLS (prod, via the funnel's X-Forwarded-Proto) but not on
+ *  plain http://localhost (dev), where a Secure cookie would be dropped. Override
+ *  with PORTAL_COOKIE_SECURE=0 (force off) / =1 (force on) if a proxy misreports. */
+function cookieSecure(req: express.Request): boolean {
+  const override = process.env.PORTAL_COOKIE_SECURE;
+  if (override === "0") return false;
+  if (override === "1") return true;
+  return req.secure || req.headers["x-forwarded-proto"] === "https";
+}
+
 function setSessionCookie(req: express.Request, res: express.Response, value: string): void {
   res.cookie(SESSION_COOKIE, value, {
     httpOnly: true,
     sameSite: "lax",
-    secure: req.secure, // false on http://localhost (dev), true behind TLS (prod)
+    secure: cookieSecure(req),
     path: "/",
     maxAge: SESSION_TTL_MS,
     domain: process.env.PORTAL_SESSION_COOKIE_DOMAIN || undefined,
@@ -221,55 +231,29 @@ export function createPortalRouter(): express.Router {
     res.sendStatus(204);
   });
 
-  // Notion connect/re-auth (carries account_id through OAuth state) ----------
-  const notionStates = new Map<string, { accountId: string; at: number }>();
-  const NOTION_STATE_TTL = 10 * 60_000;
-  const sweepNotion = () => {
-    const now = Date.now();
-    for (const [s, v] of notionStates) if (now - v.at > NOTION_STATE_TTL) notionStates.delete(s);
-  };
+  // Notion connect/re-auth. Reuses the EXISTING registered redirect URI
+  // (/notion/callback); we stash the portal account against the OAuth state so
+  // that callback associates the workspace to THIS account (see notion-link.ts +
+  // notion-routes.ts). No new redirect URI to register in the Notion app.
   const notionClientId = process.env.NOTION_OAUTH_CLIENT_ID;
-  const notionClientSecret = process.env.NOTION_OAUTH_CLIENT_SECRET;
-  const notionRedirect = `${BASE_URL}/portal/notion/callback`;
+  const notionBase = process.env.BASE_URL ?? "https://vps-1200754.tail30b723.ts.net";
 
-  router.get("/portal/notion/connect", requireSession, async (req, res) => {
+  router.get("/portal/notion/connect", requireSession, async (_req, res) => {
     if (!notionClientId) {
       res.status(503).json({ error: "Notion OAuth não configurado" });
       return;
     }
     const { buildAuthorizeUrl } = await import("../notion-oauth.js");
-    sweepNotion();
+    const { putPortalNotionState } = await import("./notion-link.js");
     const state = randomUUID();
-    notionStates.set(state, { accountId: res.locals.accountId, at: Date.now() });
-    res.redirect(buildAuthorizeUrl({ clientId: notionClientId, redirectUri: notionRedirect, state }));
-  });
-
-  router.get("/portal/notion/callback", async (req, res) => {
-    const { code, state, error } = req.query;
-    if (error) {
-      res.redirect("/app.html?notion=denied");
-      return;
-    }
-    sweepNotion();
-    const stateStr = typeof state === "string" ? state : "";
-    const entry = stateStr ? notionStates.get(stateStr) : undefined;
-    if (!entry || typeof code !== "string" || !code || !notionClientId || !notionClientSecret) {
-      res.redirect("/app.html?notion=error");
-      return;
-    }
-    notionStates.delete(stateStr);
-    try {
-      const { exchangeCodeForToken, associateNotionToAccount } = await import("../notion-oauth.js");
-      const tok = await exchangeCodeForToken(code, notionRedirect, {
+    putPortalNotionState(state, res.locals.accountId);
+    res.redirect(
+      buildAuthorizeUrl({
         clientId: notionClientId,
-        clientSecret: notionClientSecret,
-      });
-      await associateNotionToAccount(entry.accountId, tok);
-      res.redirect("/app.html?notion=connected");
-    } catch (err: any) {
-      console.error(`[portal] notion callback failed: ${err?.message ?? err}`);
-      res.redirect("/app.html?notion=error");
-    }
+        redirectUri: `${notionBase}/notion/callback`,
+        state,
+      }),
+    );
   });
 
   // Trigger a per-account index over all three sources (US3) ------------------

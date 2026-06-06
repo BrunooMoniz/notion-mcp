@@ -46,7 +46,10 @@ interface ListResp {
 }
 
 interface FetchOpts {
-  tokenEnv: string;
+  // Operator path reads the token from this env var; per-account path (portal)
+  // passes the decrypted vault key directly via `token`. One of the two is required.
+  tokenEnv?: string;
+  token?: string;
   workspace: Workspace;
   modifiedSince?: Date;
 }
@@ -127,9 +130,9 @@ function noteMetadata(note: GranolaNoteFull): Record<string, unknown> {
 export async function* fetchGranolaDocuments(
   opts: FetchOpts,
 ): AsyncGenerator<IndexableDocument> {
-  const token = process.env[opts.tokenEnv];
+  const token = opts.token ?? (opts.tokenEnv ? process.env[opts.tokenEnv] : undefined);
   if (!token) {
-    console.warn(`[granola-source] ${opts.tokenEnv} not set; skipping`);
+    console.warn(`[granola-source] no token (tokenEnv=${opts.tokenEnv ?? "-"}); skipping`);
     return;
   }
 

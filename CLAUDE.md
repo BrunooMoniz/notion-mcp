@@ -121,10 +121,45 @@ Two paths:
 - `assertWorkspaceScope()` in context.ts enforces OAuth scope per request
 - Error handling is wrapped at the `server.tool` level in tools.ts -- individual handlers don't need try/catch
 
+## Friend Account Portal (001-account-portal)
+
+Self-service portal so a non-technical friend onboards their own second brain
+without `.env`/psql/operator help. Lives in `src/portal/*` (backend) + `portal/*`
+(static front, served at the site root, replacing the old `/onboard` landing).
+Mounted into the main server in `index.ts`; additive, the existing backend is
+untouched.
+
+- **Auth**: email + single-use magic link (no password). `/portal/register`
+  (invite-gated) and `/portal/login` issue a 15-min link emailed via Resend
+  (`src/portal/email.ts`, zero-dep `fetch`). `/portal/verify` consumes it and sets
+  a server-side session cookie (`portal_sessions`, opaque cookie, SHA-256 hash at
+  rest — `src/portal/session.ts`). Account scope always comes from the session,
+  never from request input.
+- **Invites**: operator-only, single-use, hash at rest (`src/portal/invites.ts`).
+  Mint one with `npm run make-invite -- --label "..."` (prints the code once).
+- **Credentials**: friend self-manages Notion (OAuth, reuses the registered
+  `/notion/callback` via `src/portal/notion-link.ts`), multiple iCal links, one
+  Granola key — all in the existing encrypted vault (`account_secrets`), shown
+  masked (`src/portal/sources.ts`). iCal links are a JSON array under vault kind
+  `ical`; Granola is one string under kind `granola`.
+- **Indexing**: `POST /portal/reindex` runs `indexAccount()`, which now indexes
+  the friend's Notion **+ Granola + iCal** per account, isolated by `account_id`
+  + `prefixChunkIds` (`src/rag/index-account.ts`; helpers in
+  `src/rag/account-sources.ts`). The friend's source workspace is registered in
+  `account_workspaces` so their per-account bearer can see those chunks.
+- **Schema**: migration `0007_account_portal.sql` (invite_codes, magic_links,
+  portal_sessions, `account.email`).
+- **Local dev**: `npm run dev:portal` runs `src/portal/dev-server.ts` (portal only,
+  no pgvector/Notion needed) against a plain Postgres seeded with
+  `scripts/portal-dev-schema.sql`. E2E: `npx playwright test` (tests/e2e/).
+- **Deploy**: `specs/001-account-portal/DEPLOY.md` (served from the VPS same-origin;
+  Cloudflare Pages deferred until a shared domain exists — cross-site cookie).
+
 ## Environment variables
 
 Required: `NOTION_PERSONAL_TOKEN`, `NOTION_GLOBALCRIPTO_TOKEN`, `NOTION_NORA_TOKEN`, `OAUTH_PASSWORD_HASH`.
 Optional: `BEARER_TOKEN`, `BASE_URL`, `PORT`, `NORA_READONLY`, `AUDIT_LOG_PATH`, `ENROLLMENT_WINDOW_MINUTES`.
+Portal: `RESEND_API_KEY`, `PORTAL_EMAIL_FROM` (magic-link email), `NOTION_OAUTH_CLIENT_ID`/`NOTION_OAUTH_CLIENT_SECRET` (Notion connect). Dev/test: `PORTAL_EMAIL_DEV=1` (capture link, no send), `PORTAL_PORT`, `PORTAL_TEST_MODE=1`. Cross-origin (future Pages): `PORTAL_SESSION_COOKIE_DOMAIN`, `PORTAL_PAGES_ORIGIN`, `PORTAL_COOKIE_SECURE`.
 
 Generate password hash: `node scripts/hash-password.mjs 'password'`
 
