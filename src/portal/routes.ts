@@ -138,6 +138,24 @@ export function createPortalRouter(): express.Router {
     res.json({ ok: true });
   });
 
+  // POST /portal/request-invite {email, name?} — a visitor asks for access. Lands
+  // in the leads list (/admin). Generic 200 (no enumeration). Rate-limited.
+  router.post("/portal/request-invite", async (req, res) => {
+    const email = typeof req.body?.email === "string" ? normalizeEmail(req.body.email) : "";
+    const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+    if (!isLikelyEmail(email)) {
+      res.status(400).json({ error: "e-mail inválido" });
+      return;
+    }
+    try {
+      const { createInviteRequest } = await import("./leads.js");
+      await createInviteRequest(email, name);
+    } catch (err: any) {
+      console.error(`[portal] request-invite failed: ${err?.message ?? err}`);
+    }
+    res.json({ ok: true });
+  });
+
   // GET /portal/verify?token=... — consume the magic link, open a session.
   router.get("/portal/verify", async (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
