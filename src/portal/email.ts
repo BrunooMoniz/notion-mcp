@@ -29,6 +29,50 @@ function magicLinkHtml(link: string): string {
   </body></html>`;
 }
 
+let lastCode: { to: string; code: string } | null = null;
+/** Test/e2e seam: the last login code "sent" (or captured in dev mode). */
+export function __getLastCode(): { to: string; code: string } | null {
+  return lastCode;
+}
+
+/** Send (or, in dev, capture) a 6-digit login code (for the Claude.ai OAuth
+ *  authorize screen). Same dev-mode capture as the magic link. */
+export async function sendLoginCodeEmail(
+  to: string,
+  code: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  lastCode = { to, code };
+  if (isDevEmail()) {
+    console.log(`[portal-email] DEV mode (no send) — login code for ${to}: ${code}`);
+    return;
+  }
+  const doFetch = opts.fetchImpl ?? fetch;
+  const from = process.env.PORTAL_EMAIL_FROM ?? "onboarding@resend.dev";
+  const res = await doFetch(RESEND_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject: `Seu código de acesso: ${code}`,
+      html: `<!doctype html><html><body style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#222">
+      <h2 style="font-size:18px">🧠 Código de acesso ao Segundo Cérebro</h2>
+      <p>Use este código para conectar seu assistente:</p>
+      <p style="font-size:32px;font-weight:700;letter-spacing:4px;margin:16px 0">${code}</p>
+      <p style="color:#888;font-size:13px">Vale por 10 minutos. Se você não pediu, ignore.</p>
+      </body></html>`,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`resend send failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+}
+
 /** Send (or, in dev, capture) the magic-link email. Throws on a real-send failure
  *  so the route can surface a retryable state. fetchImpl injectable for tests. */
 export async function sendMagicLinkEmail(

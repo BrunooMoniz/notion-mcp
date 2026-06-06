@@ -47,6 +47,18 @@ export async function issueBearer(accountId: string, label?: string): Promise<st
   return token;
 }
 
+/** The account's currently-granted workspaces (its account_workspaces). Used to
+ *  scope a friend's OAuth token FRESH per request, so sources connected after the
+ *  token was issued are still visible without re-authorizing. */
+export async function accountWorkspaces(accountId: string): Promise<string[]> {
+  const p = getPool();
+  const { rows } = await p.query<{ workspace: string }>(
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    [accountId],
+  );
+  return rows.map((r) => r.workspace);
+}
+
 /** True iff the account already has at least one MCP bearer issued. Lets the
  *  portal show "token gerado" vs "gerar token" without revealing the token. */
 export async function accountHasBearer(accountId: string): Promise<boolean> {

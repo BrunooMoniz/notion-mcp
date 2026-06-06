@@ -16,7 +16,7 @@ import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
 import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
-import { resolveBearer } from "./account-bearer.js";
+import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
@@ -264,15 +264,25 @@ app.use("/mcp", async (req, res, next) => {
     return;
   }
 
-  // Check OAuth-issued token (Claude.ai path). Scoped to selected workspaces.
+  // Check OAuth-issued token (Claude.ai path). Operator tokens are scoped to the
+  // chosen workspaces; FRIEND tokens (001-account-portal) carry an accountId, so
+  // we pin ctx.accountId → brain_search is scoped to that friend's account (same
+  // isolation as the per-account bearer), with their workspaces as the 2nd guard.
   const info = getAccessTokenInfo(token);
   if (info) {
-    const ctx: RequestContext = {
-      authType: "oauth",
-      scopes: info.scopes,
-      clientId: info.client_id,
-      ip,
-    };
+    let ctx: RequestContext;
+    if (info.accountId) {
+      // Friend token: resolve workspaces fresh so sources added after issuance show.
+      const ws = await accountWorkspaces(info.accountId);
+      ctx = {
+        authType: "oauth",
+        scopes: ws as unknown as RequestContext["scopes"],
+        accountId: info.accountId,
+        ip,
+      };
+    } else {
+      ctx = { authType: "oauth", scopes: info.scopes, clientId: info.client_id, ip };
+    }
     requestContext.run(ctx, () => next());
     return;
   }
