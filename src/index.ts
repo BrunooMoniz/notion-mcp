@@ -3,6 +3,8 @@ import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerTools } from "./tools.js";
@@ -12,6 +14,7 @@ import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
+import { createPortalRouter } from "./portal/routes.js";
 import { resolveBearer } from "./account-bearer.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
@@ -184,6 +187,41 @@ app.use(createOAuthRouter(BASE_URL, BEARER_TOKEN));
 
 // Google OAuth + status — for connecting calendar.readonly to the indexer
 app.use(createGoogleRouter());
+
+// 001-account-portal — friend self-service portal API (/portal/*) + static front.
+// CORS for the Cloudflare Pages origin when configured (same-origin needs none).
+// Stricter rate limit on the two public POSTs (anti-enumeration / abuse).
+const PORTAL_PAGES_ORIGIN = process.env.PORTAL_PAGES_ORIGIN;
+if (PORTAL_PAGES_ORIGIN) {
+  app.use("/portal", (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && origin === PORTAL_PAGES_ORIGIN) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.header("Access-Control-Allow-Headers", "Content-Type");
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+}
+const portalPublicLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, try again later" },
+});
+app.use(["/portal/register", "/portal/login"], portalPublicLimiter);
+app.use(createPortalRouter());
+
+// Static portal front — replaces the old onboarding landing (FR-012). Served at
+// the site root: /, /app.html, /styles.css, /auth.js, /app.js resolve here.
+const PORTAL_STATIC = join(dirname(fileURLToPath(import.meta.url)), "../portal");
+app.use(express.static(PORTAL_STATIC));
 
 // F3.2 — Notion public-integration onboarding (/notion/connect, /notion/callback).
 // Additive: no-op (503) unless NOTION_OAUTH_CLIENT_ID/SECRET are set.

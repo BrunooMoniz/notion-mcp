@@ -93,8 +93,10 @@ export function createNotionOnboardRouter(): express.Router {
          </form>
        </details>`,
     );
-  router.get("/", (_req, res) => res.redirect("/onboard"));
-  router.get("/onboard", (_req, res) => res.type("html").send(landing()));
+  // 001-account-portal — the friend portal (static front, served at site root)
+  // replaces this onboarding landing (FR-012). Keep /onboard/connect-pat working
+  // as an advanced fallback, but send the landing routes to the portal.
+  router.get("/onboard", (_req, res) => res.redirect("/"));
 
   router.post("/notion/connect-pat", async (req, res) => {
     const pat = typeof req.body?.pat === "string" ? req.body.pat.trim() : "";
