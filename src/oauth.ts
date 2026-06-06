@@ -16,6 +16,11 @@ import {
   validateRefreshToken as validateRefreshTokenPure,
   type TokenStore as PureTokenStore,
 } from "./oauth-tokens.js";
+import { getPool } from "./rag/storage.js";
+import { resolveSession, SESSION_COOKIE } from "./portal/session.js";
+import { findAccountByEmail, getAccountEmail, normalizeEmail, isLikelyEmail } from "./portal/accounts.js";
+import { issueLoginCode, consumeLoginCode } from "./portal/magic-link.js";
+import { sendLoginCodeEmail } from "./portal/email.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "data");
@@ -126,6 +131,7 @@ interface AuthCode {
   code_challenge_method: string;
   scopes: Workspace[];
   expires_at: number;
+  accountId?: string; // 001-account-portal: set for the friend (per-account) flow
 }
 
 export interface AccessToken {
@@ -133,6 +139,7 @@ export interface AccessToken {
   client_id: string;
   scopes: Workspace[];
   expires_at: number;
+  accountId?: string; // friend flow → /mcp scopes to this account
 }
 
 export interface RefreshToken {
@@ -140,6 +147,7 @@ export interface RefreshToken {
   client_id: string;
   scopes: Workspace[];
   expires_at: number;
+  accountId?: string;
 }
 
 const clients = new Map<string, RegisteredClient>();
@@ -290,6 +298,172 @@ setInterval(() => {
   }
   if (tokensPruned) saveStore();
 }, 60_000);
+
+// --- 001-account-portal: friend (per-account) OAuth helpers ---
+
+interface OAuthParams {
+  client_id: string;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: string;
+  state: string;
+}
+
+function readCookie(req: { headers: Record<string, unknown> }, name: string): string | null {
+  const header = req.headers?.cookie;
+  if (typeof header !== "string") return null;
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i === -1) continue;
+    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+
+async function friendWorkspaces(accountId: string): Promise<string[]> {
+  const { rows } = await getPool().query<{ workspace: string }>(
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    [accountId],
+  );
+  return rows.map((r) => r.workspace);
+}
+
+// Short codes → limit verification attempts per email.
+const codeAttempts = new Map<string, { count: number; until: number }>();
+function codeBlocked(email: string): boolean {
+  const e = codeAttempts.get(email);
+  if (!e) return false;
+  if (Date.now() > e.until) {
+    codeAttempts.delete(email);
+    return false;
+  }
+  return e.count >= 6;
+}
+function recordCodeFail(email: string): void {
+  const e = codeAttempts.get(email) ?? { count: 0, until: 0 };
+  e.count += 1;
+  e.until = Date.now() + 10 * 60_000;
+  codeAttempts.set(email, e);
+}
+
+// Per-email code-SEND limiter. The global /oauth IP limiter collapses to one
+// bucket behind the funnel (loopback), so cap OTP issuance per email here — both
+// to stop inbox-bombing a known friend and to bound Resend usage. Applied
+// uniformly (account exists or not) so it never leaks account existence.
+const codeIssue = new Map<string, { count: number; until: number }>();
+const CODE_SEND_MAX = 4;
+function issueBlocked(email: string): boolean {
+  const e = codeIssue.get(email);
+  if (!e) return false;
+  if (Date.now() > e.until) {
+    codeIssue.delete(email);
+    return false;
+  }
+  return e.count >= CODE_SEND_MAX;
+}
+function recordIssue(email: string): void {
+  const e = codeIssue.get(email) ?? { count: 0, until: 0 };
+  if (e.count === 0) e.until = Date.now() + 10 * 60_000;
+  e.count += 1;
+  codeIssue.set(email, e);
+}
+
+const AUTH_CSS = `* { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+  .card { background: #16213e; border-radius: 12px; padding: 36px; max-width: 460px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+  h1 { font-size: 1.35em; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #9aa; margin-bottom: 20px; font-size: 0.92em; }
+  .client-name { color: #64b5f6; font-weight: 600; }
+  label { display: block; margin-bottom: 6px; font-size: 0.88em; color: #aaa; }
+  input[type=email], input[type=text], input[type=password] { width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #333; background: #1a1a2e; color: #fff; font-size: 1em; margin-bottom: 14px; }
+  input[name=code] { letter-spacing: 6px; font-size: 1.4em; text-align: center; }
+  button { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 1em; cursor: pointer; font-weight: 600; background: #4caf50; color: #fff; }
+  button:hover { background: #43a047; }
+  .err { color: #ef5350; font-size: 0.85em; margin: 6px 0; }
+  .perm { background: #0f3460; border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 0.88em; color: #cdd; }
+  details { margin-top: 18px; border-top: 1px solid #2a3a5a; padding-top: 12px; }
+  summary { cursor: pointer; color: #9aa; font-size: 0.85em; }
+  .scopes { background: #0f3460; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+  label.scope { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.95em; cursor: pointer; }
+  label.scope span { font-family: ui-monospace, monospace; color: #e0e0e0; }`;
+
+function authShell(title: string, body: string): string {
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
+<style>${AUTH_CSS}</style></head><body><div class="card">${body}</div></body></html>`;
+}
+
+function hiddenParams(p: OAuthParams): string {
+  return `<input type="hidden" name="client_id" value="${escapeHtml(p.client_id)}">
+    <input type="hidden" name="redirect_uri" value="${escapeHtml(p.redirect_uri)}">
+    <input type="hidden" name="code_challenge" value="${escapeHtml(p.code_challenge)}">
+    <input type="hidden" name="code_challenge_method" value="${escapeHtml(p.code_challenge_method)}">
+    <input type="hidden" name="state" value="${escapeHtml(p.state)}">`;
+}
+
+function operatorFormBody(clientLabel: string, p: OAuthParams, csrf: string): string {
+  const workspaceCheckboxes = ALL_WORKSPACES.map((ws) => {
+    const defaultChecked = ws !== "nora";
+    return `<label class="scope"><input type="checkbox" name="scope" value="${ws}" ${defaultChecked ? "checked" : ""}><span>${ws}</span></label>`;
+  }).join("");
+  return `<form method="POST" action="/oauth/authorize">
+    <input type="hidden" name="flow" value="operator">
+    ${hiddenParams(p)}
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <div class="scopes">${workspaceCheckboxes}</div>
+    <label for="password">Senha de operador:</label>
+    <input type="password" id="password" name="password" required placeholder="Senha">
+    <button type="submit">Autorizar (operador)</button>
+  </form>`;
+}
+
+function renderFriendEmail(clientLabel: string, p: OAuthParams, csrf: string, err = ""): string {
+  return authShell("Conectar — Segundo Cérebro", `
+    <h1>🧠 Conectar ${escapeHtml(clientLabel)}</h1>
+    <p class="subtitle">Entre com seu e-mail para autorizar o acesso ao <span class="client-name">seu segundo cérebro</span>.</p>
+    ${err ? `<p class="err">${escapeHtml(err)}</p>` : ""}
+    <form method="POST" action="/oauth/authorize">
+      <input type="hidden" name="flow" value="friend_email">
+      ${hiddenParams(p)}
+      <input type="hidden" name="_csrf" value="${csrf}">
+      <label for="email">Seu e-mail</label>
+      <input type="email" id="email" name="email" required placeholder="voce@email.com">
+      <button type="submit">Enviar código</button>
+    </form>
+    <details><summary>Sou o operador (senha de admin)</summary>
+      ${operatorFormBody(clientLabel, p, csrf)}
+    </details>`);
+}
+
+function renderFriendCode(clientLabel: string, p: OAuthParams, csrf: string, email: string, msg = ""): string {
+  return authShell("Código — Segundo Cérebro", `
+    <h1>Digite o código</h1>
+    <p class="subtitle">Enviamos um código de 6 dígitos para <span class="client-name">${escapeHtml(email)}</span> (se houver uma conta). Vale 10 minutos.</p>
+    ${msg ? `<p class="err">${escapeHtml(msg)}</p>` : ""}
+    <form method="POST" action="/oauth/authorize">
+      <input type="hidden" name="flow" value="friend_code">
+      ${hiddenParams(p)}
+      <input type="hidden" name="_csrf" value="${csrf}">
+      <input type="hidden" name="email" value="${escapeHtml(email)}">
+      <label for="code">Código</label>
+      <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autofocus>
+      <button type="submit">Verificar</button>
+    </form>`);
+}
+
+function renderFriendConsent(clientLabel: string, p: OAuthParams, csrf: string, email: string): string {
+  return authShell("Autorizar — Segundo Cérebro", `
+    <h1>Autorizar acesso</h1>
+    <p class="subtitle"><span class="client-name">${escapeHtml(clientLabel)}</span> quer acessar o segundo cérebro de <strong>${escapeHtml(email)}</strong>.</p>
+    <div class="perm">Permite buscar (<code>brain_search</code>) apenas no SEU conteúdo. Nenhuma outra conta é acessível.</div>
+    <form method="POST" action="/oauth/authorize">
+      <input type="hidden" name="flow" value="friend_consent">
+      ${hiddenParams(p)}
+      <input type="hidden" name="_csrf" value="${csrf}">
+      <button type="submit">Autorizar</button>
+    </form>`);
+}
 
 // --- Token lookup ---
 
@@ -498,204 +672,198 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     });
   });
 
-  // Authorization endpoint — render consent page
-  router.get("/oauth/authorize", (req, res) => {
-    const {
-      client_id,
-      redirect_uri,
-      response_type,
-      code_challenge,
-      code_challenge_method,
-      state,
-    } = req.query as Record<string, string>;
+  // Authorization endpoint — render consent page. Two flows share this endpoint:
+  //  - FRIEND (per-account): if a portal session cookie is present → 1-click
+  //    consent; else an inline email → 6-digit code login, then consent.
+  //  - OPERATOR (Bruno): the admin-password + workspace-scope form (unchanged),
+  //    available under a <details> on the no-session page.
+  router.get("/oauth/authorize", async (req, res) => {
+    const { client_id, redirect_uri, response_type, code_challenge, code_challenge_method, state } =
+      req.query as Record<string, string>;
 
     if (response_type !== "code") {
       res.status(400).json({ error: "unsupported_response_type" });
       return;
     }
-
     if (!client_id || !clients.has(client_id)) {
       res.status(400).json({ error: "invalid_client" });
       return;
     }
-
     if (!code_challenge || code_challenge_method !== "S256") {
       res.status(400).json({ error: "invalid_request", error_description: "PKCE S256 required" });
       return;
     }
-
     const client = clients.get(client_id)!;
     if (!client.redirect_uris.includes(redirect_uri)) {
       res.status(400).json({ error: "invalid_redirect_uri" });
       return;
     }
 
-    // Generate CSRF token
-    const csrf = generateToken();
-    csrfTokens.set(csrf, Date.now() + CSRF_TTL_MS);
-
-    const workspaceCheckboxes = ALL_WORKSPACES.map((ws) => {
-      const defaultChecked = ws !== "nora"; // Nora requires explicit opt-in
-      return `      <label class="scope">
-        <input type="checkbox" name="scope" value="${ws}" ${defaultChecked ? "checked" : ""}>
-        <span>${ws}</span>
-      </label>`;
-    }).join("\n");
-
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Notion MCP - Authorize</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a2e; color: #e0e0e0;
-      display: flex; justify-content: center; align-items: center;
-      min-height: 100vh; padding: 20px;
-    }
-    .card {
-      background: #16213e; border-radius: 12px; padding: 40px;
-      max-width: 460px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
-    h1 { font-size: 1.4em; margin-bottom: 8px; color: #fff; }
-    .subtitle { color: #888; margin-bottom: 24px; font-size: 0.9em; }
-    .client-name { color: #64b5f6; font-weight: 600; }
-    .permissions { background: #0f3460; border-radius: 8px; padding: 16px; margin: 16px 0; }
-    .permissions li { margin: 8px 0; font-size: 0.9em; list-style: none; }
-    .section-title { color: #aaa; font-size: 0.85em; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .scopes { background: #0f3460; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
-    label.scope {
-      display: flex; align-items: center; gap: 10px;
-      padding: 6px 0; font-size: 0.95em; cursor: pointer;
-    }
-    label.scope input { width: 16px; height: 16px; cursor: pointer; }
-    label.scope span { color: #e0e0e0; font-family: ui-monospace, monospace; }
-    label { display: block; margin-bottom: 8px; font-size: 0.9em; color: #aaa; }
-    input[type="password"] {
-      width: 100%; padding: 10px 14px; border-radius: 8px;
-      border: 1px solid #333; background: #1a1a2e; color: #fff;
-      font-size: 1em; margin-bottom: 16px;
-    }
-    .buttons { display: flex; gap: 12px; margin-top: 8px; }
-    button {
-      flex: 1; padding: 12px; border-radius: 8px; border: none;
-      font-size: 1em; cursor: pointer; font-weight: 600;
-    }
-    .approve { background: #4caf50; color: #fff; }
-    .approve:hover { background: #43a047; }
-    .deny { background: #333; color: #ccc; }
-    .deny:hover { background: #444; }
-    .error { color: #ef5350; font-size: 0.85em; margin-top: 8px; display: none; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Authorize Access</h1>
-    <p class="subtitle">
-      <span class="client-name">${escapeHtml(client.client_name || client_id)}</span>
-      wants to access your Notion MCP server.
-    </p>
-    <ul class="permissions">
-      <li>Search pages and databases</li>
-      <li>Read and create pages</li>
-      <li>Update pages and append content</li>
-      <li>Query databases</li>
-    </ul>
-    <form method="POST" action="/oauth/authorize">
-      <input type="hidden" name="client_id" value="${escapeHtml(client_id)}">
-      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirect_uri)}">
-      <input type="hidden" name="code_challenge" value="${escapeHtml(code_challenge)}">
-      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method)}">
-      <input type="hidden" name="state" value="${escapeHtml(state || "")}">
-      <input type="hidden" name="_csrf" value="${csrf}">
-      <div class="section-title">Workspaces this session may access</div>
-      <div class="scopes">
-${workspaceCheckboxes}
-      </div>
-      <label for="password">Enter your admin password to authorize:</label>
-      <input type="password" id="password" name="password" required placeholder="Password">
-      <p class="error" id="error-msg">Invalid password</p>
-      <div class="buttons">
-        <button type="button" class="deny" onclick="window.close()">Deny</button>
-        <button type="submit" class="approve">Authorize</button>
-      </div>
-    </form>
-  </div>
-</body>
-</html>`;
-
-    res
-      .header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'")
-      .type("html")
-      .send(html);
-  });
-
-  // Authorization POST (consent form submission)
-  router.post("/oauth/authorize", (req, res) => {
-    const {
+    const p: OAuthParams = {
       client_id,
       redirect_uri,
       code_challenge,
       code_challenge_method,
-      state,
-      password,
-      _csrf,
-      scope,
-    } = req.body;
+      state: state || "",
+    };
+    const csrf = generateToken();
+    csrfTokens.set(csrf, Date.now() + CSRF_TTL_MS);
+    const clientLabel = client.client_name || client_id;
+    const csp = "default-src 'self'; style-src 'unsafe-inline'";
 
-    const ip = req.ip || req.socket.remoteAddress || "unknown";
-
-    // Brute-force check
-    if (isBlocked(ip)) {
-      console.warn(
-        `[${new Date().toISOString()}] OAuth: blocked login attempt from ${ip} (too many failures)`
-      );
-      res.status(429).type("html").send(`<!DOCTYPE html>
-<html><head><title>Blocked</title>
-<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
-</head><body><h2>Too many failed attempts. Try again in 5 minutes.</h2></body></html>`);
+    // Friend already signed into the portal in this browser → straight to consent.
+    const accountId = await resolveSession(readCookie(req, SESSION_COOKIE)).catch(() => null);
+    if (accountId) {
+      const email = (await getAccountEmail(accountId).catch(() => null)) ?? "sua conta";
+      res.header("Content-Security-Policy", csp).type("html").send(renderFriendConsent(clientLabel, p, csrf, email));
       return;
     }
+    res.header("Content-Security-Policy", csp).type("html").send(renderFriendEmail(clientLabel, p, csrf));
+  });
 
-    // CSRF validation
+  // Issue a FRIEND (per-account) auth code and redirect back to the client.
+  // Re-validates the client + redirect_uri (never trusts hidden form fields).
+  const issueFriendAuthCode = async (res: any, p: OAuthParams, accountId: string): Promise<void> => {
+    const client = clients.get(p.client_id);
+    if (!client || !p.redirect_uri || !client.redirect_uris.includes(p.redirect_uri)) {
+      res.status(400).json({ error: "invalid_redirect_uri" });
+      return;
+    }
+    const ws = await friendWorkspaces(accountId);
+    const code = generateToken();
+    authCodes.set(code, {
+      code,
+      client_id: p.client_id,
+      redirect_uri: p.redirect_uri,
+      code_challenge: p.code_challenge,
+      code_challenge_method: p.code_challenge_method,
+      scopes: ws as Workspace[],
+      accountId,
+      expires_at: Date.now() + CODE_TTL_MS,
+    });
+    console.log(
+      `[${new Date().toISOString()}] OAuth: issued FRIEND auth code for ${accountId} client ${p.client_id} (ws: ${ws.join(",")})`
+    );
+    const url = new URL(p.redirect_uri);
+    url.searchParams.set("code", code);
+    if (p.state) url.searchParams.set("state", p.state);
+    res.redirect(302, url.toString());
+  };
+
+  // Authorization POST (consent form submission). Branches: friend_email →
+  // friend_code → (auth code); friend_consent (session) → (auth code); operator
+  // (admin password + workspace scopes, unchanged).
+  router.post("/oauth/authorize", async (req, res) => {
+    const { flow, client_id, redirect_uri, code_challenge, code_challenge_method, state, _csrf } = req.body;
+    const p: OAuthParams = {
+      client_id,
+      redirect_uri,
+      code_challenge,
+      code_challenge_method,
+      state: state || "",
+    };
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const csp = "default-src 'self'; style-src 'unsafe-inline'";
+    const newCsrf = () => {
+      const c = generateToken();
+      csrfTokens.set(c, Date.now() + CSRF_TTL_MS);
+      return c;
+    };
+    const clientLabel = clients.get(client_id)?.client_name || client_id || "o app";
+
+    // CSRF (all flows, single-use).
     if (!_csrf || !csrfTokens.has(_csrf)) {
       res.status(403).json({ error: "invalid_csrf_token" });
       return;
     }
     csrfTokens.delete(_csrf);
 
-    // Verify admin password (scrypt, timing-safe)
+    // FRIEND — email step: send a login code (only if the email maps to an
+    // account; generic either way to avoid enumeration), render the code page.
+    if (flow === "friend_email") {
+      const email = normalizeEmail(typeof req.body.email === "string" ? req.body.email : "");
+      if (!isLikelyEmail(email)) {
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendEmail(clientLabel, p, newCsrf(), "E-mail inválido."));
+        return;
+      }
+      // Per-email send cap (anti-bombing). Checked BEFORE issuing and uniformly
+      // for any email, so it neither bombs an inbox nor leaks account existence.
+      if (issueBlocked(email)) {
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendCode(clientLabel, p, newCsrf(), email, "Muitos códigos enviados. Aguarde alguns minutos e tente de novo."));
+        return;
+      }
+      recordIssue(email);
+      try {
+        const acct = await findAccountByEmail(email);
+        if (acct) {
+          const code = await issueLoginCode(email, acct);
+          void sendLoginCodeEmail(email, code).catch((e) => console.error(`[oauth] code send failed: ${e?.message ?? e}`));
+        }
+      } catch (e: any) {
+        console.error(`[oauth] friend_email failed: ${e?.message ?? e}`);
+      }
+      res.header("Content-Security-Policy", csp).type("html").send(renderFriendCode(clientLabel, p, newCsrf(), email));
+      return;
+    }
+
+    // FRIEND — code step: verify the code, then issue the auth code.
+    if (flow === "friend_code") {
+      const email = normalizeEmail(typeof req.body.email === "string" ? req.body.email : "");
+      const code = String(req.body.code ?? "").trim();
+      if (codeBlocked(email)) {
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendCode(clientLabel, p, newCsrf(), email, "Muitas tentativas. Peça um novo código pelo Claude.ai."));
+        return;
+      }
+      const r = await consumeLoginCode(email, code).catch(() => null);
+      if (!r || !r.accountId) {
+        recordCodeFail(email);
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendCode(clientLabel, p, newCsrf(), email, "Código inválido ou expirado."));
+        return;
+      }
+      await issueFriendAuthCode(res, p, r.accountId);
+      return;
+    }
+
+    // FRIEND — 1-click consent (already signed into the portal in this browser).
+    if (flow === "friend_consent") {
+      const accountId = await resolveSession(readCookie(req, SESSION_COOKIE)).catch(() => null);
+      if (!accountId) {
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendEmail(clientLabel, p, newCsrf(), "Sessão expirada. Entre com seu e-mail."));
+        return;
+      }
+      await issueFriendAuthCode(res, p, accountId);
+      return;
+    }
+
+    // OPERATOR — admin password + workspace scopes (unchanged behavior).
+    if (isBlocked(ip)) {
+      console.warn(`[${new Date().toISOString()}] OAuth: blocked login attempt from ${ip} (too many failures)`);
+      res.status(429).type("html").send(`<!DOCTYPE html>
+<html><head><title>Blocked</title>
+<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
+</head><body><h2>Too many failed attempts. Try again in 5 minutes.</h2></body></html>`);
+      return;
+    }
+    const { password, scope } = req.body;
     if (!password || typeof password !== "string" || !verifyPassword(password)) {
       recordFailedAttempt(ip);
-      console.warn(
-        `[${new Date().toISOString()}] OAuth: failed password attempt from ${ip}`
-      );
+      console.warn(`[${new Date().toISOString()}] OAuth: failed password attempt from ${ip}`);
       res.status(403).type("html").send(`<!DOCTYPE html>
 <html><head><title>Error</title>
 <style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
 </head><body><h2>Invalid password. Close this tab and try again.</h2></body></html>`);
       return;
     }
-
     clearFailedAttempts(ip);
-
     if (!client_id || !clients.has(client_id)) {
       res.status(400).json({ error: "invalid_client" });
       return;
     }
-
-    // Defense in depth: revalidate redirect_uri against the registered client.
-    // The GET handler already did this, but a hand-crafted POST could bypass it.
     const client = clients.get(client_id)!;
     if (!redirect_uri || !client.redirect_uris.includes(redirect_uri)) {
       res.status(400).json({ error: "invalid_redirect_uri" });
       return;
     }
-
-    // Parse and validate scopes. Reject if user unchecked everything.
     const scopes = normalizeWorkspaces(scope);
     if (scopes.length === 0) {
       res.status(400).type("html").send(`<!DOCTYPE html>
@@ -704,7 +872,6 @@ ${workspaceCheckboxes}
 </head><body><h2>Select at least one workspace to authorize.</h2></body></html>`);
       return;
     }
-
     const code = generateToken();
     authCodes.set(code, {
       code,
@@ -715,11 +882,9 @@ ${workspaceCheckboxes}
       scopes,
       expires_at: Date.now() + CODE_TTL_MS,
     });
-
     console.log(
       `[${new Date().toISOString()}] OAuth: issued auth code for client ${client_id} from ${ip} (scopes: ${scopes.join(",")})`
     );
-
     const url = new URL(redirect_uri);
     url.searchParams.set("code", code);
     if (state) url.searchParams.set("state", state);
@@ -767,21 +932,24 @@ ${workspaceCheckboxes}
       }
 
       const grantedScopes = validation.record.scopes as Workspace[];
+      const grantedAccountId = (validation.record as RefreshToken).accountId;
 
-      // ROTATE: mint a new access token + new refresh token (preserving scopes),
-      // invalidate the old refresh token (drop + revoke for replay defense).
+      // ROTATE: mint a new access token + new refresh token (preserving scopes +
+      // accountId), invalidate the old refresh token (drop + revoke for replay).
       const newAccess = generateToken();
       const newRefresh = generateToken();
       accessTokens.set(newAccess, {
         token: newAccess,
         client_id,
         scopes: grantedScopes,
+        accountId: grantedAccountId,
         expires_at: now + ACCESS_TTL_MS,
       });
       refreshTokens.set(newRefresh, {
         token: newRefresh,
         client_id,
         scopes: grantedScopes,
+        accountId: grantedAccountId,
         expires_at: now + REFRESH_TTL_MS,
       });
       refreshTokens.delete(refresh_token);
@@ -867,16 +1035,18 @@ ${workspaceCheckboxes}
       token,
       client_id,
       scopes: authCode.scopes,
+      accountId: authCode.accountId, // friend flow → /mcp scopes to this account
       expires_at: now + ACCESS_TTL_MS,
     });
 
-    // ALSO mint a refresh token bound to {client_id, scopes}, returned alongside
-    // the access token. Additive — existing clients that ignore it are unaffected.
+    // ALSO mint a refresh token bound to {client_id, scopes, accountId}, returned
+    // alongside the access token. Additive — clients that ignore it are unaffected.
     const refreshToken = generateToken();
     refreshTokens.set(refreshToken, {
       token: refreshToken,
       client_id,
       scopes: authCode.scopes,
+      accountId: authCode.accountId,
       expires_at: now + REFRESH_TTL_MS,
     });
     saveStore();

@@ -16,11 +16,12 @@
   <!-- Conectar ao assistente de IA (MCP) — como o amigo realmente usa o cérebro -->
   <div class="card">
     <strong>🔌 Conectar ao seu assistente (Claude, Cursor…)</strong>
-    <p class="muted">Seu cérebro vira uma ferramenta no seu assistente de IA. Gere seu token e cole o comando — depois é só pedir "busca no meu cérebro: …".</p>
+    <p class="muted">Seu cérebro vira uma ferramenta no seu assistente. Depois é só pedir "busca no meu cérebro: …".</p>
     <div class="row" style="border:none">
       <span class="muted">Endereço MCP: <code id="mcp-url">—</code></span>
       <button class="small" id="mcp-gen">Gerar token de acesso</button>
     </div>
+    <p class="muted" style="margin-top:8px"><strong>No Claude.ai / Claude Desktop:</strong> Configurações → Conectores → <em>Adicionar conector personalizado</em> → cole o <strong>endereço MCP</strong> acima. Ele vai pedir seu e-mail e um código de 6 dígitos para autorizar (não precisa do token abaixo). <strong>No Claude Code / Cursor:</strong> gere o token abaixo e use o comando.</p>
     <div id="mcp-result" class="hidden">
       <div class="notice err" style="margin-top:10px">⚠️ Copie agora: o token aparece <strong>uma única vez</strong>. Se perder, é só gerar outro (o anterior deixa de valer).</div>
       <label>Seu token de acesso</label>

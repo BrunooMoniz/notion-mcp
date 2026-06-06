@@ -7,6 +7,9 @@ import {
   hashMagic,
   issueMagicLink,
   consumeMagicLink,
+  generateLoginCode,
+  issueLoginCode,
+  consumeLoginCode,
 } from "../magic-link.js";
 import { __setPoolForTest } from "../../rag/storage.js";
 
@@ -90,4 +93,27 @@ test("unknown/empty tokens return null", async () => {
   __setPoolForTest(memPool() as never);
   assert.equal(await consumeMagicLink(undefined), null);
   assert.equal(await consumeMagicLink("nope"), null);
+});
+
+test("generateLoginCode is 6 digits", () => {
+  for (let i = 0; i < 50; i++) assert.match(generateLoginCode(), /^\d{6}$/);
+});
+
+test("login code: issue → consume once, scoped to its email, single-use", async () => {
+  __setPoolForTest(memPool() as never);
+  const code = await issueLoginCode("a@b.com", "friend:1");
+  assert.match(code, /^\d{6}$/);
+  // wrong email must not validate the code
+  assert.equal(await consumeLoginCode("other@b.com", code), null);
+  // correct email + code works once
+  assert.deepEqual(await consumeLoginCode("a@b.com", code), { email: "a@b.com", accountId: "friend:1" });
+  // and only once
+  assert.equal(await consumeLoginCode("a@b.com", code), null);
+});
+
+test("login code: bad format rejected without a DB hit", async () => {
+  __setPoolForTest(memPool() as never);
+  assert.equal(await consumeLoginCode("a@b.com", "12345"), null); // 5 digits
+  assert.equal(await consumeLoginCode("a@b.com", "abcdef"), null);
+  assert.equal(await consumeLoginCode("", "123456"), null);
 });
