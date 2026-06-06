@@ -346,6 +346,28 @@ function recordCodeFail(email: string): void {
   codeAttempts.set(email, e);
 }
 
+// Per-email code-SEND limiter. The global /oauth IP limiter collapses to one
+// bucket behind the funnel (loopback), so cap OTP issuance per email here — both
+// to stop inbox-bombing a known friend and to bound Resend usage. Applied
+// uniformly (account exists or not) so it never leaks account existence.
+const codeIssue = new Map<string, { count: number; until: number }>();
+const CODE_SEND_MAX = 4;
+function issueBlocked(email: string): boolean {
+  const e = codeIssue.get(email);
+  if (!e) return false;
+  if (Date.now() > e.until) {
+    codeIssue.delete(email);
+    return false;
+  }
+  return e.count >= CODE_SEND_MAX;
+}
+function recordIssue(email: string): void {
+  const e = codeIssue.get(email) ?? { count: 0, until: 0 };
+  if (e.count === 0) e.until = Date.now() + 10 * 60_000;
+  e.count += 1;
+  codeIssue.set(email, e);
+}
+
 const AUTH_CSS = `* { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
@@ -764,6 +786,13 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
         res.header("Content-Security-Policy", csp).type("html").send(renderFriendEmail(clientLabel, p, newCsrf(), "E-mail inválido."));
         return;
       }
+      // Per-email send cap (anti-bombing). Checked BEFORE issuing and uniformly
+      // for any email, so it neither bombs an inbox nor leaks account existence.
+      if (issueBlocked(email)) {
+        res.header("Content-Security-Policy", csp).type("html").send(renderFriendCode(clientLabel, p, newCsrf(), email, "Muitos códigos enviados. Aguarde alguns minutos e tente de novo."));
+        return;
+      }
+      recordIssue(email);
       try {
         const acct = await findAccountByEmail(email);
         if (acct) {
