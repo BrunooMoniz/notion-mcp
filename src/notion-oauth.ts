@@ -142,6 +142,30 @@ export async function associateNotionToAccount(
   return { accountId, workspace };
 }
 
+/**
+ * 001-account-portal — associate a Notion Personal Access Token to an EXISTING
+ * portal account (advanced path; the recommended path is OAuth). Stores the PAT
+ * encrypted and registers its workspace. NOTE: PATs return 0 for /v1/search, so
+ * the per-account indexer can't auto-discover their pages — PAT gives full read
+ * access by ID but limited auto-indexing (an OAuth connect is recommended for
+ * automatic indexing). Idempotent.
+ */
+export async function associatePatToAccount(
+  accountId: string,
+  pat: string,
+  identity: { id: string; name: string },
+): Promise<{ workspace: string }> {
+  const workspace = identity.id;
+  const p = getPool();
+  await p.query(
+    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [accountId, workspace],
+  );
+  await setAccountSecret(accountId, `notion_pat:${workspace}`, pat);
+  return { workspace };
+}
+
 // --- PAT path (advanced) ----------------------------------------------------
 // Some users prefer a Personal Access Token for full-workspace read coverage
 // (no per-page picker). Tradeoff: PATs return 0 for /v1/search, so the indexer

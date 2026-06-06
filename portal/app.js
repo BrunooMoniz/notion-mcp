@@ -92,6 +92,24 @@ document.getElementById("notion-connect").onclick = (e) => {
   location.href = API + "/portal/notion/connect";
 };
 
+document.getElementById("pat-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pat = document.getElementById("pat").value.trim();
+  if (!pat) return;
+  const msg = document.getElementById("pat-msg");
+  msg.classList.remove("hidden");
+  msg.textContent = "Validando…";
+  const res = await apiJSON("/portal/notion/pat", "POST", { pat });
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) {
+    document.getElementById("pat").value = "";
+    msg.textContent = `Conectado via token: ${body.name || "Notion"}.`;
+    load();
+  } else {
+    msg.textContent = body.error || "Falha ao validar o token.";
+  }
+});
+
 document.getElementById("ical-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   await apiJSON("/portal/ical", "POST", {
