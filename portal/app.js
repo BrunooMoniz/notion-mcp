@@ -61,7 +61,39 @@ async function load() {
     list.appendChild(row);
   }
 
+  await loadGoogleAccounts();
   await renderActivation(s);
+}
+
+async function loadGoogleAccounts() {
+  const el = document.getElementById("google-accounts");
+  if (!el) return;
+  let accounts = [];
+  try {
+    const res = await api("/portal/google/accounts");
+    if (res.ok) accounts = await res.json();
+  } catch {
+    /* ignore */
+  }
+  el.innerHTML = "";
+  if (!accounts.length) {
+    el.innerHTML = '<p class="muted">Nenhuma conta Google conectada.</p>';
+    return;
+  }
+  for (const a of accounts) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span>${escapeHtml(a.email)}</span>`;
+    const btn = document.createElement("button");
+    btn.className = "danger";
+    btn.textContent = "Remover";
+    btn.onclick = async () => {
+      await apiJSON("/portal/google/disconnect", "POST", { email: a.email });
+      load();
+    };
+    row.appendChild(btn);
+    el.appendChild(row);
+  }
 }
 
 function statusLine(src) {
