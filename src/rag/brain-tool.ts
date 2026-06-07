@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { brainSearch } from "./search.js";
 import type { SearchFilters } from "./types.js";
+import { QuotaExceededError } from "../billing/usage.js";
 
 const filtersSchema = z
   .object({
@@ -42,13 +43,25 @@ Options:
     },
     async (args) => {
       const filters = args.filters as SearchFilters | undefined;
-      const hits = await brainSearch(args.query, {
-        topK: args.top_k,
-        mode: args.mode,
-        rerank: args.rerank,
-        filters,
-        includeNeighbors: args.include_neighbors,
-      });
+      let hits;
+      try {
+        hits = await brainSearch(args.query, {
+          topK: args.top_k,
+          mode: args.mode,
+          rerank: args.rerank,
+          filters,
+          includeNeighbors: args.include_neighbors,
+        });
+      } catch (e) {
+        if (e instanceof QuotaExceededError) {
+          return {
+            content: [
+              { type: "text", text: JSON.stringify({ error: "quota_exceeded", message: e.message }, null, 2) },
+            ],
+          };
+        }
+        throw e;
+      }
       return {
         content: [
           {
