@@ -20,7 +20,8 @@ import { createAdminRouter } from "./admin/routes.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
 import { requestContext, getContext, getAccountId, type RequestContext } from "./context.js";
-import { isOwnerContext, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
+import { isOwnerContext, isOperatorToken, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
+import { ALL_WORKSPACES } from "./clients.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
 
@@ -288,7 +289,16 @@ app.use("/mcp", async (req, res, next) => {
         ip,
       };
     } else {
-      ctx = { authType: "oauth", scopes: info.scopes, clientId: info.client_id, ip };
+      // No accountId: operator OR a legacy/ambiguous token. Owner is decided by a
+      // POSITIVE operator signal (never the absence of accountId), so a friend
+      // token that lost its accountId cannot inherit the owner tool set.
+      ctx = {
+        authType: "oauth",
+        scopes: info.scopes,
+        clientId: info.client_id,
+        ip,
+        isOperator: isOperatorToken(info, ALL_WORKSPACES),
+      };
     }
     requestContext.run(ctx, () => next());
     return;

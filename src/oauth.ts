@@ -141,6 +141,7 @@ interface AuthCode {
   scopes: Workspace[];
   expires_at: number;
   accountId?: string; // 001-account-portal: set for the friend (per-account) flow
+  kind?: "operator"; // operator (admin-password) flow → owner tools/instructions at /mcp
 }
 
 export interface AccessToken {
@@ -149,6 +150,7 @@ export interface AccessToken {
   scopes: Workspace[];
   expires_at: number;
   accountId?: string; // friend flow → /mcp scopes to this account
+  kind?: "operator"; // operator (admin-password) flow → owner tools/instructions at /mcp
 }
 
 export interface RefreshToken {
@@ -157,6 +159,7 @@ export interface RefreshToken {
   scopes: Workspace[];
   expires_at: number;
   accountId?: string;
+  kind?: "operator"; // operator (admin-password) flow → owner tools/instructions at /mcp
 }
 
 const clients = new Map<string, RegisteredClient>();
@@ -884,6 +887,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       code_challenge,
       code_challenge_method,
       scopes,
+      kind: "operator", // admin-password flow → owner tools/instructions at /mcp
       expires_at: Date.now() + CODE_TTL_MS,
     });
     console.log(
@@ -937,6 +941,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
 
       const grantedScopes = validation.record.scopes as Workspace[];
       const grantedAccountId = (validation.record as RefreshToken).accountId;
+      const grantedKind = (validation.record as RefreshToken).kind;
 
       // ROTATE: mint a new access token + new refresh token (preserving scopes +
       // accountId), invalidate the old refresh token (drop + revoke for replay).
@@ -947,6 +952,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
         client_id,
         scopes: grantedScopes,
         accountId: grantedAccountId,
+        kind: grantedKind,
         expires_at: now + ACCESS_TTL_MS,
       });
       refreshTokens.set(newRefresh, {
@@ -954,6 +960,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
         client_id,
         scopes: grantedScopes,
         accountId: grantedAccountId,
+        kind: grantedKind,
         expires_at: now + REFRESH_TTL_MS,
       });
       refreshTokens.delete(refresh_token);
@@ -1040,6 +1047,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       client_id,
       scopes: authCode.scopes,
       accountId: authCode.accountId, // friend flow → /mcp scopes to this account
+      kind: authCode.kind, // operator flow → owner; friend leaves this undefined
       expires_at: now + ACCESS_TTL_MS,
     });
 
@@ -1051,6 +1059,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       client_id,
       scopes: authCode.scopes,
       accountId: authCode.accountId,
+      kind: authCode.kind,
       expires_at: now + REFRESH_TTL_MS,
     });
     saveStore();

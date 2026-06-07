@@ -7,9 +7,40 @@ import { DEFAULT_ACCOUNT_ID, type RequestContext } from "./context.js";
 
 /** True when the request is the operator/owner (full notion_* suite + full
  *  INSTRUCTIONS), false for an onboarded friend account (restricted, safe set).
- *  Owner = no accountId (static bearer = "all") OR the default account id. */
+ *
+ *  FAIL-CLOSED: owner requires a POSITIVE signal — the static "all" bearer, the
+ *  default account, or an explicit operator flag set by the auth layer. The mere
+ *  absence of accountId is NOT owner: a friend OAuth token that reaches /mcp
+ *  without a populated accountId (legacy persisted token, refresh edge, dropped
+ *  field) must fall to the friend tool set, never inherit the owner's tools +
+ *  private workspace names. `undefined` ctx = out-of-request (cron/eval/startup),
+ *  trusted/internal, treated as owner. */
 export function isOwnerContext(ctx: RequestContext | undefined): boolean {
-  return !ctx?.accountId || ctx.accountId === DEFAULT_ACCOUNT_ID;
+  if (!ctx) return true; // internal: cron / eval / startup (no HTTP request)
+  if (ctx.scopes === "all") return true; // static BEARER_TOKEN (Claude Code)
+  if (ctx.accountId === DEFAULT_ACCOUNT_ID) return true; // the operator's own account
+  if (ctx.accountId) return false; // any other account = friend / per-account → never owner
+  return ctx.isOperator === true; // no accountId: owner ONLY if positively flagged
+}
+
+/** Pure classifier the auth layer uses to decide ctx.isOperator for an OAuth
+ *  token that carries NO accountId. Operator iff: scopes === "all", an explicit
+ *  kind "operator" (new tokens), or — bridge for pre-flag tokens — the token is
+ *  scoped only to the operator's own known workspaces. A token with an accountId
+ *  is a friend and is NEVER operator. `knownWorkspaces` is the operator's
+ *  configured workspace set (ALL_WORKSPACES), injected to keep this pure. */
+export function isOperatorToken(
+  info: { accountId?: string; scopes: string[] | "all"; kind?: string },
+  knownWorkspaces: readonly string[],
+): boolean {
+  if (info.accountId) return false; // has a tenant → friend, never operator
+  if (info.scopes === "all") return true;
+  if (info.kind === "operator") return true;
+  return (
+    Array.isArray(info.scopes) &&
+    info.scopes.length > 0 &&
+    info.scopes.every((s) => knownWorkspaces.includes(s))
+  );
 }
 
 // A FRIEND account must NOT receive the owner's INSTRUCTIONS: those name Bruno's
