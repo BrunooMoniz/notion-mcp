@@ -152,6 +152,12 @@ For claude.ai as the operator: open the registration window
 add the server URL in claude.ai, and on the consent screen pick workspaces + enter
 your admin password (PKCE S256). The token is scoped to those workspaces.
 
+For claude.ai as a **friend** (no operator, no curl): sign into the portal and click
+**Liberar conexão ao Claude.ai** in the connector card. That opens a short
+self-service registration window (`POST /portal/connect-window`, session-gated,
+default 5 min — override with `PORTAL_CONNECT_WINDOW_MINUTES`); then add the server
+URL in claude.ai and authorize with your email + 6-digit code within the window.
+
 ---
 
 ## The second brain (RAG)

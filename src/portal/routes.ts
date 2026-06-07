@@ -227,6 +227,25 @@ export function createPortalRouter(): express.Router {
     res.json({ token, mcp_url: `${MCP_BASE}/mcp` });
   });
 
+  // Self-service: open a SHORT OAuth Dynamic-Client-Registration window so the
+  // friend can add the Zinom connector on claude.ai (which registers itself via
+  // /oauth/register) without an operator running a curl. Gated by the portal
+  // session — only a signed-in, invite-verified account reaches here — and kept
+  // brief: claude.ai's registration is a single call, so a few minutes covers a
+  // retry. Registration alone grants nothing (the real gate is /oauth/authorize:
+  // email + 6-digit code), so a brief window for an authenticated friend is the
+  // right trade, and far better than the manual 60-min operator window.
+  const CONNECT_WINDOW_MS = parseInt(process.env.PORTAL_CONNECT_WINDOW_MINUTES ?? "5", 10) * 60_000;
+  router.post("/portal/connect-window", requireSession, async (_req, res) => {
+    const { openRegistrationWindow } = await import("../oauth-registration-window.js");
+    const expiry = openRegistrationWindow(CONNECT_WINDOW_MS);
+    res.json({
+      open_until: new Date(expiry).toISOString(),
+      ttl_seconds: Math.round(CONNECT_WINDOW_MS / 1000),
+      mcp_url: `${MCP_BASE}/mcp`,
+    });
+  });
+
   // --- Billing (Fase 3) -----------------------------------------------------
   const APP_URL = process.env.BASE_URL ?? "https://zinom.ai";
 

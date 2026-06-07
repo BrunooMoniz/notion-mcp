@@ -21,6 +21,15 @@ import { resolveSession, SESSION_COOKIE } from "./portal/session.js";
 import { findAccountByEmail, getAccountEmail, normalizeEmail, isLikelyEmail } from "./portal/accounts.js";
 import { issueLoginCode, consumeLoginCode } from "./portal/magic-link.js";
 import { sendLoginCodeEmail } from "./portal/email.js";
+import {
+  isRegistrationOpen,
+  openRegistrationWindow,
+  closeRegistrationWindow,
+} from "./oauth-registration-window.js";
+
+// Re-export so existing importers of `isRegistrationOpen` from this module keep
+// working; the state now lives in oauth-registration-window.ts (portal-shareable).
+export { isRegistrationOpen };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "data");
@@ -243,11 +252,6 @@ const REFRESH_TTL_MS = parseInt(process.env.OAUTH_REFRESH_TTL_DAYS ?? "90", 10) 
 // Opened by POST /admin/open-registration (gated by BEARER_TOKEN).
 // Set ENROLLMENT_WINDOW_MS env var to override (in minutes).
 const ENROLLMENT_WINDOW_MS = parseInt(process.env.ENROLLMENT_WINDOW_MINUTES ?? "60") * 60_000;
-let registrationWindowUntil = 0;
-
-export function isRegistrationOpen(): boolean {
-  return Date.now() < registrationWindowUntil;
-}
 
 // --- Brute-force protection ---
 const failedAttempts = new Map<string, { count: number; blockedUntil: number }>();
@@ -507,13 +511,13 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       res.status(401).json({ error: "unauthorized" });
       return;
     }
-    registrationWindowUntil = Date.now() + ENROLLMENT_WINDOW_MS;
+    const expiry = openRegistrationWindow(ENROLLMENT_WINDOW_MS);
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     console.log(
-      `[${new Date().toISOString()}] OAuth: registration window opened until ${new Date(registrationWindowUntil).toISOString()} by ${ip}`
+      `[${new Date().toISOString()}] OAuth: registration window opened until ${new Date(expiry).toISOString()} by ${ip}`
     );
     res.json({
-      open_until: new Date(registrationWindowUntil).toISOString(),
+      open_until: new Date(expiry).toISOString(),
       ttl_seconds: ENROLLMENT_WINDOW_MS / 1000,
     });
   });
@@ -528,7 +532,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       res.status(401).json({ error: "unauthorized" });
       return;
     }
-    registrationWindowUntil = 0;
+    closeRegistrationWindow();
     console.log(`[${new Date().toISOString()}] OAuth: registration window closed manually`);
     res.json({ ok: true });
   });
