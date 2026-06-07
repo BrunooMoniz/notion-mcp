@@ -13,6 +13,9 @@ import {
   buildFilterClauses,
   getNeighbors,
   getStatus,
+  getBrainCounts,
+  listBrainDocuments,
+  titleFromHeaderLine,
   __setPoolForTest,
 } from "../storage.js";
 import type { ChunkWithEmbedding } from "../types.js";
@@ -560,4 +563,93 @@ test("getStatus scopes status_runs and the sync_state join by account_id", async
   assert.match(sql, /ss\.account_id = \$1/i);
   assert.deepEqual(params, ["bruno"]);
   __setPoolForTest(null);
+});
+
+// --- WS3: brain counts + document navigation (account-scoped) ---------------
+
+test("titleFromHeaderLine strips the provenance bracket to recover the title", () => {
+  assert.equal(titleFromHeaderLine("[Reuniões · personal · 2026-06-04] Sync de Produto"), "Sync de Produto");
+  assert.equal(titleFromHeaderLine("Sem colchete vira o título"), "Sem colchete vira o título");
+  assert.equal(titleFromHeaderLine("[só o bracket]"), "[só o bracket]"); // nothing after -> keep raw
+  assert.equal(titleFromHeaderLine(""), "");
+  assert.equal(titleFromHeaderLine(null), "");
+});
+
+// Build a chunk whose first line is a context header (as index-document stores it).
+function navChunk(sourceId, idx, accountId, opts) {
+  const header = `[${opts.db || "DB"} · ${opts.ws || "personal"}${opts.date ? " · " + opts.date : ""}] ${opts.title}`;
+  return {
+    id: `${accountId}:${sourceId}:${idx}`,
+    source_type: opts.source_type || "notion",
+    source_id: sourceId,
+    workspace: opts.ws || "personal",
+    db_name: opts.db || null,
+    parent_url: opts.url || null,
+    chunk_index: idx,
+    text: `${header}\n\n${opts.body || "conteúdo"}`,
+    embedding: fakeEmbed(idx + 1),
+    metadata: opts.date ? { data: opts.date } : {},
+    source_updated: new Date("2026-05-01"),
+    account_id: accountId,
+  };
+}
+
+test("getBrainCounts aggregates per source_type and isolates by account", async () => {
+  if (!HAS_PG) {
+    console.log("skipping: no POSTGRES_URL");
+    return;
+  }
+  const A = "friend:counts-A";
+  const B = "friend:counts-B";
+  const sa = `${TEST_PREFIX}-cnt`;
+  await upsertChunks([
+    navChunk(`${sa}-n1`, 0, A, { source_type: "notion", title: "N1" }),
+    navChunk(`${sa}-n1`, 1, A, { source_type: "notion", title: "N1" }),
+    navChunk(`${sa}-n2`, 0, A, { source_type: "notion", title: "N2" }),
+    navChunk(`${sa}-g1`, 0, A, { source_type: "granola", title: "G1" }),
+    navChunk(`${sa}-nB`, 0, B, { source_type: "notion", title: "B's" }),
+  ]);
+  const c = await getBrainCounts(A);
+  const notion = c.bySource.find((s) => s.source_type === "notion");
+  const granola = c.bySource.find((s) => s.source_type === "granola");
+  assert.equal(notion.documents, 2); // n1, n2 (distinct source_id)
+  assert.equal(notion.chunks, 3); // 2 + 1
+  assert.equal(granola.documents, 1);
+  assert.equal(c.totals.documents, 3); // B's doc is NOT counted for A
+  assert.equal(c.totals.chunks, 4);
+  await getPool().query(`DELETE FROM brain_chunks WHERE source_id LIKE $1`, [`${sa}%`]);
+});
+
+test("listBrainDocuments returns one row per document with title from the header, account-scoped", async () => {
+  if (!HAS_PG) {
+    console.log("skipping: no POSTGRES_URL");
+    return;
+  }
+  const A = "friend:list-A";
+  const B = "friend:list-B";
+  const sa = `${TEST_PREFIX}-list`;
+  await upsertChunks([
+    navChunk(`${sa}-doc1`, 0, A, { title: "Plano de Lançamento", db: "Projetos", date: "2026-06-04", url: "https://notion.so/doc1" }),
+    navChunk(`${sa}-doc1`, 1, A, { title: "Plano de Lançamento", db: "Projetos", date: "2026-06-04" }),
+    navChunk(`${sa}-doc2`, 0, A, { source_type: "granola", title: "1:1 com Marina", date: "2026-06-05" }),
+    navChunk(`${sa}-docB`, 0, B, { title: "Coisa da conta B" }),
+  ]);
+  const docs = await listBrainDocuments(A, {});
+  const ids = docs.map((d) => d.source_id);
+  assert.ok(!ids.includes(`${sa}-docB`)); // account B never leaks
+  const doc1 = docs.find((d) => d.source_id === `${sa}-doc1`);
+  assert.equal(doc1.title, "Plano de Lançamento"); // ONE row, title from header, bracket stripped
+  assert.equal(doc1.parent_url, "https://notion.so/doc1");
+  assert.equal(doc1.doc_date, "2026-06-04");
+  assert.equal(docs.filter((d) => d.source_id === `${sa}-doc1`).length, 1); // distinct
+
+  // source_type filter
+  const onlyGranola = await listBrainDocuments(A, { sourceType: "granola" });
+  assert.deepEqual(onlyGranola.map((d) => d.title).sort(), ["1:1 com Marina"]);
+
+  // ILIKE q filter (matches header/title)
+  const q = await listBrainDocuments(A, { q: "Marina" });
+  assert.deepEqual(q.map((d) => d.title), ["1:1 com Marina"]);
+
+  await getPool().query(`DELETE FROM brain_chunks WHERE source_id LIKE $1`, [`${sa}%`]);
 });

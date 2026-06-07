@@ -556,3 +556,135 @@ export async function getNeighbors(
   );
   return rows.map(rowToChunk);
 }
+
+// --- WS3: per-account brain counts + document navigation --------------------
+// Powers the portal "status do meu cérebro" card and the brain navigator. Both
+// are account-scoped: callers (portal routes) pass the SESSION accountId; the
+// WHERE always pins account_id, so one account can never read another's brain.
+
+export interface BrainSourceCount {
+  source_type: string;
+  documents: number;
+  chunks: number;
+  last_indexed_at: Date | null;
+}
+
+/** Count indexed documents (distinct source_id) and chunks per source_type for
+ *  ONE account, plus totals. Cheap aggregate over brain_chunks (uses the
+ *  (account_id, workspace, db_name) index); no Voyage, no search quota. */
+export async function getBrainCounts(
+  accountId: string,
+): Promise<{ bySource: BrainSourceCount[]; totals: { documents: number; chunks: number } }> {
+  const p = getPool();
+  const { rows } = await p.query<{
+    source_type: string;
+    documents: string;
+    chunks: string;
+    last_indexed_at: Date | null;
+  }>(
+    `SELECT source_type,
+            COUNT(DISTINCT source_id) AS documents,
+            COUNT(*)                  AS chunks,
+            MAX(indexed_at)           AS last_indexed_at
+       FROM brain_chunks
+      WHERE account_id = $1
+      GROUP BY source_type
+      ORDER BY source_type`,
+    [accountId],
+  );
+  const bySource = rows.map((r) => ({
+    source_type: r.source_type,
+    documents: Number(r.documents),
+    chunks: Number(r.chunks),
+    last_indexed_at: r.last_indexed_at,
+  }));
+  const totals = bySource.reduce(
+    (a, s) => ({ documents: a.documents + s.documents, chunks: a.chunks + s.chunks }),
+    { documents: 0, chunks: 0 },
+  );
+  return { bySource, totals };
+}
+
+export interface BrainDocument {
+  source_id: string;
+  source_type: string;
+  db_name: string | null;
+  workspace: string | null;
+  parent_url: string | null;
+  title: string;
+  doc_date: string | null; // YYYY-MM-DD or null
+}
+
+/**
+ * Recover a document title from a chunk's first line. Every chunk is stored with
+ * a deterministic provenance header as its first line:
+ *   `[db · workspace · YYYY-MM-DD · frente] Título`
+ * (see context-header.ts). We strip the leading bracket to get the title; if
+ * there is no bracket, the line IS the title. Exported for unit tests.
+ */
+export function titleFromHeaderLine(line: string | null | undefined): string {
+  const raw = (line ?? "").trim();
+  const stripped = raw.replace(/^\[[^\]]*\]\s*/, "").trim();
+  return stripped || raw;
+}
+
+/**
+ * List DISTINCT indexed documents (one row per source_id) for ONE account, for
+ * the portal brain navigator. Optional source_type and a cheap ILIKE substring
+ * filter (over the chunk text, which includes the header: title/db/workspace +
+ * content). Paginated. Pure SQL — no Voyage, no search-quota usage. Newest first.
+ */
+export async function listBrainDocuments(
+  accountId: string,
+  opts: { sourceType?: string; q?: string; limit?: number; offset?: number } = {},
+): Promise<BrainDocument[]> {
+  const p = getPool();
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const params: unknown[] = [accountId];
+  let where = "account_id = $1";
+  if (opts.sourceType) {
+    params.push(opts.sourceType);
+    where += ` AND source_type = $${params.length}`;
+  }
+  if (opts.q && opts.q.trim()) {
+    params.push(`%${opts.q.trim()}%`);
+    where += ` AND text ILIKE $${params.length}`;
+  }
+  params.push(limit);
+  const limIdx = params.length;
+  params.push(offset);
+  const offIdx = params.length;
+  const { rows } = await p.query<{
+    source_id: string;
+    source_type: string;
+    db_name: string | null;
+    workspace: string | null;
+    parent_url: string | null;
+    first_line: string | null;
+    doc_date: Date | null;
+  }>(
+    `SELECT source_id, source_type, db_name, workspace, parent_url, first_line, doc_date
+       FROM (
+         SELECT DISTINCT ON (source_id)
+           source_id, source_type, db_name, workspace, parent_url,
+           split_part(text, E'\n', 1) AS first_line,
+           COALESCE((metadata->>'data')::date, source_updated::date) AS doc_date
+         FROM brain_chunks
+         WHERE ${where}
+         ORDER BY source_id, chunk_index
+       ) d
+      ORDER BY doc_date DESC NULLS LAST, source_id
+      LIMIT $${limIdx} OFFSET $${offIdx}`,
+    params,
+  );
+  return rows.map((r) => ({
+    source_id: r.source_id,
+    source_type: r.source_type,
+    db_name: r.db_name,
+    workspace: r.workspace,
+    parent_url: r.parent_url,
+    title: titleFromHeaderLine(r.first_line),
+    doc_date: r.doc_date ? new Date(r.doc_date).toISOString().slice(0, 10) : null,
+  }));
+}

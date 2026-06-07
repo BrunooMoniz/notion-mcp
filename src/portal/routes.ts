@@ -480,6 +480,48 @@ export function createPortalRouter(): express.Router {
     }
   });
 
+  // --- WS3: status do cérebro + navegação -----------------------------------
+  // GET /portal/status — rich, account-scoped indexing status: whether a reindex
+  // is running now (in-memory guard), per-source last-run/ok/stale (getStatus +
+  // summarizeStatus), and live document/chunk counts (getBrainCounts). Account
+  // ALWAYS from the session, never input.
+  router.get("/portal/status", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    const running = reindexInFlight.has(accountId);
+    let sources: unknown[] = [];
+    let counts: unknown = { bySource: [], totals: { documents: 0, chunks: 0 } };
+    try {
+      const { getStatus, getBrainCounts } = await import("../rag/storage.js");
+      const { summarizeStatus } = await import("../rag/status.js");
+      sources = summarizeStatus(await getStatus(accountId));
+      counts = await getBrainCounts(accountId);
+    } catch (err: any) {
+      // light dev server / no pgvector — still report the running flag.
+      console.warn(`[portal] status unavailable: ${err?.message ?? err}`);
+    }
+    res.json({ running, sources, counts });
+  });
+
+  // GET /portal/brain/documents — browse the account's indexed documents (one row
+  // per source_id), optional ?source_type= and ?q= (cheap ILIKE substring),
+  // paginated (?limit=&offset=). Pure SQL, no Voyage, no search-quota usage.
+  router.get("/portal/brain/documents", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { listBrainDocuments } = await import("../rag/storage.js");
+      const documents = await listBrainDocuments(accountId, {
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+        sourceType: typeof req.query.source_type === "string" ? req.query.source_type : undefined,
+        limit: typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || undefined : undefined,
+        offset: typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || undefined : undefined,
+      });
+      res.json({ documents });
+    } catch (err: any) {
+      console.warn(`[portal] brain/documents unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "navegação indisponível neste ambiente", documents: [] });
+    }
+  });
+
   // --- Ativação (checklist one-time) ----------------------------------------
   router.get("/portal/activation", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;

@@ -13,6 +13,26 @@
   </div>
   <p class="sub" id="who">Carregando…</p>
 
+  <!-- WS3: Estado do meu Zinom (status da indexação + contagens, auto-refresh) -->
+  <div class="card" id="brain-status-card">
+    <div class="row" style="border:none">
+      <strong>🧠 Estado do meu Zinom</strong>
+      <span id="brain-indexing" class="tag hidden">indexando…</span>
+    </div>
+    <p class="muted" id="brain-totals">Carregando…</p>
+    <div id="brain-sources"></div>
+  </div>
+
+  <!-- WS3: Navegar no meu cérebro (lista de documentos indexados + filtro) -->
+  <div class="card" id="brain-nav-card">
+    <strong>🔎 Navegar no meu cérebro</strong>
+    <p class="muted">Tudo que o Zinom indexou. Filtre e clique para abrir a fonte.</p>
+    <div id="brain-filters" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"></div>
+    <input type="text" id="brain-q" placeholder="Filtrar por título ou conteúdo…">
+    <div id="brain-docs" style="margin-top:8px"></div>
+    <button class="secondary small hidden" id="brain-more" style="margin-top:8px">Carregar mais</button>
+  </div>
+
   <!-- Plano & consumo (Fase 3 billing) — resumo; tela completa em /plano.html -->
   <div class="card" id="billing-card">
     <div class="row" style="border:none;align-items:flex-start">
