@@ -213,7 +213,8 @@ document.getElementById("reindex").onclick = async () => {
   const el = document.getElementById("notion-notice");
   el.classList.remove("hidden");
   el.className = "notice";
-  el.textContent = res.ok ? "Indexação iniciada. Volte daqui a pouco." : "Indexação indisponível neste ambiente.";
+  el.textContent = res.ok ? "Indexação iniciada — acompanhe em “Estado do meu Zinom” acima." : "Indexação indisponível neste ambiente.";
+  if (res.ok) loadStatus(); // reflect "indexando…" + start polling immediately
 };
 
 // --- Ativação (checklist one-time) ------------------------------------------
@@ -357,6 +358,127 @@ async function loadBilling() {
   }
 }
 
+// --- WS3: Estado do meu Zinom (status) + Navegar no meu cérebro -------------
+const SRC_ICON = { notion: "📄", granola: "🎙️", calendar: "📅", web: "🌐" };
+const SRC_LABEL = { notion: "Notion", granola: "Granola", calendar: "Calendário", web: "Web" };
+let statusPollTimer = null;
+function stopStatusPolling() { if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; } }
+
+async function loadStatus() {
+  let st;
+  try {
+    const res = await api("/portal/status");
+    if (!res.ok) return;
+    st = await res.json();
+  } catch { return; }
+
+  document.getElementById("brain-indexing").classList.toggle("hidden", !st.running);
+
+  const totals = (st.counts && st.counts.totals) || { documents: 0, chunks: 0 };
+  const totalsEl = document.getElementById("brain-totals");
+  if (totals.documents > 0) {
+    totalsEl.textContent = `${totals.documents} documentos · ${totals.chunks} trechos indexados`;
+  } else {
+    totalsEl.textContent = st.running
+      ? "Indexando pela primeira vez… isto pode levar alguns minutos."
+      : "Nada indexado ainda. Conecte suas fontes e clique em “Indexar meu Zinom agora”.";
+  }
+
+  // errors by source_type, from the per-source run status
+  const errBy = {};
+  for (const s of st.sources || []) {
+    const t = s.source && s.source.startsWith("notion") ? "notion"
+      : s.source && s.source.startsWith("granola") ? "granola"
+      : s.source && s.source.startsWith("calendar") ? "calendar" : s.source;
+    if (s.ok === false) errBy[t] = s.error || "erro";
+  }
+  const wrap = document.getElementById("brain-sources");
+  wrap.innerHTML = "";
+  for (const c of (st.counts && st.counts.bySource) || []) {
+    const when = c.last_indexed_at ? new Date(c.last_indexed_at).toLocaleString("pt-BR") : "—";
+    const err = errBy[c.source_type] ? ' <span class="tag off">erro</span>' : "";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span>${SRC_ICON[c.source_type] || "•"} ${SRC_LABEL[c.source_type] || escapeHtml(c.source_type)} `
+      + `<span class="muted">${c.documents} docs · ${c.chunks} trechos</span>${err}</span>`
+      + `<span class="muted">${escapeHtml(when)}</span>`;
+    wrap.appendChild(row);
+  }
+
+  if (st.running) {
+    if (!statusPollTimer) statusPollTimer = setInterval(loadStatus, 4000);
+  } else if (statusPollTimer) {
+    // a run just finished — stop polling and refresh everything with fresh counts
+    stopStatusPolling();
+    load();
+    loadBilling();
+    loadBrain(true);
+  }
+}
+
+// Brain navigator (browse indexed documents; cheap ILIKE filter, paginated)
+let brainOffset = 0;
+let brainQ = "";
+let brainSourceType = "";
+const PAGE = 50;
+
+function renderBrainFilters() {
+  const el = document.getElementById("brain-filters");
+  el.innerHTML = "";
+  const opts = [["", "Tudo"], ["notion", "📄 Notion"], ["granola", "🎙️ Granola"], ["calendar", "📅 Calendário"], ["web", "🌐 Web"]];
+  for (const [val, label] of opts) {
+    const b = document.createElement("button");
+    b.className = "small" + (brainSourceType === val ? "" : " secondary");
+    b.textContent = label;
+    b.onclick = () => { brainSourceType = val; renderBrainFilters(); loadBrain(true); };
+    el.appendChild(b);
+  }
+}
+
+async function loadBrain(reset) {
+  if (reset) brainOffset = 0;
+  const params = new URLSearchParams();
+  if (brainQ) params.set("q", brainQ);
+  if (brainSourceType) params.set("source_type", brainSourceType);
+  params.set("limit", String(PAGE));
+  params.set("offset", String(brainOffset));
+  let docs = [];
+  try {
+    const res = await api("/portal/brain/documents?" + params.toString());
+    if (res.ok) docs = (await res.json()).documents || [];
+  } catch { /* ignore */ }
+  const wrap = document.getElementById("brain-docs");
+  if (reset) wrap.innerHTML = "";
+  if (reset && docs.length === 0) {
+    wrap.innerHTML = '<p class="muted">Nada por aqui ainda. Conecte fontes e indexe, ou ajuste o filtro.</p>';
+  }
+  for (const d of docs) {
+    const icon = SRC_ICON[d.source_type] || "•";
+    const title = escapeHtml(d.title || "(sem título)");
+    const inner = d.parent_url
+      ? `<a href="${escapeHtml(d.parent_url)}" target="_blank" rel="noopener">${title}</a>`
+      : title;
+    const date = d.doc_date ? ` <span class="muted">· ${escapeHtml(d.doc_date)}</span>` : "";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span>${icon} ${inner}${date}</span><span class="muted">${escapeHtml(d.db_name || SRC_LABEL[d.source_type] || "")}</span>`;
+    wrap.appendChild(row);
+  }
+  brainOffset += docs.length;
+  document.getElementById("brain-more").classList.toggle("hidden", docs.length < PAGE);
+}
+
+let brainQTimer = null;
+document.getElementById("brain-q").addEventListener("input", (e) => {
+  brainQ = e.target.value.trim();
+  clearTimeout(brainQTimer);
+  brainQTimer = setTimeout(() => loadBrain(true), 300);
+});
+document.getElementById("brain-more").onclick = () => loadBrain(false);
+
 notionNotice();
 load();
 loadBilling();
+loadStatus();
+renderBrainFilters();
+loadBrain(true);
