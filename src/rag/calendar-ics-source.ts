@@ -199,7 +199,11 @@ export function parsedToDocuments(
       source_id: `ics:${cfg.label}::${ev.uid}`,
       workspace: cfg.workspace,
       db_name: "Calendar",
-      parent_url: ev.url ?? "https://calendar.google.com/calendar/r",
+      // Only a real per-event URL is citable. iCal feeds rarely carry one; store
+      // "" rather than the calendar HOME link (which misleads the model into
+      // citing a link that doesn't point at the event). brain-format.sourceUrlOf
+      // also drops any legacy generic-home value already in the index at read time.
+      parent_url: ev.url ?? "",
       text,
       metadata: eventMetadata(ev, cfg.label, cfg.workspace, effStart, allDay),
       source_updated: now,
