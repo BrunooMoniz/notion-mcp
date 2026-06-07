@@ -24,6 +24,27 @@ test("buildTaskPagePayload: date -> Prazo.date.start (datetime passes through)",
   assert.deepEqual(p.properties.Prazo, { date: { start: "2026-06-09T20:00:00-03:00" } });
 });
 
+test("buildTaskPagePayload: start+end -> Prazo.date range (time block for the calendar)", () => {
+  const p = buildTaskPagePayload("ds-1", {
+    title: "Bloco de foco",
+    date: "2026-06-09T14:00:00-03:00",
+    endDate: "2026-06-09T16:00:00-03:00",
+  }) as any;
+  assert.deepEqual(p.properties.Prazo, {
+    date: { start: "2026-06-09T14:00:00-03:00", end: "2026-06-09T16:00:00-03:00" },
+  });
+});
+
+test("buildTaskPagePayload: endDate without a start is ignored (no range without start)", () => {
+  const p = buildTaskPagePayload("ds-1", { title: "X", endDate: "2026-06-09T16:00:00-03:00" }) as any;
+  assert.equal(p.properties.Prazo, undefined);
+});
+
+test("buildTaskPagePayload: blank endDate -> start only", () => {
+  const p = buildTaskPagePayload("ds-1", { title: "X", date: "2026-06-09", endDate: "  " }) as any;
+  assert.deepEqual(p.properties.Prazo, { date: { start: "2026-06-09" } });
+});
+
 test("buildTaskPagePayload: status -> Status.select.name; note -> body paragraph", () => {
   const p = buildTaskPagePayload("ds-1", { title: "X", status: "A fazer", note: "detalhe" }) as any;
   assert.deepEqual(p.properties.Status, { select: { name: "A fazer" } });

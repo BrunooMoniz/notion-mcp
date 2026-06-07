@@ -69,6 +69,20 @@ export function classifyResults(dataSources: DataSourceLite[]): Detection {
   return { status, candidates };
 }
 
+/** Auto-create guard: find an EXISTING data source that IS our own tracker — its
+ *  title equals "Tarefas" (accent/case-insensitive) — so a retry (e.g. a prior
+ *  run created the DB but failed to persist its id) reuses it instead of creating
+ *  a SECOND "🧠 Zinom" page. Returns the data_source id, or null. */
+export function findReusableTrackerId(
+  dataSources: Array<{ id: string; title: string }>,
+): string | null {
+  const target = normalize(TARGET_DB_TITLE);
+  for (const ds of dataSources) {
+    if (normalize(ds.title ?? "") === target) return ds.id;
+  }
+  return null;
+}
+
 /** Payload de POST /v1/pages: página-mãe "🧠 Zinom" no topo do workspace. */
 export function buildParentPagePayload(): {
   parent: { type: "workspace"; workspace: true };

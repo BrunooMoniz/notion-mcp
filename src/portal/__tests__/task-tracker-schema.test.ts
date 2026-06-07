@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   isTaskTrackerCandidate,
   classifyResults,
+  findReusableTrackerId,
   buildCreateDbPayload,
   buildParentPagePayload,
   TARGET_PROPERTIES,
@@ -56,6 +57,13 @@ test("classifyResults conta candidatas: none / one / many", () => {
   ]);
   assert.equal(many.status, "many");
   assert.equal(many.candidates.length, 2);
+});
+
+test("findReusableTrackerId: reusa nossa DB 'Tarefas' (exata, acento/caixa), senão null", () => {
+  assert.equal(findReusableTrackerId([{ id: "a", title: "Notas" }, { id: "b", title: "TAREFAS" }]), "b");
+  assert.equal(findReusableTrackerId([{ id: "a", title: "tarefas" }]), "a");
+  assert.equal(findReusableTrackerId([{ id: "a", title: "Tarefas do João" }]), null); // não-exata não reusa
+  assert.equal(findReusableTrackerId([]), null);
 });
 
 test("buildParentPagePayload cria página no topo do workspace", () => {
