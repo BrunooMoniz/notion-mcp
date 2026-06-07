@@ -87,6 +87,16 @@ function chunkInsertParams(c: ChunkWithEmbedding, fallbackAccountId: string): un
 export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> {
   if (chunks.length === 0) return;
   const p = getPool();
+  // Fase 3 billing — defensive chunk-storage cap. Owner/default account is
+  // exempt (no DB hit). Lazy import to avoid the storage<->billing cycle (same
+  // pattern as recordUsage). Throws QuotaExceededError when a friend would
+  // exceed their plan's maxChunks; callers (on-demand tools) return a friendly
+  // error. The per-account indexer path uses replaceDocumentChunks (capped too).
+  const acctForCap = chunks[0]?.account_id ?? getAccountId();
+  if (acctForCap !== DEFAULT_ACCOUNT_ID) {
+    const { assertChunksWithinLimit } = await import("../billing/usage.js");
+    await assertChunksWithinLimit(acctForCap, chunks.length);
+  }
   for (const c of chunks) {
     await p.query(INSERT_CHUNK_SQL, chunkInsertParams(c, DEFAULT_ACCOUNT_ID));
   }
