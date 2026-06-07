@@ -11,6 +11,7 @@ import { registerTools } from "./tools.js";
 import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
+import { registerRememberTool, registerRecallTool } from "./rag/remember-tool.js";
 import { registerZinomTaskTool } from "./zinom-task-tool.js";
 import { registerCalendarTools } from "./google/calendar-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
@@ -107,7 +108,9 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ## Brain RAG tools
 
-- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom. Each result has title, source_type (notion/granola/calendar), and source_url. CITE YOUR SOURCES: when you answer from brain_search, list the contributing sources as markdown links — [title](source_url) — labeled by type (página do Notion / reunião do Granola / evento do Calendar). If source_url is null (some calendar events lack a per-event link), cite by title + date (metadata.data).
+- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom. Each result has title, source_type (notion/granola/calendar/web/conversation), and source_url. CITE YOUR SOURCES (obrigatório): quando você responder a partir do brain_search, cite as fontes por trás de cada afirmação — liste como links markdown [title](source_url), nomeando o source_type de cada hit (página do Notion / reunião do Granola / evento do Calendar / página da web / conversa). Quando source_url for null (eventos de calendário sem link próprio e memórias de conversa), cite pelo title + data (metadata.data). Nunca afirme algo recuperado do Zinom sem dizer de qual fonte veio.
+- **remember** — Salve uma nota/resumo desta conversa no Zinom. Use quando a pessoa pedir "lembra disso", "anota isso", "guarda essa decisão", ou quando você quiser persistir uma conclusão importante do diálogo. A nota vira source_type "conversation", pesquisável e citável no brain_search. Passe um title curto: é por ele que a memória será citada depois.
+- **recall** — Atalho do brain_search filtrado por source_type:"conversation": recupera SÓ as memórias de conversa salvas com remember. Use para "o que você anotou sobre...", "lembra o que decidimos...". Para buscar em todas as fontes, use brain_search.
 - **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no Zinom", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
 - **brain_index_web** — On-demand indexing of an arbitrary web page/article by URL into the brain. Use for non-Notion links (articles, docs, posts) the user wants queryable in brain_search. Fetches the URL, extracts readable text, chunks/embeds it, and stores it under source_type "web". Re-indexing the same URL refreshes it.
 `.trim();
@@ -483,10 +486,14 @@ app.post("/mcp", async (req, res) => {
     registerBrainSearchTool(server);
     registerBrainIndexUrlTool(server);
     registerBrainIndexWebTool(server);
+    registerRememberTool(server);
+    registerRecallTool(server);
     registerCalendarTools(server);
   } else {
     registerBrainSearchTool(server);
     registerBrainIndexWebTool(server);
+    registerRememberTool(server);
+    registerRecallTool(server);
     registerZinomTaskTool(server);
     registerCalendarTools(server);
   }
