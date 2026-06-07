@@ -30,3 +30,11 @@ hr { border: none; border-top: 1px solid #eee; margin: 28px 0; }
 .notice { padding: 10px 12px; border-radius: 8px; background: #f4f4f4; font-size: 14px; }
 .notice.err { background: #f8e0e0; color: var(--bad); }
 .toggle { background: none; color: var(--green); padding: 0; font-weight: 600; }
+/* Plano & Uso (Fase 3 billing) */
+.meter { margin: 10px 0; }
+.meter-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.meter-track { height: 8px; background: #eee; border-radius: 999px; overflow: hidden; }
+.meter-bar { height: 100%; background: var(--green); border-radius: 999px; transition: width .3s; }
+.meter-bar.warn { background: #d9a521; }
+.meter-bar.over { background: var(--bad); }
+#billing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }

@@ -14,6 +14,7 @@ import type { Chunk, SearchFilters, SearchHit, SearchMode, Workspace } from "./t
 import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedWorkspaces.js";
 import { getAccountId } from "../context.js";
 import { recordUsage } from "./usage.js";
+import { assertSearchWithinLimit } from "../billing/usage.js";
 
 export interface RankedChunk {
   chunk: Chunk;
@@ -260,6 +261,11 @@ export async function brainSearch(
     _accountId: accountId,
     ...(allowedWorkspaces !== undefined ? { _allowedWorkspaces: allowedWorkspaces } : {}),
   };
+
+  // Fase 3 billing — hard-cap searches/month for non-owner accounts. Throws
+  // QuotaExceededError (surfaced by the brain_search tool as a friendly message).
+  // Owner/default account is exempt (no DB hit) so cron/eval/tests are unchanged.
+  await assertSearchWithinLimit(accountId);
 
   // F3.0 — passive metering (best-effort, never blocks the search).
   await recordUsage(accountId, "search", 1);

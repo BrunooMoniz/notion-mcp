@@ -28,9 +28,13 @@ import {
 import { prefixChunkIds } from "./account-chunks.js";
 import { FRIEND_WORKSPACE, accountIcalConfigs, ensureAccountWorkspace } from "./account-sources.js";
 import type { Workspace } from "./types.js";
+import { accountHasFeature } from "../billing/usage.js";
 
 export async function indexAccount(accountId: string): Promise<{ documents: number; chunks: number }> {
   const workspaces = await warmAccount(accountId);
+  // Fase 3 billing — Granola + Calendar are paid features (Free indexes Notion
+  // only). Owner/default account has all features.
+  const canGranolaCalendar = await accountHasFeature(accountId, "granolaCalendar");
   let documents = 0;
   let chunks = 0;
 
@@ -89,7 +93,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- Granola pass (one key per account, from the vault) ----
-  const granolaKey = await getAccountSecret(accountId, "granola");
+  const granolaKey = canGranolaCalendar ? await getAccountSecret(accountId, "granola") : null;
   if (granolaKey) {
     await ensureAccountWorkspace(accountId, FRIEND_WORKSPACE);
     const startedAt = new Date();
@@ -137,7 +141,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- iCal pass (many links per account, from the vault) ----
-  const icalConfigs = accountIcalConfigs(await getAccountSecret(accountId, "ical"));
+  const icalConfigs = canGranolaCalendar ? accountIcalConfigs(await getAccountSecret(accountId, "ical")) : [];
   if (icalConfigs.length > 0) {
     for (const ws of new Set(icalConfigs.map((c) => c.workspace))) {
       await ensureAccountWorkspace(accountId, ws);

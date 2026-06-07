@@ -16,6 +16,7 @@ import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
 import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
+import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
 import { requestContext, type RequestContext } from "./context.js";
 import { getStatus } from "./rag/storage.js";
@@ -161,6 +162,10 @@ app.use("/oauth", oauthLimiter);
 // F3.2: throttle the public onboarding endpoints (unauthenticated) — same strict
 // budget as /oauth. Prevents flooding /notion/connect (state-map growth + 302s).
 app.use("/notion", oauthLimiter);
+
+// Fase 3 billing — Stripe webhook MUST be mounted before express.json() so its
+// per-route express.raw() sees the exact bytes for signature verification.
+app.use(createStripeWebhookRouter());
 
 // Parse JSON for all routes, URL-encoded for OAuth consent form
 app.use(express.json());

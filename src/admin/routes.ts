@@ -17,12 +17,15 @@ interface AccountRow {
   email: string | null;
   status: string | null;
   created_at: Date;
+  plan: string | null;
+  plan_status: string | null;
+  current_period_end: Date | null;
 }
 
 async function gather() {
   const p = getPool();
   const [accounts, secrets, workspaces, tokens, usage, runs, invites, sessions] = await Promise.all([
-    p.query<AccountRow>(`SELECT id, kind, email, status, created_at FROM account ORDER BY created_at`),
+    p.query<AccountRow>(`SELECT id, kind, email, status, created_at, plan, plan_status, current_period_end FROM account ORDER BY created_at`),
     p.query<{ account_id: string; kinds: string[] }>(
       `SELECT account_id, array_agg(kind ORDER BY kind) AS kinds FROM account_secrets GROUP BY account_id`),
     p.query<{ account_id: string; ws: string[] }>(
@@ -75,6 +78,13 @@ function sourceFlags(kinds: string[] | undefined): string {
 function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
   const friends = data.accounts.filter((a) => a.kind === "friend");
   const pending = data.leads.filter((l) => l.status === "pending").length;
+  // Approx MRR: sum of active paid plans (BRL cents).
+  const PLAN_CENTS: Record<string, number> = { essencial: 499, pro: 999, ilimitado: 1899 };
+  const mrrCents = data.accounts.reduce(
+    (sum, a) => sum + (a.plan_status !== "canceled" ? (PLAN_CENTS[a.plan ?? ""] ?? 0) : 0),
+    0,
+  );
+  const mrr = `R$${(mrrCents / 100).toFixed(2)}`;
   const action = `/admin/invite?token=${encodeURIComponent(token)}`;
   const rows = data.accounts
     .map((a) => {
@@ -87,6 +97,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         <td><code>${escapeHtml(a.id)}</code></td>
         <td>${escapeHtml(a.email ?? "—")}</td>
         <td>${escapeHtml(a.kind ?? "—")}</td>
+        <td>${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
         <td>${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
         <td>${data.tokens.get(a.id) ? "🔑×" + data.tokens.get(a.id) : "—"}</td>
         <td class="small">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
@@ -150,6 +161,7 @@ ${banner}
   <div class="card"><div class="n">${data.activeSessions}</div><div class="l">sessões ativas</div></div>
   <div class="card"><div class="n">${data.invites.redeemed}/${data.invites.total}</div><div class="l">convites usados</div></div>
   <div class="card"><div class="n">${pending}</div><div class="l">leads pendentes</div></div>
+  <div class="card"><div class="n">${mrr}</div><div class="l">MRR (aprox.)</div></div>
 </div>
 
 <h2>Solicitações de convite (leads)</h2>
@@ -167,7 +179,7 @@ ${leadRows || '<tr><td colspan="5" class="small">Nenhuma solicitação ainda.</t
 <h2>Contas</h2>
 <table>
   <thead><tr>
-    <th>account_id</th><th>email</th><th>tipo</th><th>fontes</th><th>MCP</th>
+    <th>account_id</th><th>email</th><th>tipo</th><th>plano</th><th>fontes</th><th>MCP</th>
     <th>workspaces</th><th>últimos índices</th><th>uso</th><th>criada</th>
   </tr></thead>
   <tbody>

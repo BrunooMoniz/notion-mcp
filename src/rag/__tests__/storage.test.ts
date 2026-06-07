@@ -221,7 +221,10 @@ test("replaceDocumentChunks issues BEGIN/DELETE/INSERT*/COMMIT in order (stub)",
     repChunk("p1", 0, "friend:X", "a"),
     repChunk("p1", 1, "friend:X", "b"),
   ]);
-  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "COMMIT"]);
+  // Fase 3 billing: for a NON-owner account the chunk cap reads the POST-DELETE
+  // count inside the txn (the SELECT between DELETE and the INSERTs). The
+  // reliability invariant is unchanged: DELETE before INSERTs, COMMIT only after.
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "SELECT", "INSERT", "INSERT", "COMMIT"]);
   __setPoolForTest(null);
 });
 
@@ -248,8 +251,9 @@ test("replaceDocumentChunks ROLLS BACK and rethrows when an INSERT fails (stub)"
     ]),
     /insert boom/,
   );
-  // DELETE ran, first INSERT ok, second INSERT threw -> ROLLBACK, never COMMIT.
-  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "ROLLBACK"]);
+  // DELETE ran, billing cap SELECT, first INSERT ok, second INSERT threw ->
+  // ROLLBACK, never COMMIT.
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "SELECT", "INSERT", "INSERT", "ROLLBACK"]);
   __setPoolForTest(null);
 });
 
