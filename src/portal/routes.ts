@@ -36,7 +36,10 @@ import {
   removeGranolaKey,
   getGranolaMasked,
 } from "./sources.js";
-import { assertCanAddWorkspace, WorkspaceLimitError } from "../billing/usage.js";
+import { assertCanAddWorkspace, WorkspaceLimitError, getUsageSnapshot } from "../billing/usage.js";
+import { PAID_PLANS, priceIdForPlan, getPlanLimits, type PlanId } from "../billing/plans.js";
+import { getBillingRow, setStripeCustomerId } from "../billing/account-plan.js";
+import { getStripe } from "../billing/stripe.js";
 
 const BASE_URL = process.env.PORTAL_BASE_URL ?? process.env.BASE_URL ?? "http://localhost:3456";
 // The canonical server origin where the MCP endpoint (/mcp) lives — what a friend
@@ -222,6 +225,89 @@ export function createPortalRouter(): express.Router {
     await revokeBearersForAccount(accountId);
     const token = await issueBearer(accountId, "portal");
     res.json({ token, mcp_url: `${MCP_BASE}/mcp` });
+  });
+
+  // --- Billing (Fase 3) -----------------------------------------------------
+  const APP_URL = process.env.BASE_URL ?? "https://zinom.ai";
+
+  // Current plan + usage snapshot + purchasable plans (for the "Plano & Uso" UI).
+  router.get("/portal/billing", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const usage = await getUsageSnapshot(accountId);
+      const row = await getBillingRow(accountId);
+      res.json({
+        plan: usage.plan,
+        plan_status: row?.plan_status ?? null,
+        current_period_end: row?.current_period_end ?? null,
+        manage_available: Boolean(row?.stripe_customer_id),
+        usage,
+        plans: PAID_PLANS.map((id) => {
+          const l = getPlanLimits(id);
+          return {
+            id, label: l.label, priceBRLCents: l.priceBRLCents,
+            maxWorkspaces: l.maxWorkspaces, maxChunks: l.maxChunks,
+            searchesPerMonth: l.searchesPerMonth, onDemandPagesPerDay: l.onDemandPagesPerDay,
+            features: l.features,
+          };
+        }),
+      });
+    } catch (err: any) {
+      console.error(`[portal] /billing: ${err?.message ?? err}`);
+      res.status(500).json({ error: "erro ao carregar plano" });
+    }
+  });
+
+  // Start a hosted Checkout for an upgrade. Returns { url } for the front to redirect to.
+  router.post("/portal/billing/checkout", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const plan = String(req.body?.plan ?? "") as PlanId;
+    if (!PAID_PLANS.includes(plan)) { res.status(400).json({ error: "plano inválido" }); return; }
+    const price = priceIdForPlan(plan);
+    if (!price) { res.status(503).json({ error: "billing não configurado" }); return; }
+    try {
+      const stripe = getStripe();
+      const row = await getBillingRow(accountId);
+      let customerId = row?.stripe_customer_id ?? null;
+      if (!customerId) {
+        const email = await getAccountEmail(accountId).catch(() => null);
+        const customer = await stripe.customers.create({ email: email ?? undefined, metadata: { account_id: accountId } });
+        customerId = customer.id;
+        await setStripeCustomerId(accountId, customerId);
+      }
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        customer: customerId,
+        client_reference_id: accountId,
+        line_items: [{ price, quantity: 1 }],
+        success_url: `${APP_URL}/app.html?billing=success`,
+        cancel_url: `${APP_URL}/app.html?billing=cancel`,
+        metadata: { account_id: accountId },
+        subscription_data: { metadata: { account_id: accountId } },
+      });
+      res.json({ url: session.url });
+    } catch (err: any) {
+      console.error(`[portal] checkout: ${err?.message ?? err}`);
+      res.status(502).json({ error: "falha ao iniciar checkout" });
+    }
+  });
+
+  // Open the Stripe-hosted Customer Portal (change card, switch/cancel plan).
+  router.post("/portal/billing/manage", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const row = await getBillingRow(accountId);
+      if (!row?.stripe_customer_id) { res.status(400).json({ error: "sem assinatura ativa" }); return; }
+      const stripe = getStripe();
+      const session = await stripe.billingPortal.sessions.create({
+        customer: row.stripe_customer_id,
+        return_url: `${APP_URL}/app.html`,
+      });
+      res.json({ url: session.url });
+    } catch (err: any) {
+      console.error(`[portal] manage: ${err?.message ?? err}`);
+      res.status(502).json({ error: "falha ao abrir portal de assinatura" });
+    }
   });
 
   // iCal links (multiple) ----------------------------------------------------
