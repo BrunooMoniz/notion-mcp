@@ -278,68 +278,22 @@ document.getElementById("act-dismiss").onclick = async () => {
 // --- Plano & Uso (Fase 3 billing) -------------------------------------------
 const PLAN_LABELS = { free: "Free", essencial: "Essencial", pro: "Pro", ilimitado: "Ilimitado", owner: "Owner" };
 
-function billingMeter(label, used, limit) {
-  const unlimited = limit == null || !isFinite(limit);
-  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
-  const cls = pct >= 100 ? "meter-bar over" : pct >= 80 ? "meter-bar warn" : "meter-bar";
-  const text = unlimited ? `${used} / ilimitado` : `${used} / ${limit}`;
-  return `<div class="meter"><div class="meter-head"><span>${escapeHtml(label)}</span><span>${escapeHtml(text)}</span></div>`
-    + `<div class="meter-track"><div class="${cls}" style="width:${pct}%"></div></div></div>`;
-}
-
+// Compact summary only — the full screen (meters + upgrade + manage) is /plano.html.
 async function loadBilling() {
   const planEl = document.getElementById("billing-plan");
-  const metersEl = document.getElementById("billing-meters");
-  const actionsEl = document.getElementById("billing-actions");
-  const msgEl = document.getElementById("billing-msg");
+  const lineEl = document.getElementById("billing-usage-line");
   try {
     const res = await api("/portal/billing");
     if (!res.ok) throw new Error("falha");
     const b = await res.json();
     const status = b.plan_status && b.plan_status !== "active" ? ` (${b.plan_status})` : "";
-    planEl.textContent = `Plano atual: ${PLAN_LABELS[b.plan] || b.plan}${status}`;
-    metersEl.innerHTML =
-      billingMeter("Chunks indexados", b.usage.chunks.used, b.usage.chunks.limit) +
-      billingMeter("Buscas no mês", b.usage.searches.used, b.usage.searches.limit) +
-      billingMeter("Páginas on-demand (hoje)", b.usage.onDemand.used, b.usage.onDemand.limit);
-    actionsEl.innerHTML = "";
-    for (const p of b.plans) {
-      if (p.id === b.plan) continue;
-      const btn = document.createElement("button");
-      btn.className = "small";
-      btn.textContent = `${p.label} — R$${(p.priceBRLCents / 100).toFixed(2)}/mês`;
-      btn.onclick = () => startCheckout(p.id, btn);
-      actionsEl.appendChild(btn);
-    }
-    if (b.manage_available) {
-      const m = document.createElement("button");
-      m.className = "small secondary";
-      m.textContent = "Gerenciar assinatura";
-      m.onclick = () => openManage(m);
-      actionsEl.appendChild(m);
-    }
-    msgEl.textContent = "";
+    planEl.textContent = (PLAN_LABELS[b.plan] || b.plan) + status;
+    const lim = (v) => (v == null || !isFinite(v)) ? "ilimitado" : v.toLocaleString("pt-BR");
+    const s = b.usage.searches, c = b.usage.chunks;
+    lineEl.textContent = `Consultas este mês: ${s.used}/${lim(s.limit)} · Trechos indexados: ${c.used}/${lim(c.limit)}`;
   } catch {
-    planEl.textContent = "Não foi possível carregar o plano.";
+    planEl.textContent = "—";
   }
-}
-
-async function startCheckout(plan, btn) {
-  btn.disabled = true;
-  const res = await apiJSON("/portal/billing/checkout", "POST", { plan });
-  const data = await res.json().catch(() => ({}));
-  if (data.url) { location.href = data.url; return; }
-  document.getElementById("billing-msg").textContent = data.error || "Falha ao iniciar checkout.";
-  btn.disabled = false;
-}
-
-async function openManage(btn) {
-  btn.disabled = true;
-  const res = await apiJSON("/portal/billing/manage", "POST");
-  const data = await res.json().catch(() => ({}));
-  if (data.url) { location.href = data.url; return; }
-  document.getElementById("billing-msg").textContent = data.error || "Falha ao abrir o portal.";
-  btn.disabled = false;
 }
 
 notionNotice();
