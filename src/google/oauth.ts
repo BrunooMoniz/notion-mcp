@@ -10,7 +10,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "..", "data");
 const CREDS_PATH = join(DATA_DIR, "google-creds.json");
 
-const SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const SCOPES = [
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+];
+const SCOPE = SCOPES.join(" ");
 
 export interface GoogleCreds {
   refresh_token: string;
@@ -83,7 +87,7 @@ interface TokenResp {
   id_token?: string;
 }
 
-export async function exchangeCode(code: string): Promise<GoogleCreds> {
+export async function exchangeCodeRaw(code: string): Promise<GoogleCreds> {
   const body = new URLSearchParams({
     client_id: clientId(),
     client_secret: clientSecret(),
@@ -115,15 +119,40 @@ export async function exchangeCode(code: string): Promise<GoogleCreds> {
   } catch {
     /* ignore */
   }
-  const creds: GoogleCreds = {
+  return {
     refresh_token: data.refresh_token,
     access_token: data.access_token,
     access_token_expires_at: Date.now() + (data.expires_in - 60) * 1000,
     granted_at: Date.now(),
     granted_email,
   };
+}
+
+export async function exchangeCode(code: string): Promise<GoogleCreds> {
+  const creds = await exchangeCodeRaw(code);
   saveCreds(creds);
   return creds;
+}
+
+export async function refreshAccessToken(
+  refreshToken: string,
+): Promise<{ access_token: string; expires_in: number }> {
+  const body = new URLSearchParams({
+    client_id: clientId(),
+    client_secret: clientSecret(),
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  });
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const data = (await resp.json()) as { access_token?: string; expires_in?: number; error?: string };
+  if (!resp.ok || !data.access_token) {
+    throw new Error(`Google refresh failed: ${data.error ?? "unknown"}`);
+  }
+  return { access_token: data.access_token, expires_in: data.expires_in ?? 3600 };
 }
 
 export async function getAccessToken(): Promise<string> {
@@ -132,27 +161,7 @@ export async function getAccessToken(): Promise<string> {
   if (creds.access_token && creds.access_token_expires_at && creds.access_token_expires_at > Date.now()) {
     return creds.access_token;
   }
-  // refresh
-  const body = new URLSearchParams({
-    client_id: clientId(),
-    client_secret: clientSecret(),
-    refresh_token: creds.refresh_token,
-    grant_type: "refresh_token",
-  });
-  const resp = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  const data = (await resp.json()) as TokenResp & { error?: string };
-  if (!resp.ok || !data.access_token) {
-    throw new Error(`Google refresh failed: ${data.error ?? "unknown"}`);
-  }
-  const updated: GoogleCreds = {
-    ...creds,
-    access_token: data.access_token,
-    access_token_expires_at: Date.now() + (data.expires_in - 60) * 1000,
-  };
-  saveCreds(updated);
-  return data.access_token;
+  const { access_token, expires_in } = await refreshAccessToken(creds.refresh_token);
+  saveCreds({ ...creds, access_token, access_token_expires_at: Date.now() + (expires_in - 60) * 1000 });
+  return access_token;
 }

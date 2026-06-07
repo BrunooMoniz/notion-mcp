@@ -6,7 +6,7 @@
 // are loaded lazily inside handlers so this router can also run in the light
 // dev server without booting clients.ts.
 import express from "express";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import {
   createSession,
   resolveSession,
@@ -36,6 +36,9 @@ import {
   removeGranolaKey,
   getGranolaMasked,
 } from "./sources.js";
+import { authUrl } from "../google/oauth.js";
+import { putPortalGoogleState } from "./google-link.js";
+import { listGoogleAccountsMasked, removeGoogleAccount } from "../google/google-accounts.js";
 import { assertCanAddWorkspace, WorkspaceLimitError, getUsageSnapshot } from "../billing/usage.js";
 import { PAID_PLANS, priceIdForPlan, getPlanLimits, type PlanId } from "../billing/plans.js";
 import { getBillingRow, setStripeCustomerId } from "../billing/account-plan.js";
@@ -372,6 +375,27 @@ export function createPortalRouter(): express.Router {
   router.delete("/portal/granola", requireSession, async (_req, res) => {
     await removeGranolaKey(res.locals.accountId);
     res.sendStatus(204);
+  });
+
+  // Google Calendar (multi-conta OAuth) --------------------------------------
+  router.get("/portal/google/connect", requireSession, (_req, res) => {
+    const state = randomBytes(16).toString("base64url");
+    putPortalGoogleState(state, res.locals.accountId);
+    res.redirect(302, authUrl(state));
+  });
+
+  router.get("/portal/google/accounts", requireSession, async (_req, res) => {
+    res.json(await listGoogleAccountsMasked(res.locals.accountId));
+  });
+
+  router.post("/portal/google/disconnect", requireSession, async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email : "";
+    if (!email) {
+      res.status(400).json({ error: "email obrigatório" });
+      return;
+    }
+    const ok = await removeGoogleAccount(res.locals.accountId, email);
+    res.sendStatus(ok ? 204 : 404);
   });
 
   // Notion connect/re-auth. Reuses the EXISTING registered redirect URI
