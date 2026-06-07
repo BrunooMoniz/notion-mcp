@@ -1,6 +1,6 @@
 // src/rag/types.ts
 
-export type SourceType = "notion" | "granola" | "calendar" | "web";
+export type SourceType = "notion" | "granola" | "calendar" | "web" | "conversation";
 export type Workspace = "personal" | "globalcripto" | "nora";
 
 export interface Chunk {
@@ -62,7 +62,7 @@ export interface IndexableDocument {
   source_id: string;
   workspace: Workspace | null;
   db_name: string | null;
-  parent_url: string;
+  parent_url: string | null;   // null for sources with no per-item URL (conversation)
   text: string;                // full document text — chunker splits it
   metadata: Record<string, unknown>;
   source_updated: Date;
