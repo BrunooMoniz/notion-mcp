@@ -9,6 +9,7 @@ import { runRevisitar } from "./classifier/revisitar.js";
 import { syncGranolasToReunioes } from "./classifier/granola-to-reuniao.js";
 import { runDailyBriefing } from "./briefing/daily-briefing.js";
 import { recordRun } from "./rag/storage.js";
+import { runResyncTick } from "./billing/resync-cron.js";
 
 const CLASSIFIER_CRON = process.env.CLASSIFIER_CRON ?? "30 * * * *"; // half past every hour
 const REVISITAR_CRON = process.env.REVISITAR_CRON ?? "0 7 * * *";    // 07:00 every day
@@ -97,3 +98,11 @@ cron.schedule(GRANOLA_REUNIAO_CRON, () => {
 cron.schedule(BRIEFING_CRON, () => {
   void tickBriefing("cron");
 });
+
+// Fase 3 billing — per-account auto re-sync. Hourly tick; each account is
+// re-indexed only when its plan's syncIntervalHours has elapsed (free skipped).
+const RESYNC_CRON = process.env.RESYNC_CRON ?? "15 * * * *";
+cron.schedule(RESYNC_CRON, () => {
+  void runResyncTick().catch((err) => console.error("[resync] tick failed", err));
+});
+console.log(`[classifier] account resync scheduled: ${RESYNC_CRON}`);
