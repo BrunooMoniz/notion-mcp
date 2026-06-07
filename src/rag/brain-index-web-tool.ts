@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Workspace } from "../clients.js";
 import { assertWorkspaceScope, getAccountId } from "../context.js";
+import { getAllowedWorkspaces } from "../getAllowedWorkspaces.js";
 import { indexDocument } from "./index-document.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
 import { fetchWebDocument } from "./sources/web-source.js";
@@ -29,23 +30,30 @@ instead.
 Returns counts and the resolved title/source_id.`,
     {
       workspace: z
-        .enum(["personal", "globalcripto", "nora"])
-        .describe("Which workspace to tag this web document with"),
+        .string()
+        .optional()
+        .describe("Which workspace to tag this web document with. Optional — defaults to your primary workspace."),
       url: z
         .string()
         .url()
         .describe("Full http(s) URL of the page/article to index"),
     },
     async ({ workspace, url }) => {
-      // Security gate: enforce token workspace scope before any work.
+      // Resolve the workspace: a friend's workspaces have arbitrary names/ids and
+      // they won't know them, so default to their first allowed workspace (the
+      // brain-read scope). Owner ("all") keeps the explicit value or "personal".
+      const allowed = getAllowedWorkspaces();
+      const resolvedWs = (workspace ?? allowed?.[0] ?? "personal") as Workspace;
+      // Security gate: enforce token workspace scope on the resolved value.
       // No-op for bearer ("all") and for non-HTTP contexts (startup/cron/tests).
-      assertWorkspaceScope(workspace as Workspace);
+      assertWorkspaceScope(resolvedWs);
+      const workspaceTag = resolvedWs;
 
       try {
         const accountId = getAccountId();
         // Fase 3 billing — on-demand indexing gated by plan (Free = off) + daily cap.
         await assertOnDemandWithinLimit(accountId, 1);
-        const doc = await fetchWebDocument(url, { workspace: workspace as Workspace });
+        const doc = await fetchWebDocument(url, { workspace: workspaceTag });
         doc.account_id = accountId; // F3.0: attribute to the caller's tenant
         const chunks = await indexDocument(doc);
         await deleteBySource("web", doc.source_id, accountId);
@@ -58,7 +66,7 @@ Returns counts and the resolved title/source_id.`,
               text: JSON.stringify({
                 ok: true,
                 source_type: "web",
-                workspace,
+                workspace: workspaceTag,
                 url,
                 source_id: doc.source_id,
                 title: doc.metadata.title ?? null,

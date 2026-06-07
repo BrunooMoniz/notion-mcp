@@ -4,10 +4,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { brainSearch } from "./search.js";
 import type { SearchFilters } from "./types.js";
 import { QuotaExceededError } from "../billing/usage.js";
+import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
 
 const filtersSchema = z
   .object({
-    workspace: z.enum(["personal", "globalcripto", "nora"]).optional(),
+    // Free-form string, not a fixed enum: a friend's workspaces have arbitrary
+    // names/ids. Security does NOT depend on this value — brainSearch always
+    // scopes results to the caller's account_id + allowed workspaces, so an
+    // unknown/foreign workspace simply yields zero rows.
+    workspace: z.string().optional(),
     db: z.string().optional(),
     frente: z.string().optional(),
     date_from: z.string().optional(),
@@ -62,6 +67,13 @@ Options:
         }
         throw e;
       }
+      // Empty-state orientation for friend accounts: a silent [] reads as
+      // "broken". Tell them the likely next action (index their sources) instead.
+      const isFriend = getAccountId() !== DEFAULT_ACCOUNT_ID;
+      const hint =
+        hits.length === 0 && isFriend
+          ? "Nenhum resultado no seu Zinom para essa busca. Se você conectou ou editou suas fontes agora há pouco, abra o portal (zinom.ai), clique em 'Indexar agora' e tente de novo."
+          : undefined;
       return {
         content: [
           {
@@ -70,6 +82,7 @@ Options:
               {
                 query: args.query,
                 mode: args.mode,
+                ...(hint ? { hint } : {}),
                 results: hits.map((h) => ({
                   text: h.chunk.text,
                   score: h.score,

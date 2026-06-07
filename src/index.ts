@@ -11,6 +11,7 @@ import { registerTools } from "./tools.js";
 import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
+import { registerZinomTaskTool } from "./zinom-task-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
@@ -18,7 +19,8 @@ import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
-import { requestContext, type RequestContext } from "./context.js";
+import { requestContext, getContext, type RequestContext } from "./context.js";
+import { isOwnerContext, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
 
@@ -387,20 +389,34 @@ app.post("/mcp", async (req, res) => {
     if (id) evictSession(id);
   };
 
+  // WS2 — tailor the server to the account. This runs inside the auth
+  // middleware's requestContext scope, so getContext() carries the resolved
+  // account. Owner gets the full INSTRUCTIONS + all notion_* tools; a friend gets
+  // friend INSTRUCTIONS + a SAFE tool set (search, web-index, create-task) — the
+  // 24 notion_* tools are owner-only because they assume Bruno's fixed workspaces
+  // and expose destructive ops not meant for non-technical friends.
+  const owner = isOwnerContext(getContext());
+
   const server = new McpServer(
     {
       name: "zinom",
       version: "1.0.0",
     },
     {
-      instructions: INSTRUCTIONS,
+      instructions: owner ? INSTRUCTIONS : FRIEND_INSTRUCTIONS,
     }
   );
 
-  registerTools(server);
-  registerBrainSearchTool(server);
-  registerBrainIndexUrlTool(server);
-  registerBrainIndexWebTool(server);
+  if (owner) {
+    registerTools(server);
+    registerBrainSearchTool(server);
+    registerBrainIndexUrlTool(server);
+    registerBrainIndexWebTool(server);
+  } else {
+    registerBrainSearchTool(server);
+    registerBrainIndexWebTool(server);
+    registerZinomTaskTool(server);
+  }
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
