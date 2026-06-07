@@ -147,6 +147,35 @@ document.getElementById("mcp-gen").onclick = async () => {
   document.getElementById("mcp-gen").textContent = "Gerar novo token";
 };
 
+// Liberar conexão ao Claude.ai: abre uma janela curta de registro OAuth pra que o
+// "Adicionar conector personalizado" do Claude.ai consiga se registrar. Mostra a
+// contagem regressiva pra pessoa adicionar o conector dentro da janela.
+let connectTimer = null;
+document.getElementById("connect-open").onclick = async () => {
+  const status = document.getElementById("connect-status");
+  status.textContent = "Liberando…";
+  const res = await apiJSON("/portal/connect-window", "POST");
+  const b = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    status.textContent = b.error || "Não consegui liberar agora. Tente de novo.";
+    return;
+  }
+  const until = new Date(b.open_until).getTime();
+  clearInterval(connectTimer);
+  const tick = () => {
+    const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+    if (left <= 0) {
+      clearInterval(connectTimer);
+      status.textContent = "Janela expirou — clique de novo se precisar.";
+      return;
+    }
+    const m = Math.floor(left / 60), s = String(left % 60).padStart(2, "0");
+    status.textContent = `✅ Liberado — adicione o conector no Claude.ai agora (${m}:${s})`;
+  };
+  tick();
+  connectTimer = setInterval(tick, 1000);
+};
+
 document.getElementById("reindex").onclick = async () => {
   const res = await api("/portal/reindex", { method: "POST" });
   const el = document.getElementById("notion-notice");

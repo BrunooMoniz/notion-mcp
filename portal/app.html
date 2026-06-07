@@ -32,7 +32,11 @@
       <span class="muted">Endereço MCP: <code id="mcp-url">—</code></span>
       <button class="small" id="mcp-gen">Gerar token de acesso</button>
     </div>
-    <p class="muted" style="margin-top:8px"><strong>No Claude.ai / Claude Desktop:</strong> Configurações → Conectores → <em>Adicionar conector personalizado</em> → cole o <strong>endereço MCP</strong> acima. Ele vai pedir seu e-mail e um código de 6 dígitos para autorizar (não precisa do token abaixo). <strong>No Claude Code / Cursor:</strong> gere o token abaixo e use o comando.</p>
+    <p class="muted" style="margin-top:8px"><strong>No Claude.ai / Claude Desktop:</strong> clique em <em>Liberar conexão</em> abaixo, depois Configurações → Conectores → <em>Adicionar conector personalizado</em> → cole o <strong>endereço MCP</strong> acima. Ele vai pedir seu e-mail e um código de 6 dígitos para autorizar (não precisa do token abaixo). <strong>No Claude Code / Cursor:</strong> gere o token abaixo e use o comando.</p>
+    <div class="row" style="border:none;margin-top:8px">
+      <button class="small" id="connect-open">Liberar conexão ao Claude.ai (5 min)</button>
+      <span class="muted" id="connect-status"></span>
+    </div>
     <div id="mcp-result" class="hidden">
       <div class="notice err" style="margin-top:10px">⚠️ Copie agora: o token aparece <strong>uma única vez</strong>. Se perder, é só gerar outro (o anterior deixa de valer).</div>
       <label>Seu token de acesso</label>
