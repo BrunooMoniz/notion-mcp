@@ -91,12 +91,14 @@
 
   <div id="notion-notice" class="notice hidden"></div>
 
-  <!-- Notion -->
+  <!-- Notion (múltiplos workspaces) -->
   <div class="card">
     <div class="row" style="border:none">
       <div><strong>Notion</strong> <span id="notion-tag" class="tag off">desconectado</span></div>
-      <a id="notion-connect" href="#"><button class="small">Conectar / reconectar</button></a>
+      <a id="notion-connect" href="#"><button class="small">Adicionar outro Notion</button></a>
     </div>
+    <p class="muted" style="margin:6px 0">Conecte um ou mais workspaces do Notion. Cada um pode ser removido aqui — ao remover, apago suas chaves e tudo que já indexei daquele workspace.</p>
+    <div id="notion-list"></div>
     <p class="muted" id="notion-status"></p>
     <details style="margin-top:10px" open>
       <summary style="cursor:pointer;font-weight:600;font-size:13px">Conectar com um token (mais simples) — tutorial</summary>
