@@ -200,6 +200,59 @@ test("replaceDocumentChunks isolates by account_id (A's replace leaves B untouch
   await pool.query(`DELETE FROM brain_chunks WHERE source_id=$1`, [src]);
 });
 
+// These two run WITHOUT POSTGRES_URL via an injected pool whose connect() returns
+// a fake client that records the SQL verb of each statement — so CI verifies the
+// transaction SEQUENCE (BEGIN→DELETE→INSERT…→COMMIT, and ROLLBACK on failure)
+// even when no real Postgres is present.
+test("replaceDocumentChunks issues BEGIN/DELETE/INSERT*/COMMIT in order (stub)", async () => {
+  const calls: string[] = [];
+  const fakeClient = {
+    query: async (sql: string) => {
+      calls.push(String(sql).trim().split(/\s+/)[0].toUpperCase());
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => {},
+  };
+  __setPoolForTest({
+    query: async () => ({ rows: [], rowCount: 0 }),
+    connect: async () => fakeClient,
+  } as never);
+  await replaceDocumentChunks("notion", "p1", "friend:X", [
+    repChunk("p1", 0, "friend:X", "a"),
+    repChunk("p1", 1, "friend:X", "b"),
+  ]);
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "COMMIT"]);
+  __setPoolForTest(null);
+});
+
+test("replaceDocumentChunks ROLLS BACK and rethrows when an INSERT fails (stub)", async () => {
+  const calls: string[] = [];
+  let inserts = 0;
+  const fakeClient = {
+    query: async (sql: string) => {
+      const verb = String(sql).trim().split(/\s+/)[0].toUpperCase();
+      calls.push(verb);
+      if (verb === "INSERT" && ++inserts === 2) throw new Error("insert boom");
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => {},
+  };
+  __setPoolForTest({
+    query: async () => ({ rows: [], rowCount: 0 }),
+    connect: async () => fakeClient,
+  } as never);
+  await assert.rejects(
+    replaceDocumentChunks("notion", "p1", "friend:X", [
+      repChunk("p1", 0, "friend:X", "a"),
+      repChunk("p1", 1, "friend:X", "b"),
+    ]),
+    /insert boom/,
+  );
+  // DELETE ran, first INSERT ok, second INSERT threw -> ROLLBACK, never COMMIT.
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "ROLLBACK"]);
+  __setPoolForTest(null);
+});
+
 // --- F.1.2: searchSemantic/searchKeyword expose real scores ----------------
 // These run WITHOUT POSTGRES_URL: the pool is replaced with a stub via the
 // __setPoolForTest seam, so no live DB is touched.
