@@ -331,6 +331,27 @@ h1.title em{font-style:normal;color:var(--accent-strong)}
   .s3{text-align:left}
 }
 
+/* ---------- Pricing ---------- */
+.pricing-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:stretch}
+.plan{display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:24px 22px;box-shadow:var(--shadow-sm);position:relative;transition:transform .2s ease, box-shadow .2s ease}
+.plan:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.plan.featured{border-color:#cfe6d8;box-shadow:var(--shadow)}
+.plan .badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;letter-spacing:.02em;color:#fff;background:var(--accent);border-radius:999px;padding:4px 12px;white-space:nowrap}
+.plan .pname{font-size:16px;font-weight:580;letter-spacing:-.02em}
+.plan .pdesc{font-size:12.5px;color:var(--muted);margin-top:4px;min-height:32px}
+.plan .price{display:flex;align-items:baseline;gap:2px;margin:14px 0 6px}
+.plan .price .cur{font-size:15px;font-weight:560;color:var(--ink-soft)}
+.plan .price .amt{font-size:34px;font-weight:600;letter-spacing:-.03em}
+.plan .price .per{font-size:13px;color:var(--muted)}
+.plan .pfeats{list-style:none;padding:0;margin:16px 0 22px;display:flex;flex-direction:column;gap:10px;flex:1}
+.plan .pfeats li{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--ink-soft);line-height:1.4}
+.plan .pfeats li svg{flex:0 0 auto;color:var(--accent);margin-top:1px}
+.plan .pfeats li.off{color:#b7b2a7}
+.plan .pfeats li.off svg{color:#d4cfc4}
+.plan-note{text-align:center;font-size:13.5px;color:var(--muted);margin-top:26px}
+@media(max-width:900px){.pricing-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.pricing-grid{grid-template-columns:1fr}}
+
 /* reveal — opacity:0 only applied once JS confirms (html.reveal-ready), so
    content is always visible if JS/IO fail */
 .reveal{transition:opacity .6s ease, transform .6s ease}
@@ -386,6 +407,7 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
     <nav class="nav-links">
       <a class="lnk" href="#demo">Demonstração</a>
       <a class="lnk" href="#como">Como funciona</a>
+      <a class="lnk" href="#planos">Planos</a>
       <a class="lnk" href="https://github.com/BrunooMoniz/notion-mcp" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <div class="nav-cta">
@@ -574,6 +596,86 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
       <div class="s3"><b>2 · O Zinom organiza</b><span>Junta tudo num só lugar, pesquisável.</span></div>
       <div class="s3"><b>3 · Use na sua IA</b><span>Pergunte e aja pela IA que preferir.</span></div>
     </div>
+  </div>
+</section>
+
+<!-- ============ PLANOS ============ -->
+<section class="section alt" id="planos">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="sec-tag">Planos</p>
+      <h2>Comece grátis. Cresça quando precisar.</h2>
+      <p>Você cria a conta com convite no plano Free. O upgrade é self-service dentro do app, quando quiser mais.</p>
+    </div>
+    <div class="pricing-grid reveal">
+
+      <!-- Free -->
+      <div class="plan">
+        <div class="pname">Free</div>
+        <div class="pdesc">Pra experimentar o segundo cérebro.</div>
+        <div class="price"><span class="cur">R$</span><span class="amt">0</span><span class="per">/mês</span></div>
+        <ul class="pfeats">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1 workspace do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>2.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>100 consultas / mês</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Indexação sob demanda</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Granola + Calendar</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Classificador + Briefing</span></li>
+        </ul>
+        <a class="btn btn-ghost btn-block" href="#acesso">Pedir convite</a>
+      </div>
+
+      <!-- Essencial -->
+      <div class="plan">
+        <div class="pname">Essencial</div>
+        <div class="pdesc">Pro uso pessoal do dia a dia.</div>
+        <div class="price"><span class="cur">R$</span><span class="amt">4</span><span class="per">,99/mês</span></div>
+        <ul class="pfeats">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1 workspace do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>10.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (50 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Classificador + Briefing</span></li>
+        </ul>
+        <a class="btn btn-ghost btn-block" href="/plano.html">Assinar</a>
+      </div>
+
+      <!-- Pro -->
+      <div class="plan featured">
+        <span class="badge">Mais popular</span>
+        <div class="pname">Pro</div>
+        <div class="pdesc">Pra quem vive dentro do segundo cérebro.</div>
+        <div class="price"><span class="cur">R$</span><span class="amt">9</span><span class="per">,99/mês</span></div>
+        <ul class="pfeats">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>3 workspaces do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>40.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>5.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (200 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Classificador + Revisitar + Briefing</span></li>
+        </ul>
+        <a class="btn btn-primary btn-block" href="/plano.html">Assinar</a>
+      </div>
+
+      <!-- Ilimitado -->
+      <div class="plan">
+        <div class="pname">Ilimitado</div>
+        <div class="pdesc">Sem se preocupar com limites.</div>
+        <div class="price"><span class="cur">R$</span><span class="amt">18</span><span class="per">,99/mês</span></div>
+        <ul class="pfeats">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>5 workspaces do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>150.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>20.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (500 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Classificador + Revisitar + Briefing</span></li>
+        </ul>
+        <a class="btn btn-ghost btn-block" href="/plano.html">Assinar</a>
+      </div>
+
+    </div>
+    <p class="plan-note">Preços em reais (R$), cobrança mensal via Stripe. Cancele quando quiser.</p>
   </div>
 </section>
 
