@@ -19,7 +19,7 @@ import { fetchGranolaDocuments } from "./granola-source.js";
 import { fetchIcsCalendarDocuments } from "./calendar-ics-source.js";
 import { indexDocument } from "./index-document.js";
 import {
-  upsertChunks,
+  replaceDocumentChunks,
   deleteBySource,
   setSyncState,
   recordRun,
@@ -27,7 +27,7 @@ import {
 } from "./storage.js";
 import { prefixChunkIds } from "./account-chunks.js";
 import { FRIEND_WORKSPACE, accountIcalConfigs, ensureAccountWorkspace } from "./account-sources.js";
-import type { ChunkWithEmbedding, Workspace } from "./types.js";
+import type { Workspace } from "./types.js";
 
 export async function indexAccount(accountId: string): Promise<{ documents: number; chunks: number }> {
   const workspaces = await warmAccount(accountId);
@@ -38,10 +38,10 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   for (const ws of workspaces) {
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
-      const collected: ChunkWithEmbedding[] = [];
       const liveIds: string[] = [];
       const archivedIds: string[] = [];
       let wsDocs = 0;
+      let wsChunks = 0;
       try {
         for await (const doc of fetchWorkspaceDocuments({
           workspace: ws as Workspace,
@@ -49,12 +49,13 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         })) {
           doc.account_id = accountId;
           const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
-          await deleteBySource("notion", doc.source_id, accountId);
-          collected.push(...docChunks);
+          // Atomic per-document replace: an interruption mid-pass leaves every
+          // already-processed document intact instead of emptying the brain.
+          await replaceDocumentChunks("notion", doc.source_id, accountId, docChunks);
           liveIds.push(doc.source_id);
           wsDocs++;
+          wsChunks += docChunks.length;
         }
-        await upsertChunks(collected);
         for (const id of archivedIds) await deleteBySource("notion", id, accountId);
         const pruned = await pruneOrphans("notion", ws, liveIds, accountId);
         if (pruned > 0) console.log(`[index-account] ${accountId} ws=${ws} pruned ${pruned} orphans`);
@@ -63,14 +64,14 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
           worker: "indexer",
           source: `notion-${ws}`,
           ok: true,
-          counts: { documents: wsDocs, chunks: collected.length },
+          counts: { documents: wsDocs, chunks: wsChunks },
           startedAt,
           endedAt: new Date(),
           accountId,
         });
         documents += wsDocs;
-        chunks += collected.length;
-        console.log(`[index-account] ${accountId} ws=${ws} documents=${wsDocs} chunks=${collected.length}`);
+        chunks += wsChunks;
+        console.log(`[index-account] ${accountId} ws=${ws} documents=${wsDocs} chunks=${wsChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} ws=${ws} FAILED: ${err?.message ?? err}`);
         await recordRun({
@@ -78,7 +79,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
           source: `notion-${ws}`,
           ok: false,
           error: err?.message ?? String(err),
-          counts: { documents: wsDocs, chunks: collected.length },
+          counts: { documents: wsDocs, chunks: wsChunks },
           startedAt,
           endedAt: new Date(),
           accountId,
@@ -93,33 +94,32 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
     await ensureAccountWorkspace(accountId, FRIEND_WORKSPACE);
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
-      const collected: ChunkWithEmbedding[] = [];
       const liveIds: string[] = [];
       let gDocs = 0;
+      let gChunks = 0;
       try {
         for await (const doc of fetchGranolaDocuments({ token: granolaKey, workspace: FRIEND_WORKSPACE })) {
           doc.account_id = accountId;
           const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
-          await deleteBySource("granola", doc.source_id, accountId);
-          collected.push(...docChunks);
+          await replaceDocumentChunks("granola", doc.source_id, accountId, docChunks);
           liveIds.push(doc.source_id);
           gDocs++;
+          gChunks += docChunks.length;
         }
-        await upsertChunks(collected);
         await pruneOrphans("granola", FRIEND_WORKSPACE, liveIds, accountId);
         await setSyncState(`granola-${FRIEND_WORKSPACE}`, startedAt, accountId);
         await recordRun({
           worker: "indexer",
           source: `granola-${FRIEND_WORKSPACE}`,
           ok: true,
-          counts: { documents: gDocs, chunks: collected.length },
+          counts: { documents: gDocs, chunks: gChunks },
           startedAt,
           endedAt: new Date(),
           accountId,
         });
         documents += gDocs;
-        chunks += collected.length;
-        console.log(`[index-account] ${accountId} granola documents=${gDocs} chunks=${collected.length}`);
+        chunks += gChunks;
+        console.log(`[index-account] ${accountId} granola documents=${gDocs} chunks=${gChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} granola FAILED: ${err?.message ?? err}`);
         await recordRun({
@@ -127,7 +127,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
           source: `granola-${FRIEND_WORKSPACE}`,
           ok: false,
           error: err?.message ?? String(err),
-          counts: { documents: gDocs, chunks: collected.length },
+          counts: { documents: gDocs, chunks: gChunks },
           startedAt,
           endedAt: new Date(),
           accountId,
@@ -144,37 +144,36 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
     }
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
-      const collected: ChunkWithEmbedding[] = [];
       const liveByWs = new Map<string, string[]>();
       let cDocs = 0;
+      let cChunks = 0;
       try {
         for await (const doc of fetchIcsCalendarDocuments({ configs: icalConfigs })) {
           doc.account_id = accountId;
           const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
-          await deleteBySource("calendar", doc.source_id, accountId);
-          collected.push(...docChunks);
+          await replaceDocumentChunks("calendar", doc.source_id, accountId, docChunks);
           if (doc.workspace) {
             const arr = liveByWs.get(doc.workspace) ?? [];
             arr.push(doc.source_id);
             liveByWs.set(doc.workspace, arr);
           }
           cDocs++;
+          cChunks += docChunks.length;
         }
-        await upsertChunks(collected);
         for (const [ws, liveIds] of liveByWs) await pruneOrphans("calendar", ws, liveIds, accountId);
         await setSyncState("calendar-ics", startedAt, accountId);
         await recordRun({
           worker: "indexer",
           source: "calendar",
           ok: true,
-          counts: { documents: cDocs, chunks: collected.length },
+          counts: { documents: cDocs, chunks: cChunks },
           startedAt,
           endedAt: new Date(),
           accountId,
         });
         documents += cDocs;
-        chunks += collected.length;
-        console.log(`[index-account] ${accountId} calendar documents=${cDocs} chunks=${collected.length}`);
+        chunks += cChunks;
+        console.log(`[index-account] ${accountId} calendar documents=${cDocs} chunks=${cChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} calendar FAILED: ${err?.message ?? err}`);
         await recordRun({
@@ -182,7 +181,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
           source: "calendar",
           ok: false,
           error: err?.message ?? String(err),
-          counts: { documents: cDocs, chunks: collected.length },
+          counts: { documents: cDocs, chunks: cChunks },
           startedAt,
           endedAt: new Date(),
           accountId,

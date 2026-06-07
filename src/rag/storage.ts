@@ -8,8 +8,10 @@ import { recordUsage } from "./usage.js";
 
 let pool: pg.Pool | null = null;
 
-/** Minimal pg-like surface the storage layer depends on (lets tests inject a stub). */
-type PoolLike = Pick<pg.Pool, "query">;
+/** Minimal pg-like surface the storage layer depends on (lets tests inject a stub).
+ *  `connect` is optional: only the transactional path (replaceDocumentChunks) uses
+ *  it, and a real pg.Pool always provides it. */
+type PoolLike = Pick<pg.Pool, "query"> & { connect?: pg.Pool["connect"] };
 
 let injectedPool: PoolLike | null = null;
 
@@ -42,10 +44,9 @@ export async function closePool(): Promise<void> {
   }
 }
 
-export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> {
-  if (chunks.length === 0) return;
-  const p = getPool();
-  const sql = `
+// Shared INSERT for a single chunk row (upsert by PK). Used by both upsertChunks
+// (best-effort batch) and replaceDocumentChunks (transactional per-document).
+const INSERT_CHUNK_SQL = `
     INSERT INTO brain_chunks
       (id, source_type, source_id, workspace, db_name, parent_url, chunk_index,
        text, embedding, metadata, source_updated, account_id, indexed_at)
@@ -64,22 +65,86 @@ export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> 
       source_updated = EXCLUDED.source_updated,
       account_id     = EXCLUDED.account_id,
       indexed_at     = now()
-  `;
+`;
+
+function chunkInsertParams(c: ChunkWithEmbedding, fallbackAccountId: string): unknown[] {
+  return [
+    c.id,
+    c.source_type,
+    c.source_id,
+    c.workspace,
+    c.db_name,
+    c.parent_url,
+    c.chunk_index,
+    c.text,
+    formatVector(c.embedding),
+    JSON.stringify(c.metadata),
+    c.source_updated,
+    c.account_id ?? fallbackAccountId,
+  ];
+}
+
+export async function upsertChunks(chunks: ChunkWithEmbedding[]): Promise<void> {
+  if (chunks.length === 0) return;
+  const p = getPool();
   for (const c of chunks) {
-    await p.query(sql, [
-      c.id,
-      c.source_type,
-      c.source_id,
-      c.workspace,
-      c.db_name,
-      c.parent_url,
-      c.chunk_index,
-      c.text,
-      formatVector(c.embedding),
-      JSON.stringify(c.metadata),
-      c.source_updated,
-      c.account_id ?? DEFAULT_ACCOUNT_ID,
-    ]);
+    await p.query(INSERT_CHUNK_SQL, chunkInsertParams(c, DEFAULT_ACCOUNT_ID));
+  }
+  // F3.0 passive metering: count chunks written for the current tenant.
+  await recordUsage(getAccountId(), "chunks", chunks.length);
+}
+
+/**
+ * Atomically REPLACE all chunks of ONE document (source_type+source_id) for an
+ * account, inside a single transaction: DELETE the old chunks then INSERT the new
+ * ones, commit-or-rollback as a unit.
+ *
+ * Why this exists: the per-account indexer used to delete every document's chunks
+ * up front and only re-insert them in one batch at the very END of the pass. An
+ * interruption (deploy/restart/OOM/network error mid-pass) between the deletes and
+ * the final insert left the account's brain TOTALLY OR PARTIALLY EMPTY, with no
+ * trace. Replacing one document at a time, transactionally, shrinks the only
+ * possible loss window to a single in-flight document (recovered on the next
+ * reindex) and never leaves the brain empty.
+ *
+ * ISOLATION: account_id scopes the DELETE and is forced onto every inserted row
+ * (falling back to the passed accountId, NEVER to 'bruno'), so one account's
+ * replace can never touch another's rows.
+ */
+export async function replaceDocumentChunks(
+  sourceType: string,
+  sourceId: string,
+  accountId: string,
+  chunks: ChunkWithEmbedding[],
+): Promise<void> {
+  const p = getPool();
+  const deleteSql = `DELETE FROM brain_chunks WHERE source_type=$1 AND source_id=$2 AND account_id=$3`;
+
+  if (typeof p.connect === "function") {
+    const client = await p.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(deleteSql, [sourceType, sourceId, accountId]);
+      for (const c of chunks) {
+        await client.query(INSERT_CHUNK_SQL, chunkInsertParams(c, accountId));
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore rollback failure; surface the original error */
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    // Test stub without a real pool: sequential, non-transactional fallback.
+    await p.query(deleteSql, [sourceType, sourceId, accountId]);
+    for (const c of chunks) {
+      await p.query(INSERT_CHUNK_SQL, chunkInsertParams(c, accountId));
+    }
   }
   // F3.0 passive metering: count chunks written for the current tenant.
   await recordUsage(getAccountId(), "chunks", chunks.length);
