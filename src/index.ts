@@ -19,7 +19,7 @@ import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
-import { requestContext, getContext, type RequestContext } from "./context.js";
+import { requestContext, getContext, getAccountId, type RequestContext } from "./context.js";
 import { isOwnerContext, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
@@ -329,9 +329,32 @@ interface ManagedSession {
   transport: StreamableHTTPServerTransport;
   createdAt: number;
   timer: ReturnType<typeof setTimeout>;
+  /** WS2 — the account that created this session. A session is bound to one
+   *  account: its McpServer was built with that account's instructions + tool set
+   *  (owner gets notion_*; a friend does not). Reuse by a DIFFERENT account is
+   *  rejected, so a friend can never inherit the owner's tools via a leaked
+   *  mcp-session-id (confused-deputy / session fixation). */
+  accountId: string;
 }
 
 const sessions = new Map<string, ManagedSession>();
+
+/** Serve an existing session ONLY to the account that created it. Returns the
+ *  session when the current request's account matches; otherwise responds 404
+ *  (forcing the client to re-initialize a session bound to its own account) and
+ *  returns null. */
+function sessionForRequest(sessionId: string, res: express.Response): ManagedSession | null {
+  const managed = sessions.get(sessionId);
+  if (!managed) return null;
+  if (managed.accountId !== getAccountId()) {
+    console.warn(
+      `[${new Date().toISOString()}] MCP: session ${sessionId.slice(0, 8)} account mismatch (bound=${managed.accountId}, req=${getAccountId()}); rejecting`
+    );
+    res.status(404).json({ error: "Session not found or expired. Please reinitialize." });
+    return null;
+  }
+  return managed;
+}
 
 function evictSession(id: string) {
   const session = sessions.get(id);
@@ -354,7 +377,8 @@ app.post("/mcp", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
   if (sessionId && sessions.has(sessionId)) {
-    const managed = sessions.get(sessionId)!;
+    const managed = sessionForRequest(sessionId, res); // account-bound; 404 on mismatch
+    if (!managed) return;
     await managed.transport.handleRequest(req, res, req.body);
     return;
   }
@@ -376,11 +400,22 @@ app.post("/mcp", async (req, res) => {
     if (oldest) evictSession(oldest[0]);
   }
 
+  // WS2 — tailor the server to the account. This runs inside the auth
+  // middleware's requestContext scope, so getContext()/getAccountId() carry the
+  // resolved account. Owner gets the full INSTRUCTIONS + all notion_* tools; a
+  // friend gets friend INSTRUCTIONS + a SAFE tool set (search, web-index,
+  // create-task) — the 24 notion_* tools are owner-only because they assume
+  // Bruno's fixed workspaces and expose destructive ops not meant for friends.
+  // The session is BOUND to this account (sessionAccountId) so a later request
+  // from a different account can never reuse it and inherit this tool set.
+  const owner = isOwnerContext(getContext());
+  const sessionAccountId = getAccountId();
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (id) => {
       const timer = setTimeout(() => evictSession(id), SESSION_TTL_MS);
-      sessions.set(id, { transport, createdAt: Date.now(), timer });
+      sessions.set(id, { transport, createdAt: Date.now(), timer, accountId: sessionAccountId });
     },
   });
 
@@ -388,14 +423,6 @@ app.post("/mcp", async (req, res) => {
     const id = transport.sessionId;
     if (id) evictSession(id);
   };
-
-  // WS2 — tailor the server to the account. This runs inside the auth
-  // middleware's requestContext scope, so getContext() carries the resolved
-  // account. Owner gets the full INSTRUCTIONS + all notion_* tools; a friend gets
-  // friend INSTRUCTIONS + a SAFE tool set (search, web-index, create-task) — the
-  // 24 notion_* tools are owner-only because they assume Bruno's fixed workspaces
-  // and expose destructive ops not meant for non-technical friends.
-  const owner = isOwnerContext(getContext());
 
   const server = new McpServer(
     {
@@ -427,7 +454,8 @@ app.get("/mcp", async (req, res) => {
     res.status(404).json({ error: "Session not found" });
     return;
   }
-  const managed = sessions.get(sessionId)!;
+  const managed = sessionForRequest(sessionId, res); // account-bound; 404 on mismatch
+  if (!managed) return;
   await managed.transport.handleRequest(req, res);
 });
 
@@ -437,7 +465,8 @@ app.delete("/mcp", async (req, res) => {
     res.status(404).json({ error: "Session not found" });
     return;
   }
-  const managed = sessions.get(sessionId)!;
+  const managed = sessionForRequest(sessionId, res); // account-bound; 404 on mismatch
+  if (!managed) return;
   await managed.transport.handleRequest(req, res);
 });
 
