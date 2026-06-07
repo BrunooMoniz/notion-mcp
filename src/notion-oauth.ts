@@ -106,9 +106,9 @@ export async function onboardAccount(
     [accountId],
   );
   await p.query(
-    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [accountId, workspace],
+    `INSERT INTO account_workspaces (account_id, workspace, name) VALUES ($1, $2, $3)
+     ON CONFLICT (account_id, workspace) DO UPDATE SET name = COALESCE(EXCLUDED.name, account_workspaces.name)`,
+    [accountId, workspace, tok.workspace_name ?? null],
   );
   await setAccountSecret(accountId, `notion_access:${workspace}`, tok.access_token);
   if (tok.refresh_token) {
@@ -122,7 +122,8 @@ export async function onboardAccount(
  * EXISTING portal account (instead of minting a `notion:<workspace>` identity).
  * Used when a signed-in friend connects Notion from the portal: the OAuth state
  * carries their account_id, and the workspace + encrypted tokens attach to it.
- * The standalone onboardAccount() path above is unchanged. Idempotent.
+ * The standalone onboardAccount() path above is unchanged. Idempotent. Persists
+ * the OAuth `workspace_name` (0010) so the portal lists a human-readable name.
  */
 export async function associateNotionToAccount(
   accountId: string,
@@ -131,9 +132,9 @@ export async function associateNotionToAccount(
   const workspace = tok.workspace_id;
   const p = getPool();
   await p.query(
-    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [accountId, workspace],
+    `INSERT INTO account_workspaces (account_id, workspace, name) VALUES ($1, $2, $3)
+     ON CONFLICT (account_id, workspace) DO UPDATE SET name = COALESCE(EXCLUDED.name, account_workspaces.name)`,
+    [accountId, workspace, tok.workspace_name ?? null],
   );
   await setAccountSecret(accountId, `notion_access:${workspace}`, tok.access_token);
   if (tok.refresh_token) {
@@ -158,9 +159,9 @@ export async function associatePatToAccount(
   const workspace = identity.id;
   const p = getPool();
   await p.query(
-    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [accountId, workspace],
+    `INSERT INTO account_workspaces (account_id, workspace, name) VALUES ($1, $2, $3)
+     ON CONFLICT (account_id, workspace) DO UPDATE SET name = COALESCE(EXCLUDED.name, account_workspaces.name)`,
+    [accountId, workspace, identity.name ?? null],
   );
   await setAccountSecret(accountId, `notion_pat:${workspace}`, pat);
   return { workspace };
@@ -220,9 +221,9 @@ export async function onboardPat(
     [accountId],
   );
   await p.query(
-    `INSERT INTO account_workspaces (account_id, workspace) VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [accountId, workspace],
+    `INSERT INTO account_workspaces (account_id, workspace, name) VALUES ($1, $2, $3)
+     ON CONFLICT (account_id, workspace) DO UPDATE SET name = COALESCE(EXCLUDED.name, account_workspaces.name)`,
+    [accountId, workspace, identity.name ?? null],
   );
   await setAccountSecret(accountId, `notion_pat:${workspace}`, pat);
   return { accountId, workspace };

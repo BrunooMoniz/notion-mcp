@@ -201,6 +201,27 @@ export async function deleteBySource(
 }
 
 /**
+ * Purge EVERY chunk of one (source_type, workspace) namespace for an account.
+ * Used when a friend disconnects a Notion workspace from the portal: all of that
+ * workspace's indexed Notion chunks must vanish from their brain. ISOLATION:
+ * account_id AND workspace both scope the DELETE, so removing one account's
+ * workspace can never touch another account's rows (or another workspace's).
+ * Returns the number of rows deleted.
+ */
+export async function deleteByAccountWorkspaceSource(
+  accountId: string,
+  workspace: string,
+  sourceType: string,
+): Promise<number> {
+  const p = getPool();
+  const res = await p.query(
+    `DELETE FROM brain_chunks WHERE account_id=$1 AND workspace=$2 AND source_type=$3`,
+    [accountId, workspace, sourceType],
+  );
+  return res.rowCount ?? 0;
+}
+
+/**
  * Delete chunks for a source that are no longer present upstream (orphans),
  * scoped to a single (source_type, workspace) namespace.
  *
