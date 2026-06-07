@@ -6,13 +6,26 @@
 -- invite -> magic link -> sign-in -> credentials flow locally.
 
 CREATE TABLE IF NOT EXISTS account (
-  id          text PRIMARY KEY,
-  kind        text,
-  status      text NOT NULL DEFAULT 'active',
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  email       text
+  id                     text PRIMARY KEY,
+  kind                   text,
+  status                 text NOT NULL DEFAULT 'active',
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  email                  text,
+  plan                   text NOT NULL DEFAULT 'free',
+  stripe_customer_id     text,
+  stripe_subscription_id text,
+  plan_status            text,
+  current_period_end     timestamptz
 );
 CREATE UNIQUE INDEX IF NOT EXISTS account_email_uniq ON account (email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS account_stripe_customer_uniq ON account (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS billing_events (
+  stripe_event_id text PRIMARY KEY,
+  type            text NOT NULL,
+  account_id      text,
+  received_at     timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS account_workspaces (
   account_id  text NOT NULL,
