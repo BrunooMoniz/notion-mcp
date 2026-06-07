@@ -32,6 +32,28 @@
     </div>
   </div>
 
+  <!-- Checklist de ativação (one-time) -->
+  <div class="card hidden" id="activation">
+    <strong>🚀 Ative seu Zinom</strong>
+    <p class="muted">4 passos pra começar a tirar valor. Some quando terminar.</p>
+    <ul id="activation-items" style="list-style:none;padding:0;margin:8px 0"></ul>
+
+    <!-- Sub-bloco Tarefas (renderizado conforme a detecção) -->
+    <div id="act-tasks" class="hidden" style="margin:8px 0;padding:10px;border:1px solid #eee;border-radius:8px">
+      <p class="muted" id="act-tasks-msg"></p>
+      <div id="act-tasks-actions"></div>
+    </div>
+
+    <!-- Sub-bloco Pergunte ao Zinom -->
+    <div id="act-ask" class="hidden" style="margin:8px 0;padding:10px;border:1px solid #eee;border-radius:8px">
+      <p class="muted">Abra o Claude (com o Zinom conectado) e experimente:</p>
+      <ul id="act-prompts" class="muted" style="padding-left:18px;line-height:1.7"></ul>
+      <button class="small" id="act-ask-done">Já testei ✅</button>
+    </div>
+
+    <button class="secondary small" id="act-dismiss" style="margin-top:8px">Pular por enquanto</button>
+  </div>
+
   <div id="notion-notice" class="notice hidden"></div>
 
   <!-- Notion -->

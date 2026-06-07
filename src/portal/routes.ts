@@ -336,6 +336,63 @@ export function createPortalRouter(): express.Router {
     }
   });
 
+  // --- Ativação (checklist one-time) ----------------------------------------
+  router.get("/portal/activation", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    const { getActivationState } = await import("./activation.js");
+    res.json(await getActivationState(accountId));
+  });
+
+  // Detecta candidatas a Task Tracker no Notion da conta (não escreve nada).
+  router.post("/portal/tasks/detect", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { detectTaskTracker } = await import("./task-tracker.js");
+      res.json(await detectTaskTracker(accountId));
+    } catch (err: any) {
+      console.error(`[portal] tasks/detect ${accountId}: ${err?.message ?? err}`);
+      res.status(502).json({ error: "não consegui ler seu Notion agora" });
+    }
+  });
+
+  // Cria a DB "Tarefas" (página-mãe "🧠 Zinom" no topo). Só com confirmação (POST).
+  router.post("/portal/tasks/create", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { createTaskTracker } = await import("./task-tracker.js");
+      const { dataSourceId } = await createTaskTracker(accountId);
+      res.status(201).json({ data_source_id: dataSourceId });
+    } catch (err: any) {
+      console.error(`[portal] tasks/create ${accountId}: ${err?.message ?? err}`);
+      res.status(400).json({ error: err?.message ?? "não consegui criar as Tarefas" });
+    }
+  });
+
+  // Usa uma DB existente que a pessoa escolheu (grava o id; não muta schema no MVP).
+  router.post("/portal/tasks/use", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const id = typeof req.body?.data_source_id === "string" ? req.body.data_source_id.trim() : "";
+    if (!id) {
+      res.status(400).json({ error: "data_source_id obrigatório" });
+      return;
+    }
+    const { useExistingTracker } = await import("./task-tracker.js");
+    await useExistingTracker(accountId, id);
+    res.sendStatus(200);
+  });
+
+  router.post("/portal/activation/ask", requireSession, async (_req, res) => {
+    const { markAsked } = await import("./activation.js");
+    await markAsked(res.locals.accountId);
+    res.sendStatus(200);
+  });
+
+  router.post("/portal/activation/dismiss", requireSession, async (_req, res) => {
+    const { dismissActivation } = await import("./activation.js");
+    await dismissActivation(res.locals.accountId);
+    res.sendStatus(200);
+  });
+
   return router;
 }
 
