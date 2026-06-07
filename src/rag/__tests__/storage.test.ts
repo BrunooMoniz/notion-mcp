@@ -3,6 +3,7 @@ import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   upsertChunks,
+  replaceDocumentChunks,
   deleteBySource,
   getPool,
   closePool,
@@ -98,6 +99,158 @@ test("deleteBySource removes all chunks for a source", async () => {
     [sourceId],
   );
   assert.equal(rows[0].count, "0");
+});
+
+// --- WS1: replaceDocumentChunks — transactional per-document replace ---------
+// Proves the fix for the data-loss window. The per-account indexer used to delete
+// every document up front and upsert ONCE at the end of a pass; an interruption
+// emptied the brain. replaceDocumentChunks makes each document an atomic unit, so
+// a crash can only lose the single in-flight document, never the whole brain.
+
+function repChunk(sourceId: string, idx: number, accountId: string, text: string): ChunkWithEmbedding {
+  return {
+    id: `${accountId}:${sourceId}:${idx}`,
+    source_type: "notion",
+    source_id: sourceId,
+    workspace: "personal",
+    db_name: null,
+    parent_url: null,
+    chunk_index: idx,
+    text,
+    embedding: fakeEmbed(idx + 1),
+    metadata: {},
+    source_updated: new Date("2026-05-01"),
+    account_id: accountId,
+  };
+}
+
+test("replaceDocumentChunks swaps a document's chunks atomically (and prunes removed)", async () => {
+  if (!HAS_PG) {
+    console.log("skipping: no POSTGRES_URL");
+    return;
+  }
+  const src = `${TEST_PREFIX}-replace-1`;
+  const acct = "friend:replace-A";
+  await upsertChunks([
+    repChunk(src, 0, acct, "old a"),
+    repChunk(src, 1, acct, "old b"),
+    repChunk(src, 2, acct, "old c"),
+  ]);
+  // New version of the same document has only 2 chunks, with new text.
+  await replaceDocumentChunks("notion", src, acct, [
+    repChunk(src, 0, acct, "new a"),
+    repChunk(src, 1, acct, "new b"),
+  ]);
+  const pool = getPool();
+  const { rows } = await pool.query<{ chunk_index: number; text: string }>(
+    `SELECT chunk_index, text FROM brain_chunks WHERE source_id=$1 AND account_id=$2 ORDER BY chunk_index`,
+    [src, acct],
+  );
+  assert.equal(rows.length, 2); // the 3rd (old c) is gone
+  assert.equal(rows[0].text, "new a");
+  assert.equal(rows[1].text, "new b");
+  await pool.query(`DELETE FROM brain_chunks WHERE source_id=$1`, [src]);
+});
+
+test("replaceDocumentChunks ROLLS BACK on a mid-insert failure, keeping old chunks", async () => {
+  if (!HAS_PG) {
+    console.log("skipping: no POSTGRES_URL");
+    return;
+  }
+  const src = `${TEST_PREFIX}-replace-rollback`;
+  const acct = "friend:replace-RB";
+  await upsertChunks([repChunk(src, 0, acct, "keep a"), repChunk(src, 1, acct, "keep b")]);
+  // The second new chunk has a wrong-dimension embedding: the INSERT fails AFTER
+  // the DELETE and the first INSERT — exactly the window that used to corrupt data.
+  const good = repChunk(src, 0, acct, "would-be-new");
+  const bad = { ...repChunk(src, 1, acct, "bad"), embedding: [0.1, 0.2, 0.3] };
+  await assert.rejects(replaceDocumentChunks("notion", src, acct, [good, bad]));
+  const pool = getPool();
+  const { rows } = await pool.query<{ text: string }>(
+    `SELECT text FROM brain_chunks WHERE source_id=$1 AND account_id=$2 ORDER BY chunk_index`,
+    [src, acct],
+  );
+  // Transaction rolled back: the ORIGINAL two chunks survive; nothing was lost.
+  assert.deepEqual(rows.map((r) => r.text), ["keep a", "keep b"]);
+  await pool.query(`DELETE FROM brain_chunks WHERE source_id=$1`, [src]);
+});
+
+test("replaceDocumentChunks isolates by account_id (A's replace leaves B untouched)", async () => {
+  if (!HAS_PG) {
+    console.log("skipping: no POSTGRES_URL");
+    return;
+  }
+  const src = `${TEST_PREFIX}-replace-iso`;
+  const A = "friend:iso-A";
+  const B = "friend:iso-B";
+  // Two accounts indexing the SAME page (same source_id), distinct ids per account.
+  await upsertChunks([repChunk(src, 0, A, "A old"), repChunk(src, 0, B, "B keep")]);
+  await replaceDocumentChunks("notion", src, A, [repChunk(src, 0, A, "A new"), repChunk(src, 1, A, "A new2")]);
+  const pool = getPool();
+  const a = await pool.query<{ text: string }>(
+    `SELECT text FROM brain_chunks WHERE source_id=$1 AND account_id=$2 ORDER BY chunk_index`,
+    [src, A],
+  );
+  const b = await pool.query<{ text: string }>(
+    `SELECT text FROM brain_chunks WHERE source_id=$1 AND account_id=$2 ORDER BY chunk_index`,
+    [src, B],
+  );
+  assert.deepEqual(a.rows.map((r) => r.text), ["A new", "A new2"]);
+  assert.deepEqual(b.rows.map((r) => r.text), ["B keep"]); // account B never touched
+  await pool.query(`DELETE FROM brain_chunks WHERE source_id=$1`, [src]);
+});
+
+// These two run WITHOUT POSTGRES_URL via an injected pool whose connect() returns
+// a fake client that records the SQL verb of each statement — so CI verifies the
+// transaction SEQUENCE (BEGIN→DELETE→INSERT…→COMMIT, and ROLLBACK on failure)
+// even when no real Postgres is present.
+test("replaceDocumentChunks issues BEGIN/DELETE/INSERT*/COMMIT in order (stub)", async () => {
+  const calls: string[] = [];
+  const fakeClient = {
+    query: async (sql: string) => {
+      calls.push(String(sql).trim().split(/\s+/)[0].toUpperCase());
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => {},
+  };
+  __setPoolForTest({
+    query: async () => ({ rows: [], rowCount: 0 }),
+    connect: async () => fakeClient,
+  } as never);
+  await replaceDocumentChunks("notion", "p1", "friend:X", [
+    repChunk("p1", 0, "friend:X", "a"),
+    repChunk("p1", 1, "friend:X", "b"),
+  ]);
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "COMMIT"]);
+  __setPoolForTest(null);
+});
+
+test("replaceDocumentChunks ROLLS BACK and rethrows when an INSERT fails (stub)", async () => {
+  const calls: string[] = [];
+  let inserts = 0;
+  const fakeClient = {
+    query: async (sql: string) => {
+      const verb = String(sql).trim().split(/\s+/)[0].toUpperCase();
+      calls.push(verb);
+      if (verb === "INSERT" && ++inserts === 2) throw new Error("insert boom");
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => {},
+  };
+  __setPoolForTest({
+    query: async () => ({ rows: [], rowCount: 0 }),
+    connect: async () => fakeClient,
+  } as never);
+  await assert.rejects(
+    replaceDocumentChunks("notion", "p1", "friend:X", [
+      repChunk("p1", 0, "friend:X", "a"),
+      repChunk("p1", 1, "friend:X", "b"),
+    ]),
+    /insert boom/,
+  );
+  // DELETE ran, first INSERT ok, second INSERT threw -> ROLLBACK, never COMMIT.
+  assert.deepEqual(calls, ["BEGIN", "DELETE", "INSERT", "INSERT", "ROLLBACK"]);
+  __setPoolForTest(null);
 });
 
 // --- F.1.2: searchSemantic/searchKeyword expose real scores ----------------
