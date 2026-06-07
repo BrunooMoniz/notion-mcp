@@ -152,6 +152,27 @@ test("createTaskTracker: cria página + DB, grava o data_source id", async () =>
   assert.ok(calls.some((c) => c.includes("/v1/databases")));
 });
 
+test("createTaskTracker: reusa 'Tarefas' existente, sem criar página duplicada", async () => {
+  await seedNotion("friend:y");
+  const calls: string[] = [];
+  const fetchImpl = (async (url: string) => {
+    const u = String(url);
+    calls.push(u);
+    let body: any = {};
+    if (u.includes("/v1/search")) {
+      body = { results: [{ id: "ds-existing", object: "data_source", title: [{ plain_text: "Tarefas" }] }] };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+  }) as any;
+
+  const res = await createTaskTracker("friend:y", { fetchImpl });
+  assert.equal(res.dataSourceId, "ds-existing");
+  assert.equal(res.created, false);
+  assert.equal(await getTasksDbId("friend:y"), "ds-existing");
+  assert.ok(!calls.some((c) => c.includes("/v1/pages")), "não deve criar página-mãe nova");
+  assert.ok(!calls.some((c) => c.includes("/v1/databases")), "não deve criar DB nova");
+});
+
 test("createTaskTracker sem Notion → erro claro", async () => {
   await assert.rejects(
     () => createTaskTracker("friend:no-notion", { fetchImpl: routeFetch(() => ({})) }),

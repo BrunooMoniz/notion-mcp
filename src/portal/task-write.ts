@@ -18,8 +18,13 @@ const NOTION_API = "https://api.notion.com";
 export interface CreateTaskInput {
   /** Task/event title (the "Nome" title property). */
   title: string;
-  /** Optional ISO date or datetime for the "Prazo" date property (e.g. "2026-06-09" or "2026-06-09T20:00:00-03:00"). */
+  /** Optional ISO date or datetime for the "Prazo" date property — the START
+   *  (e.g. "2026-06-09" or "2026-06-09T20:00:00-03:00"). */
   date?: string;
+  /** Optional ISO datetime for the END of a time block. Only used when `date` is
+   *  also set → Prazo becomes a {start,end} range (Notion renders it as a time
+   *  block on a calendar view). Ignored without a start. */
+  endDate?: string;
   /** Optional "Status" select value (defaults to the DB's first option / left unset). */
   status?: string;
   /** Optional free-text note appended as a paragraph in the page body. */
@@ -37,7 +42,9 @@ export function buildTaskPagePayload(
     Nome: { title: [{ type: "text", text: { content: input.title.slice(0, 2000) } }] },
   };
   if (input.date && input.date.trim()) {
-    properties.Prazo = { date: { start: input.date.trim() } };
+    const range: { start: string; end?: string } = { start: input.date.trim() };
+    if (input.endDate && input.endDate.trim()) range.end = input.endDate.trim();
+    properties.Prazo = { date: range };
   }
   if (input.status && input.status.trim()) {
     properties.Status = { select: { name: input.status.trim() } };
@@ -143,7 +150,7 @@ export async function createTaskPage(
   if (!dataSourceId) {
     const r = await createTaskTracker(accountId, { fetchImpl });
     dataSourceId = r.dataSourceId;
-    created = true;
+    created = r.created; // false when an existing "Tarefas" was reused
   }
 
   const token = await resolveTokenForDataSource(accountId, dataSourceId, fetchImpl);

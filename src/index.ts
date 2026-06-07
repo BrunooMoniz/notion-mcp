@@ -21,7 +21,8 @@ import { createAdminRouter } from "./admin/routes.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
 import { requestContext, getContext, getAccountId, type RequestContext } from "./context.js";
-import { isOwnerContext, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
+import { isOwnerContext, isOperatorToken, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
+import { ALL_WORKSPACES } from "./clients.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus, renderStatusHtml, escapeHtml } from "./rag/status.js";
 
@@ -105,7 +106,7 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ## Brain RAG tools
 
-- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom.
+- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom. Each result has title, source_type (notion/granola/calendar), and source_url. CITE YOUR SOURCES: when you answer from brain_search, list the contributing sources as markdown links — [title](source_url) — labeled by type (página do Notion / reunião do Granola / evento do Calendar). If source_url is null (some calendar events lack a per-event link), cite by title + date (metadata.data).
 - **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no Zinom", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
 - **brain_index_web** — On-demand indexing of an arbitrary web page/article by URL into the brain. Use for non-Notion links (articles, docs, posts) the user wants queryable in brain_search. Fetches the URL, extracts readable text, chunks/embeds it, and stores it under source_type "web". Re-indexing the same URL refreshes it.
 `.trim();
@@ -289,7 +290,16 @@ app.use("/mcp", async (req, res, next) => {
         ip,
       };
     } else {
-      ctx = { authType: "oauth", scopes: info.scopes, clientId: info.client_id, ip };
+      // No accountId: operator OR a legacy/ambiguous token. Owner is decided by a
+      // POSITIVE operator signal (never the absence of accountId), so a friend
+      // token that lost its accountId cannot inherit the owner tool set.
+      ctx = {
+        authType: "oauth",
+        scopes: info.scopes,
+        clientId: info.client_id,
+        ip,
+        isOperator: isOperatorToken(info, ALL_WORKSPACES),
+      };
     }
     requestContext.run(ctx, () => next());
     return;

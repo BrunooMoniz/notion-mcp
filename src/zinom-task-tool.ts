@@ -21,7 +21,8 @@ Use SEMPRE que a pessoa pedir para "criar uma tarefa", "agendar", "marcar", "cri
 
 Parâmetros:
 - titulo: o nome da tarefa/evento (obrigatório).
-- data: data ou data-hora em ISO 8601 (ex.: "2026-06-09" para o dia, ou "2026-06-09T20:00:00-03:00" para 20h). Calcule a data absoluta a partir de expressões como "hoje", "amanhã", "sexta 20h" usando a data atual. Opcional.
+- data: data ou data-hora de INÍCIO em ISO 8601 (ex.: "2026-06-09" para o dia, ou "2026-06-09T20:00:00-03:00" para 20h). Calcule a data absoluta a partir de expressões como "hoje", "amanhã", "sexta 20h" usando a data atual. Opcional.
+- fim: data-hora de FIM em ISO 8601. Use para RESERVAR UM BLOCO DE TEMPO / alocar a agenda do dia (ex.: foco das 14h às 16h → data="2026-06-09T14:00:00-03:00", fim="2026-06-09T16:00:00-03:00"). O Notion mostra o intervalo como um bloco na visão de calendário. Opcional (só vale com 'data').
 - status: "A fazer" | "Fazendo" | "Feito" (opcional).
 - nota: detalhe livre adicionado no corpo da página (opcional).
 
@@ -31,14 +32,18 @@ Responde em português confirmando o que foi criado, com o link da página.`,
       data: z
         .string()
         .optional()
-        .describe('Data/hora ISO 8601, ex.: "2026-06-09" ou "2026-06-09T20:00:00-03:00"'),
+        .describe('Início ISO 8601, ex.: "2026-06-09" ou "2026-06-09T20:00:00-03:00"'),
+      fim: z
+        .string()
+        .optional()
+        .describe('Fim ISO 8601 para bloco de tempo, ex.: "2026-06-09T16:00:00-03:00" (só com data)'),
       status: z.string().optional().describe('Status, ex.: "A fazer"'),
       nota: z.string().optional().describe("Detalhe livre para o corpo da página"),
     },
-    async ({ titulo, data, status, nota }) => {
+    async ({ titulo, data, fim, status, nota }) => {
       const accountId = getAccountId();
       try {
-        const r = await createTaskPage(accountId, { title: titulo, date: data, status, note: nota });
+        const r = await createTaskPage(accountId, { title: titulo, date: data, endDate: fim, status, note: nota });
         return {
           content: [
             {

@@ -4,7 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildTaskPagePayload } from "../task-write.js";
-import { isOwnerContext, FRIEND_INSTRUCTIONS } from "../../mcp-account-config.js";
+import { isOwnerContext, isOperatorToken, FRIEND_INSTRUCTIONS } from "../../mcp-account-config.js";
+
+const OWNER_WS = ["personal", "globalcripto", "nora"] as const;
 
 // --- buildTaskPagePayload (pure) --------------------------------------------
 
@@ -20,6 +22,27 @@ test("buildTaskPagePayload: title only -> data_source parent + Nome title, no ex
 test("buildTaskPagePayload: date -> Prazo.date.start (datetime passes through)", () => {
   const p = buildTaskPagePayload("ds-1", { title: "Reunião", date: "2026-06-09T20:00:00-03:00" }) as any;
   assert.deepEqual(p.properties.Prazo, { date: { start: "2026-06-09T20:00:00-03:00" } });
+});
+
+test("buildTaskPagePayload: start+end -> Prazo.date range (time block for the calendar)", () => {
+  const p = buildTaskPagePayload("ds-1", {
+    title: "Bloco de foco",
+    date: "2026-06-09T14:00:00-03:00",
+    endDate: "2026-06-09T16:00:00-03:00",
+  }) as any;
+  assert.deepEqual(p.properties.Prazo, {
+    date: { start: "2026-06-09T14:00:00-03:00", end: "2026-06-09T16:00:00-03:00" },
+  });
+});
+
+test("buildTaskPagePayload: endDate without a start is ignored (no range without start)", () => {
+  const p = buildTaskPagePayload("ds-1", { title: "X", endDate: "2026-06-09T16:00:00-03:00" }) as any;
+  assert.equal(p.properties.Prazo, undefined);
+});
+
+test("buildTaskPagePayload: blank endDate -> start only", () => {
+  const p = buildTaskPagePayload("ds-1", { title: "X", date: "2026-06-09", endDate: "  " }) as any;
+  assert.deepEqual(p.properties.Prazo, { date: { start: "2026-06-09" } });
 });
 
 test("buildTaskPagePayload: status -> Status.select.name; note -> body paragraph", () => {
@@ -46,6 +69,32 @@ test("isOwnerContext: owner = no accountId, 'all' bearer, or default account", (
 test("isOwnerContext: a friend account is NOT owner", () => {
   assert.equal(isOwnerContext({ authType: "oauth", scopes: ["wsA"], accountId: "friend:abc" }), false);
   assert.equal(isOwnerContext({ authType: "bearer", scopes: ["notion:xyz"], accountId: "notion:xyz" }), false);
+});
+
+// FAIL-CLOSED: the regression that handed friend:e09 the owner tool set. A token
+// reaching /mcp WITHOUT an accountId must NOT default to owner; owner requires a
+// positive signal (bearer "all", default account, or explicit operator flag).
+test("isOwnerContext: no-accountId OAuth token is NOT owner unless explicitly operator", () => {
+  // friend token that lost its accountId — scopes are the friend's workspace UUIDs
+  assert.equal(isOwnerContext({ authType: "oauth", scopes: ["313d872b-594c-81d7-aa05-000220a6ddc7"] }), false);
+  // explicitly operator-flagged → owner (Bruno's Claude.ai)
+  assert.equal(isOwnerContext({ authType: "oauth", scopes: ["personal"], isOperator: true }), true);
+  // no flag, no accountId, unknown scopes → NOT owner (fail closed)
+  assert.equal(isOwnerContext({ authType: "oauth", scopes: ["mystery-ws"] }), false);
+});
+
+// isOperatorToken — pure operator classifier the auth layer uses to set ctx.isOperator.
+test("isOperatorToken: operator only by positive signal", () => {
+  assert.equal(isOperatorToken({ scopes: "all" }, OWNER_WS), true);
+  assert.equal(isOperatorToken({ scopes: ["personal", "nora"], kind: "operator" }, OWNER_WS), true);
+  // legacy operator (pre-kind) bridged by scopes ⊆ the operator's known workspaces
+  assert.equal(isOperatorToken({ scopes: ["personal", "globalcripto"] }, OWNER_WS), true);
+  // friend (has accountId) is never operator, even with owner-looking scopes
+  assert.equal(isOperatorToken({ scopes: ["personal"], accountId: "friend:x" }, OWNER_WS), false);
+  // a workspace UUID in scopes → not the operator
+  assert.equal(isOperatorToken({ scopes: ["313d872b-x", "personal"] }, OWNER_WS), false);
+  // empty scopes → not operator
+  assert.equal(isOperatorToken({ scopes: [] }, OWNER_WS), false);
 });
 
 // --- FRIEND_INSTRUCTIONS (no leakage of the owner's private structure) --------

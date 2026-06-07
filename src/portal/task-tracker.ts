@@ -12,6 +12,7 @@ import { warmAccount, getAccountToken } from "../account-tokens.js";
 import { getAccountSecret, setAccountSecret } from "../secrets.js";
 import {
   classifyResults,
+  findReusableTrackerId,
   buildParentPagePayload,
   buildCreateDbPayload,
   type Detection,
@@ -124,14 +125,38 @@ export async function useExistingTracker(accountId: string, dataSourceId: string
   await setTasksDbId(accountId, dataSourceId);
 }
 
-/** Cria "🧠 Zinom" (topo do workspace) + DB "Tarefas" dentro, grava o data_source id. */
+/** Cria "🧠 Zinom" (topo do workspace) + DB "Tarefas" dentro, grava o data_source
+ *  id. Search-before-create: se já existir uma DB "Tarefas" (ex.: um run anterior
+ *  criou mas não persistiu o id), REUSA em vez de criar uma "🧠 Zinom" duplicada.
+ *  `created` é false quando reusou. */
 export async function createTaskTracker(
   accountId: string,
   opts: { fetchImpl?: typeof fetch } = {},
-): Promise<{ dataSourceId: string }> {
+): Promise<{ dataSourceId: string; created: boolean }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const conn = await resolveAccountNotion(accountId);
   if (!conn) throw new Error("conecte o Notion antes de criar as Tarefas");
+
+  // Search-before-create guard (best-effort: a transient search failure must not
+  // block creation).
+  try {
+    const out = await notionFetch(
+      conn.token,
+      "/v1/search",
+      { method: "POST", body: JSON.stringify({ filter: { property: "object", value: "data_source" } }) },
+      fetchImpl,
+    );
+    const hits: Array<{ id: string; title: string }> = (out.results ?? [])
+      .filter((r: any) => r?.id)
+      .map((r: any) => ({ id: r.id, title: plainTitle(r.title) }));
+    const reuse = findReusableTrackerId(hits);
+    if (reuse) {
+      await setTasksDbId(accountId, reuse);
+      return { dataSourceId: reuse, created: false };
+    }
+  } catch (err: any) {
+    console.warn(`[task-tracker] ${accountId}: search-before-create failed: ${err?.message ?? err}`);
+  }
 
   const page = await notionFetch(
     conn.token,
@@ -152,5 +177,5 @@ export async function createTaskTracker(
   const dataSourceId: string = db?.data_sources?.[0]?.id ?? db?.id;
   if (!dataSourceId) throw new Error("Notion não retornou o id da base criada");
   await setTasksDbId(accountId, dataSourceId);
-  return { dataSourceId };
+  return { dataSourceId, created: true };
 }

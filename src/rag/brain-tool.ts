@@ -5,6 +5,7 @@ import { brainSearch } from "./search.js";
 import type { SearchFilters } from "./types.js";
 import { QuotaExceededError } from "../billing/usage.js";
 import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
+import { toBrainResult } from "./brain-format.js";
 
 const filtersSchema = z
   .object({
@@ -27,7 +28,9 @@ export function registerBrainSearchTool(server: McpServer): void {
   server.tool(
     "brain_search",
     `Search your Zinom (second brain) — indexed Notion pages, Granola meeting notes, and Calendar events across your connected sources.
-Hybrid retrieval combines semantic vector search with PT-BR full-text, then a cross-encoder reranker (Voyage rerank) reorders the candidate pool by relevance. Scores are real relevance scores (reranker relevance_score, or normalized hybrid fusion when rerank is off/unavailable). Results are scoped to the caller's allowed workspaces. Returns chunks with metadata, scores, and source URLs.
+Hybrid retrieval combines semantic vector search with PT-BR full-text, then a cross-encoder reranker (Voyage rerank) reorders the candidate pool by relevance. Scores are real relevance scores (reranker relevance_score, or normalized hybrid fusion when rerank is off/unavailable). Results are scoped to the caller's allowed workspaces.
+
+Each result has: title, text, score, source_type ("notion" | "granola" | "calendar"), source_url, workspace, db, metadata. CITE YOUR SOURCES: when you answer from these results, list the sources that contributed as markdown links — [title](source_url) — labeled by source_type (página do Notion / reunião do Granola / evento do Calendar). When source_url is null (some calendar events have no per-event link), cite by title + date (metadata.data) instead. notion_url is a deprecated alias of source_url.
 
 Use cases:
 - Lookup pontual: pass a specific question, get matching chunks.
@@ -83,16 +86,7 @@ Options:
                 query: args.query,
                 mode: args.mode,
                 ...(hint ? { hint } : {}),
-                results: hits.map((h) => ({
-                  text: h.chunk.text,
-                  score: h.score,
-                  notion_url: h.chunk.parent_url,
-                  source_type: h.chunk.source_type,
-                  workspace: h.chunk.workspace,
-                  db: h.chunk.db_name,
-                  metadata: h.chunk.metadata,
-                  neighbors: h.neighbors?.map((n) => n.text) ?? [],
-                })),
+                results: hits.map(toBrainResult),
               },
               null,
               2,

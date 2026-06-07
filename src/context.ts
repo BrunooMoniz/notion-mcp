@@ -14,6 +14,13 @@ export interface RequestContext {
    * to the default account so current behavior is unchanged.
    */
   accountId?: string;
+  /**
+   * WS2 hardening — POSITIVE owner/operator signal set by the auth layer for the
+   * operator (Bruno): the static "all" bearer, or an operator-issued OAuth token.
+   * Owner status must never be inferred from the mere ABSENCE of accountId (that
+   * is fail-open: a friend token without accountId would inherit the owner tools).
+   */
+  isOperator?: boolean;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();
