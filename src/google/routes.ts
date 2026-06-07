@@ -5,7 +5,9 @@
 
 import { Router } from "express";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { authUrl, exchangeCode, loadCreds, redirectUri } from "./oauth.js";
+import { authUrl, exchangeCode, exchangeCodeRaw, loadCreds, redirectUri, SCOPES } from "./oauth.js";
+import { takePortalGoogleState } from "../portal/google-link.js";
+import { addGoogleAccount } from "./google-accounts.js";
 
 const pendingStates = new Map<string, number>(); // state → expires_at
 const STATE_TTL_MS = 10 * 60_000;
@@ -88,6 +90,35 @@ ${existingNote}
     if (error) {
       res.status(400).type("html").send(`<h2 style='font-family:sans-serif;padding:40px'>Google error: ${escape(error)}</h2>`);
       return;
+    }
+    // Portal multi-conta: state foi emitido por um usuário logado no portal.
+    // Grava a conta Google no vault dele (não no arquivo único legado).
+    if (code && state) {
+      const portalAccount = takePortalGoogleState(state);
+      if (portalAccount) {
+        try {
+          const creds = await exchangeCodeRaw(code);
+          if (!creds.granted_email) throw new Error("não consegui identificar o email da conta Google");
+          await addGoogleAccount(portalAccount, {
+            email: creds.granted_email,
+            refresh_token: creds.refresh_token,
+            scopes: SCOPES,
+          });
+          console.log(`[google-oauth] portal account ${portalAccount} connected ${creds.granted_email}`);
+          res
+            .type("html")
+            .send(
+              `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Conectado</title></head><body style="font-family:sans-serif;padding:40px;background:#1a1a2e;color:#e0e0e0"><h1 style="color:#4caf50">✅ Google conectado</h1><p>Conta: <code>${escape(creds.granted_email)}</code>. Pode fechar esta aba e voltar ao portal.</p></body></html>`,
+            );
+        } catch (err: any) {
+          console.error("[google-oauth] portal callback failed:", err);
+          res
+            .status(500)
+            .type("html")
+            .send(`<h2 style='font-family:sans-serif;padding:40px'>Falha: ${escape(err.message ?? String(err))}</h2>`);
+        }
+        return;
+      }
     }
     if (!code || !state || !pendingStates.has(state)) {
       res.status(400).type("html").send("<h2 style='font-family:sans-serif;padding:40px'>Bad state/code.</h2>");

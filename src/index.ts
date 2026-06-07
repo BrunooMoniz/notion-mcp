@@ -12,6 +12,7 @@ import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { registerZinomTaskTool } from "./zinom-task-tool.js";
+import { registerCalendarTools } from "./google/calendar-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
@@ -439,10 +440,12 @@ app.post("/mcp", async (req, res) => {
     registerBrainSearchTool(server);
     registerBrainIndexUrlTool(server);
     registerBrainIndexWebTool(server);
+    registerCalendarTools(server);
   } else {
     registerBrainSearchTool(server);
     registerBrainIndexWebTool(server);
     registerZinomTaskTool(server);
+    registerCalendarTools(server);
   }
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);

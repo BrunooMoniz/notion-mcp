@@ -182,6 +182,34 @@ Integrate calendar → Secret address in iCal format* (`.../basic.ics`). The ope
 lists them in `GOOGLE_CAL_ICS`; portal friends add them per-account. iCal URLs are
 **secrets** — `.env`/vault only.
 
+### Google Calendar multi-conta (criar/editar/excluir)
+
+Além do iCal (que é leitura/RAG), cada usuário pode conectar **suas próprias
+contas Google** via OAuth no portal (botão "Conectar conta Google") e operar as
+agendas ao vivo pelas tools MCP `list_calendars`, `list_events`,
+`create_calendar_event`, `update_calendar_event`, `delete_calendar_event`. Os
+refresh tokens ficam no vault criptografado (`account_secrets`, kind
+`google_oauth`), **isolados por conta** — o `calendar_ref` é validado contra as
+contas conectadas do tenant antes de qualquer operação. `delete_calendar_event`
+exige `confirm: true`; toda escrita vai pro audit log.
+
+**Configuração única no Google Cloud** (reusa o projeto OAuth existente):
+
+1. Tela de consentimento → adicionar os escopos
+   `https://www.googleapis.com/auth/calendar.readonly` e
+   `https://www.googleapis.com/auth/calendar.events`.
+2. Publishing status = **"In production"** (NÃO "Testing"): evita a expiração de
+   7 dias do refresh token e a verificação do Google (mostra só o aviso
+   "app não verificado", que o usuário aceita clicando).
+3. Redirect URI `/google/callback` já está registrado (reusado).
+4. Env já existentes: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+   `BASE_URL`, `SECRETS_KEY`.
+
+**Dono via Claude Code:** o bearer estático resolve `account_id = 'bruno'`. Para o
+dono enxergar pelas tools as contas Google que conectou pelo portal, a conta
+`'bruno'` precisa ter o email do portal dele (`account.email`), para que o login
+do portal caia no **mesmo** `account_id`.
+
 ---
 
 ## Configuration
@@ -272,7 +300,11 @@ every write, and `confirm: true` guard rails on destructive tools.
 
 **Brain:** `brain_search` (hybrid semantic + keyword, reranked, account/workspace
 scoped), `brain_index_url` (index a Notion URL/ID on demand), `brain_index_web`
-(index any web page/article). **Total: 27 tools.**
+(index any web page/article).
+
+**Google Calendar (account-scoped, multi-conta):** `list_calendars`, `list_events`
+(read), `create_calendar_event`, `update_calendar_event` (write),
+`delete_calendar_event` (DESTRUCTIVE — requires `confirm: true`).
 
 ---
 
