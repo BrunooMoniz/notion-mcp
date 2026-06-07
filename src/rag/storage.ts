@@ -129,12 +129,36 @@ export async function replaceDocumentChunks(
 ): Promise<void> {
   const p = getPool();
   const deleteSql = `DELETE FROM brain_chunks WHERE source_type=$1 AND source_id=$2 AND account_id=$3`;
+  const countSql = `SELECT count(*)::text AS n FROM brain_chunks WHERE account_id=$1`;
+
+  // Fase 3 billing — chunk-storage cap on the per-account indexing path (portal
+  // reindex, onboarding, auto re-sync). Owner/default exempt (cap = Infinity, no
+  // query). The cap is checked against the POST-DELETE count of this same doc, so
+  // re-indexing an existing document never false-blocks. Lazy import avoids the
+  // storage<->billing cycle (same pattern as recordUsage). Throwing aborts the
+  // transaction (rollback) and surfaces to the indexAccount pass / on-demand tool.
+  let cap = Number.POSITIVE_INFINITY;
+  let QuotaErr: (new (m: string, l: number, u: number) => Error) | null = null;
+  if (accountId !== DEFAULT_ACCOUNT_ID) {
+    const billing = await import("../billing/usage.js");
+    cap = await billing.chunkCapFor(accountId);
+    QuotaErr = billing.QuotaExceededError;
+  }
+  const overCapAfter = async (current: number): Promise<void> => {
+    if (cap !== Number.POSITIVE_INFINITY && current + chunks.length > cap && QuotaErr) {
+      throw new QuotaErr("chunks indexados", cap, current);
+    }
+  };
 
   if (typeof p.connect === "function") {
     const client = await p.connect();
     try {
       await client.query("BEGIN");
       await client.query(deleteSql, [sourceType, sourceId, accountId]);
+      if (cap !== Number.POSITIVE_INFINITY) {
+        const { rows } = await client.query<{ n: string }>(countSql, [accountId]);
+        await overCapAfter(Number(rows[0]?.n ?? 0));
+      }
       for (const c of chunks) {
         await client.query(INSERT_CHUNK_SQL, chunkInsertParams(c, accountId));
       }
@@ -152,6 +176,10 @@ export async function replaceDocumentChunks(
   } else {
     // Test stub without a real pool: sequential, non-transactional fallback.
     await p.query(deleteSql, [sourceType, sourceId, accountId]);
+    if (cap !== Number.POSITIVE_INFINITY) {
+      const { rows } = await p.query<{ n: string }>(countSql, [accountId]);
+      await overCapAfter(Number(rows[0]?.n ?? 0));
+    }
     for (const c of chunks) {
       await p.query(INSERT_CHUNK_SQL, chunkInsertParams(c, accountId));
     }

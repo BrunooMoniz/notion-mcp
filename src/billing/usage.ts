@@ -90,6 +90,17 @@ export async function assertChunksWithinLimit(accountId: string, incoming: numbe
   }
 }
 
+/** The account's chunk cap as a number (Infinity for owner/default/unlimited).
+ *  Used by replaceDocumentChunks (the per-account indexing path) to enforce the
+ *  cap inside its transaction with a single POST-DELETE count — accurate for
+ *  re-indexing an existing document (never false-blocks a same-size replace). */
+export async function chunkCapFor(accountId: string): Promise<number> {
+  if (accountId === DEFAULT_ACCOUNT_ID) return Number.POSITIVE_INFINITY;
+  const plan = await getAccountPlan(accountId);
+  if (isUnlimited(plan)) return Number.POSITIVE_INFINITY;
+  return getPlanLimits(plan).maxChunks;
+}
+
 export async function assertOnDemandWithinLimit(accountId: string, pages: number): Promise<void> {
   if (accountId === DEFAULT_ACCOUNT_ID) return;
   const plan = await getAccountPlan(accountId);
