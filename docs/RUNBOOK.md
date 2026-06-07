@@ -34,6 +34,11 @@ sudo -u postgres dropdb brain_restore_test && rm -f /tmp/rt.dump
 - **Notion PATs:** expiram em 1 ano — anotar renovação no calendar. iCal URLs e tokens (Voyage/Anthropic/Granola): rotacionar resetando na origem + atualizar `.env` → `pm2 restart --update-env` → `npm run doctor`.
 - Arquivos secretos em `data/` (oauth/google) com `chmod 600`; `.env`/`data/` gitignored.
 
+## Google Calendar multi-conta (criar/editar/excluir)
+- Setup é **uma vez** na tela de consentimento OAuth do Google Cloud (projeto já existente): adicionar escopos `calendar.readonly` + `calendar.events` e marcar Publishing status = **"In production"** (não "Testing"), senão o refresh token expira em 7 dias. Detalhes no README ("Google Calendar multi-conta").
+- Tokens por conta ficam no vault (`account_secrets`, kind `google_oauth`), isolados por `account_id`. Para revogar a conexão de um usuário: ele remove no portal (`POST /portal/google/disconnect`) ou apaga-se a linha do vault. Revogar do lado Google: o usuário em myaccount.google.com → Segurança → apps com acesso.
+- Tools: `list_calendars`, `list_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` (esta exige `confirm:true`). Escrita registrada no audit log.
+
 ## Recuperação completa (VPS nova)
 1. Provisionar box (Node 20+, Postgres 16+pgvector) **ou** `docker compose up` (ver README).
 2. Restaurar o último dump no banco `brain` (extensões + `pg_restore`).
