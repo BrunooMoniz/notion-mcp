@@ -33,9 +33,11 @@ async function load() {
   document.getElementById("mcp-gen").textContent = mcp.configured ? "Gerar novo token" : "Gerar token de acesso";
 
   const s = me.sources || {};
-  // Notion
-  tag(document.getElementById("notion-tag"), s.notion && s.notion.connected, "conectado", "desconectado");
-  document.getElementById("notion-status").textContent = statusLine(s.notion);
+  // Notion — repeatable list of connected workspaces (name + date + Remove)
+  const notion = s.notion || {};
+  tag(document.getElementById("notion-tag"), notion.connected, "conectado", "desconectado");
+  document.getElementById("notion-status").textContent = statusLine(notion);
+  renderNotionWorkspaces(notion.workspaces || []);
 
   // Granola
   const g = s.granola || {};
@@ -93,6 +95,38 @@ async function loadGoogleAccounts() {
     };
     row.appendChild(btn);
     el.appendChild(row);
+  }
+}
+
+// Repeatable Notion list: each connected workspace (human name + connected date)
+// with a Remove button. Mirrors the iCal/Google list pattern. Removing purges the
+// workspace's secrets + indexed chunks server-side (POST /portal/notion/disconnect).
+function renderNotionWorkspaces(workspaces) {
+  const list = document.getElementById("notion-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!workspaces.length) {
+    list.innerHTML = '<p class="muted">Nenhum workspace do Notion conectado ainda.</p>';
+    return;
+  }
+  for (const w of workspaces) {
+    const name = w.name || w.workspace || "(workspace)";
+    const when = w.connected_at ? new Date(w.connected_at).toLocaleDateString("pt-BR") : "";
+    const row = document.createElement("div");
+    row.className = "row";
+    const meta = when ? ` <span class="muted">· conectado em ${escapeHtml(when)}</span>` : "";
+    row.innerHTML = `<span>📄 ${escapeHtml(name)}${meta}</span>`;
+    const btn = document.createElement("button");
+    btn.className = "danger";
+    btn.textContent = "Remover";
+    btn.onclick = async () => {
+      if (!confirm(`Remover o Notion “${name}”? Isto apaga as chaves e tudo que já indexei desse workspace.`)) return;
+      btn.disabled = true;
+      await apiJSON("/portal/notion/disconnect", "POST", { workspace: w.workspace });
+      load();
+    };
+    row.appendChild(btn);
+    list.appendChild(row);
   }
 }
 

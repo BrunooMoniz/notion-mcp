@@ -21,6 +21,7 @@ import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
+import { isAccountActive } from "./account-status.js";
 import { requestContext, getContext, getAccountId, type RequestContext } from "./context.js";
 import { isOwnerContext, isOperatorToken, FRIEND_INSTRUCTIONS } from "./mcp-account-config.js";
 import { ALL_WORKSPACES } from "./clients.js";
@@ -265,6 +266,34 @@ app.use("/mcp", async (req, res, next) => {
   const token = auth.slice(7);
   const ip = req.ip || req.socket.remoteAddress;
 
+  // Objective #6 — suspension enforcement (fail-closed). Every token path that
+  // resolves to an accountId runs through this AFTER the tenant is resolved: a
+  // blocked (account.status != 'active') OR missing account is rejected with 403,
+  // so setting status='suspended' actually cuts off access. Returns true (request
+  // already denied) when the caller should stop. The static operator BEARER_TOKEN
+  // never reaches here (no accountId, full owner access). On a DB error we DENY
+  // (never fail open): isAccountActive throws, we 403 in the catch.
+  const denyIfNotActive = async (accountId: string): Promise<boolean> => {
+    let active: boolean;
+    try {
+      active = await isAccountActive(accountId);
+    } catch (err) {
+      console.error(
+        `[${new Date().toISOString()}] status-check failed for ${accountId} from ${ip}: ${(err as Error).message}`,
+      );
+      res.status(403).json({ error: "Account access check failed" });
+      return true;
+    }
+    if (!active) {
+      console.warn(
+        `[${new Date().toISOString()}] BLOCKED ${req.method} ${req.path} — account ${accountId} suspended (from ${ip})`,
+      );
+      res.status(403).json({ error: "Account suspended" });
+      return true;
+    }
+    return false;
+  };
+
   // Check static bearer token first (Claude Code path). Grants full access.
   if (BEARER_TOKEN && token === BEARER_TOKEN) {
     const ctx: RequestContext = {
@@ -284,6 +313,8 @@ app.use("/mcp", async (req, res, next) => {
   if (info) {
     let ctx: RequestContext;
     if (info.accountId) {
+      // Suspension guard (fail-closed) before granting the friend any scope.
+      if (await denyIfNotActive(info.accountId)) return;
       // Friend token: resolve workspaces fresh so sources added after issuance show.
       const ws = await accountWorkspaces(info.accountId);
       ctx = {
@@ -313,6 +344,8 @@ app.use("/mcp", async (req, res, next) => {
   // that account (account_id guard) and its workspaces (workspace guard).
   const acct = await resolveBearer(token);
   if (acct) {
+    // Suspension guard (fail-closed) before granting the per-account bearer scope.
+    if (await denyIfNotActive(acct.accountId)) return;
     const ctx: RequestContext = {
       authType: "bearer",
       scopes: acct.workspaces as unknown as RequestContext["scopes"],

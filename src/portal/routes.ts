@@ -36,6 +36,7 @@ import {
   removeGranolaKey,
   getGranolaMasked,
 } from "./sources.js";
+import { listNotionWorkspaces, disconnectNotionWorkspace } from "./notion-workspaces.js";
 import { authUrl } from "../google/oauth.js";
 import { putPortalGoogleState } from "./google-link.js";
 import { listGoogleAccountsMasked, removeGoogleAccount } from "../google/google-accounts.js";
@@ -429,6 +430,39 @@ export function createPortalRouter(): express.Router {
     }
   });
 
+  // List the Notion workspaces connected to THIS session account (id + human
+  // name + connected date), so the portal can render a repeatable list with a
+  // Remove button per workspace. Account always from the session, never input.
+  router.get("/portal/notion/workspaces", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      res.json(await listNotionWorkspaces(accountId));
+    } catch (err: any) {
+      console.warn(`[portal] notion/workspaces unavailable: ${err?.message ?? err}`);
+      res.json([]);
+    }
+  });
+
+  // Disconnect ONE Notion workspace: delete its vault secrets, drop the
+  // account_workspaces row, and purge that workspace's indexed chunks. The
+  // workspace id comes from the body but is validated against the SESSION account
+  // (disconnectNotionWorkspace returns false if it isn't owned) — isolation.
+  router.post("/portal/notion/disconnect", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const workspace = typeof req.body?.workspace === "string" ? req.body.workspace.trim() : "";
+    if (!workspace) {
+      res.status(400).json({ error: "workspace obrigatório" });
+      return;
+    }
+    try {
+      const ok = await disconnectNotionWorkspace(accountId, workspace);
+      res.sendStatus(ok ? 204 : 404);
+    } catch (err: any) {
+      console.error(`[portal] notion/disconnect ${accountId}: ${err?.message ?? err}`);
+      res.status(502).json({ error: "não consegui desconectar agora" });
+    }
+  });
+
   router.get("/portal/notion/connect", requireSession, async (_req, res) => {
     if (!notionClientId) {
       res.status(503).json({ error: "Notion OAuth não configurado" });
@@ -615,11 +649,22 @@ async function sourcesSummary(accountId: string): Promise<any> {
   } catch {
     /* status table may be absent in the light dev DB — ignore */
   }
-  const notionConnected = await hasNotionWorkspace(accountId).catch(() => false);
+  // The repeatable Notion list (id + human name + connected date). The legacy
+  // `connected` boolean stays for backward compat; the front prefers `workspaces`.
+  const notionWorkspaces = await listNotionWorkspaces(accountId).catch(() => []);
+  const notionConnected =
+    notionWorkspaces.length > 0 ||
+    (await hasNotionWorkspace(accountId).catch(() => false)) ||
+    Boolean(runs.notion);
   const ical = await listIcalMasked(accountId);
   const granola = await getGranolaMasked(accountId);
   return {
-    notion: { connected: notionConnected || Boolean(runs.notion), ...(runs.notion ?? {}) },
+    notion: {
+      connected: notionConnected,
+      workspaces: notionWorkspaces,
+      count: notionWorkspaces.length,
+      ...(runs.notion ?? {}),
+    },
     granola: { ...granola, ...(runs.granola ?? {}) },
     ical: { links: ical, count: ical.length, ...(runs.ical ?? {}) },
   };
