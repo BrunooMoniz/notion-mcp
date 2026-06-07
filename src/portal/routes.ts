@@ -36,6 +36,7 @@ import {
   removeGranolaKey,
   getGranolaMasked,
 } from "./sources.js";
+import { assertCanAddWorkspace, WorkspaceLimitError } from "../billing/usage.js";
 
 const BASE_URL = process.env.PORTAL_BASE_URL ?? process.env.BASE_URL ?? "http://localhost:3456";
 // The canonical server origin where the MCP endpoint (/mcp) lives — what a friend
@@ -285,11 +286,16 @@ export function createPortalRouter(): express.Router {
       return;
     }
     try {
+      await assertCanAddWorkspace(res.locals.accountId);
       const { validatePat, associatePatToAccount } = await import("../notion-oauth.js");
       const identity = await validatePat(pat);
       await associatePatToAccount(res.locals.accountId, pat, identity);
       res.json({ ok: true, name: identity.name });
     } catch (err: any) {
+      if (err instanceof WorkspaceLimitError) {
+        res.status(402).json({ error: err.message });
+        return;
+      }
       res.status(400).json({ error: err?.message ?? "token inválido" });
     }
   });
@@ -298,6 +304,15 @@ export function createPortalRouter(): express.Router {
     if (!notionClientId) {
       res.status(503).json({ error: "Notion OAuth não configurado" });
       return;
+    }
+    try {
+      await assertCanAddWorkspace(res.locals.accountId);
+    } catch (err: any) {
+      if (err instanceof WorkspaceLimitError) {
+        res.status(402).json({ error: err.message });
+        return;
+      }
+      throw err;
     }
     const { buildAuthorizeUrl } = await import("../notion-oauth.js");
     const { putPortalNotionState } = await import("./notion-link.js");
