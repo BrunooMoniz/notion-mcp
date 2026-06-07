@@ -11,6 +11,8 @@ import { batchEmbed } from "./embeddings.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
 import { chunkId, pageToText, extractMetadata } from "./notion-source.js";
 import type { ChunkWithEmbedding } from "./types.js";
+import { recordUsage } from "./usage.js";
+import { assertOnDemandWithinLimit, QuotaExceededError } from "../billing/usage.js";
 
 function extractNotionId(input: string): string | null {
   let s = input.trim();
@@ -147,6 +149,19 @@ Returns counts and per-page indexing stats.`,
       // No-op for bearer ("all") and for non-HTTP contexts (startup/cron/tests).
       assertWorkspaceScope(workspace as Workspace);
 
+      // Fase 3 billing — on-demand indexing gated by plan (Free = off) + daily
+      // page cap. Owner/default exempt. Pre-check vs requested max_pages; record
+      // actual pages indexed after each success.
+      const accountId = getAccountId();
+      try {
+        await assertOnDemandWithinLimit(accountId, max_pages);
+      } catch (e) {
+        if (e instanceof QuotaExceededError) {
+          return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "quota_exceeded", message: e.message }) }] };
+        }
+        throw e;
+      }
+
       const id = extractNotionId(url);
       if (!id) {
         return {
@@ -168,6 +183,7 @@ Returns counts and per-page indexing stats.`,
       try {
         const page = (await notionFetch(ws, `/v1/pages/${id}`)) as any;
         const result = await indexSinglePage(ws, page, null);
+        await recordUsage(accountId, "index_pages", 1);
         return {
           content: [
             {
@@ -208,6 +224,7 @@ Returns counts and per-page indexing stats.`,
           ds.title?.map((t: any) => t.plain_text ?? "").join("") || "(untitled)";
         const { pages, truncated } = await indexDataSource(ws, id, dsName, max_pages);
         const total_chunks = pages.reduce((sum, p) => sum + p.chunks, 0);
+        await recordUsage(accountId, "index_pages", pages.length);
         return {
           content: [
             {
@@ -271,6 +288,7 @@ Returns counts and per-page indexing stats.`,
         }
         const { pages, truncated } = await indexDataSource(ws, dsId, dsName, max_pages);
         const total_chunks = pages.reduce((sum, p) => sum + p.chunks, 0);
+        await recordUsage(accountId, "index_pages", pages.length);
         return {
           content: [
             {

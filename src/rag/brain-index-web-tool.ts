@@ -10,6 +10,8 @@ import { assertWorkspaceScope, getAccountId } from "../context.js";
 import { indexDocument } from "./index-document.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
 import { fetchWebDocument } from "./sources/web-source.js";
+import { recordUsage } from "./usage.js";
+import { assertOnDemandWithinLimit, QuotaExceededError } from "../billing/usage.js";
 
 export function registerBrainIndexWebTool(server: McpServer): void {
   server.tool(
@@ -41,11 +43,14 @@ Returns counts and the resolved title/source_id.`,
 
       try {
         const accountId = getAccountId();
+        // Fase 3 billing — on-demand indexing gated by plan (Free = off) + daily cap.
+        await assertOnDemandWithinLimit(accountId, 1);
         const doc = await fetchWebDocument(url, { workspace: workspace as Workspace });
         doc.account_id = accountId; // F3.0: attribute to the caller's tenant
         const chunks = await indexDocument(doc);
         await deleteBySource("web", doc.source_id, accountId);
         await upsertChunks(chunks);
+        await recordUsage(accountId, "index_pages", 1);
         return {
           content: [
             {
@@ -64,6 +69,9 @@ Returns counts and the resolved title/source_id.`,
           ],
         };
       } catch (e: any) {
+        if (e instanceof QuotaExceededError) {
+          return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "quota_exceeded", message: e.message }) }] };
+        }
         return {
           content: [
             {
