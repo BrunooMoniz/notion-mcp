@@ -10,6 +10,7 @@ import { syncGranolasToReunioes } from "./classifier/granola-to-reuniao.js";
 import { runDailyBriefing } from "./briefing/daily-briefing.js";
 import { recordRun } from "./rag/storage.js";
 import { runResyncTick } from "./billing/resync-cron.js";
+import { notify } from "./notify.js";
 
 const CLASSIFIER_CRON = process.env.CLASSIFIER_CRON ?? "30 * * * *"; // half past every hour
 const REVISITAR_CRON = process.env.REVISITAR_CRON ?? "0 7 * * *";    // 07:00 every day
@@ -27,7 +28,9 @@ async function tickClassifier(label: string): Promise<void> {
     );
     await recordRun({ worker: "classifier", source: "classifier", ok: stats.errors === 0, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] [classifier:${label}] FAILED`, err);
+    const msg = `[${new Date().toISOString()}] [classifier:${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg, err);
+    await notify(msg, { title: "Zinom brain", priority: "high" });
     await recordRun({ worker: "classifier", source: "classifier", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
@@ -41,7 +44,9 @@ async function tickRevisitar(label: string): Promise<void> {
     );
     await recordRun({ worker: "classifier", source: "revisitar", ok: true, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] [revisitar:${label}] FAILED`, err);
+    const msg = `[${new Date().toISOString()}] [revisitar:${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg, err);
+    await notify(msg, { title: "Zinom brain", priority: "high" });
     await recordRun({ worker: "classifier", source: "revisitar", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
@@ -56,7 +61,9 @@ async function tickGranolaReuniao(label: string): Promise<void> {
     );
     await recordRun({ worker: "classifier", source: "granola-reuniao", ok: stats.errors === 0, counts: stats, startedAt: new Date(start), endedAt: new Date() });
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] [granola->reuniao:${label}] FAILED`, err);
+    const msg = `[${new Date().toISOString()}] [granola->reuniao:${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg, err);
+    await notify(msg, { title: "Zinom brain", priority: "high" });
     await recordRun({ worker: "classifier", source: "granola-reuniao", ok: false, error: err instanceof Error ? err.message : String(err), startedAt: new Date(start), endedAt: new Date() });
   }
 }
@@ -70,7 +77,9 @@ async function tickBriefing(label: string): Promise<void> {
       `[${new Date().toISOString()}] [briefing:${label}] ok took=${Date.now() - start}ms`,
     );
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] [briefing:${label}] FAILED`, err);
+    const msg = `[${new Date().toISOString()}] [briefing:${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg, err);
+    await notify(msg, { title: "Zinom brain", priority: "high" });
   }
 }
 

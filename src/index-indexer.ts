@@ -4,6 +4,7 @@ import cron from "node-cron";
 import { runDeltaSync } from "./rag/indexer.js";
 import { getStatus } from "./rag/storage.js";
 import { summarizeStatus } from "./rag/status.js";
+import { notify } from "./notify.js";
 
 const CRON_EXPR = process.env.INDEXER_CRON ?? "0 * * * *";
 
@@ -18,15 +19,17 @@ async function tick(label: string): Promise<void> {
     try {
       const sources = summarizeStatus(await getStatus());
       for (const s of sources.filter((x) => !x.ok || x.stale)) {
-        console.error(
-          `[ALERT] ${s.worker}/${s.source} ${s.ok ? "STALE" : "FAILING"}: age=${s.age_seconds}s last_error=${s.error ?? "-"}`,
-        );
+        const msg = `[ALERT] ${s.worker}/${s.source} ${s.ok ? "STALE" : "FAILING"}: age=${s.age_seconds}s last_error=${s.error ?? "-"}`;
+        console.error(msg);
+        await notify(msg, { title: "Zinom brain", priority: "high" });
       }
     } catch (e) {
       console.warn(`[status] alert check failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] [${label}] FAILED`, err);
+    const msg = `[${new Date().toISOString()}] [${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg, err);
+    await notify(msg, { title: "Zinom brain", priority: "high" });
   }
 }
 
