@@ -637,6 +637,28 @@ export function createPortalRouter(): express.Router {
     await handleAsk(req, res);
   });
 
+  // --- MCP token list + per-token revoke ---------------------------------------
+  // GET /portal/mcp-tokens — list tokens for the session account.
+  // Returns [{id: token_hash, name, created_at, last_used_at}]. The hash is
+  // safe to expose (SHA-256, not the plaintext token). Account always from session.
+  router.get("/portal/mcp-tokens", requireSession, async (_req, res) => {
+    const { listMcpTokens } = await import("./mcp-tokens.js");
+    res.json(await listMcpTokens(res.locals.accountId));
+  });
+
+  // POST /portal/mcp-tokens/revoke {id: token_hash} — delete ONE token.
+  // 204 on success; 404 if not found or belongs to another account (no-op).
+  router.post("/portal/mcp-tokens/revoke", requireSession, async (req, res) => {
+    const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+    if (!id) {
+      res.status(400).json({ error: "id obrigatório" });
+      return;
+    }
+    const { revokeMcpToken } = await import("./mcp-tokens.js");
+    const ok = await revokeMcpToken(res.locals.accountId, id);
+    res.sendStatus(ok ? 204 : 404);
+  });
+
   return router;
 }
 
