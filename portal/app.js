@@ -480,11 +480,17 @@ function wireAtividade() {
 var ACT_STEPS = [
   { label: 'Entrar com seu convite', go: null, goLabel: '' },
   { label: 'Conectar sua primeira fonte', go: 'fontes', goLabel: 'ir para Fontes →' },
-  { label: 'Indexar o cerebro', go: 'fontes', goLabel: 'indexar →' },
+  { label: 'Tarefas no Notion', go: null, goLabel: 'configurar →' },
   { label: 'Conectar seu assistente (Claude, ChatGPT…)', go: 'inicio', goLabel: 'conectar →' }
 ];
 
 var _actDone = [true, false, false, false];
+var _actNotionConnected = false;
+var _actTasksDone = false;
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 async function loadActivation(sources) {
   try {
@@ -495,11 +501,13 @@ async function loadActivation(sources) {
     if (!wrap) return;
     if (st.complete) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
+    _actNotionConnected = !!(sources && sources.notion && sources.notion.connected);
+    _actTasksDone = !!(st.items && st.items.tasks);
     /* mapear os itens do backend (tasks, granola, ical, ask) para os 4 passos */
     _actDone = [
       true, /* convite = sempre feito */
-      !!(sources && sources.notion && sources.notion.connected),
-      !!(st.items && (st.items.tasks || st.items.granola || st.items.ical)),
+      _actNotionConnected,
+      _actTasksDone,
       !!(st.items && st.items.ask)
     ];
     renderActivation();
@@ -516,14 +524,43 @@ function renderActivation() {
   var logoEl = document.getElementById('activation-logo');
   if (logoEl) logoEl.innerHTML = logoSvg(18);
   var stepsEl = document.getElementById('activation-steps');
-  if (stepsEl) {
-    stepsEl.innerHTML = ACT_STEPS.map(function (st, i) {
-      return '<button class="act-step' + (_actDone[i] ? ' done' : '') + '" type="button" data-step="' + i + '">' +
-        '<span class="ck">' + (_actDone[i] ? '✓' : '') + '</span>' +
-        '<span>' + st.label + '</span>' +
-        '<span class="go">' + st.goLabel + '</span></button>';
-    }).join('');
-  }
+  if (!stepsEl) return;
+
+  var html = ACT_STEPS.map(function (st, i) {
+    var isTasksStep = (i === 2);
+    /* Para o passo Tarefas incompleto, não exibir goLabel (o sub-fluxo inline substitui) */
+    var goLabel = (isTasksStep && !_actDone[i]) ? '' : st.goLabel;
+    var btn = '<button class="act-step' + (_actDone[i] ? ' done' : '') + '" type="button" data-step="' + i + '">' +
+      '<span class="ck">' + (_actDone[i] ? '✓' : '') + '</span>' +
+      '<span>' + st.label + '</span>' +
+      '<span class="go">' + goLabel + '</span></button>';
+
+    /* Sub-fluxo inline de Tarefas: aparece apenas quando passo 2 incompleto */
+    if (isTasksStep && !_actDone[i]) {
+      var inner = '';
+      if (!_actNotionConnected) {
+        inner = '<p class="muted" style="margin:0 0 0 28px;font-size:13px">Conecte seu Notion em Fontes primeiro.</p>';
+      } else {
+        inner = '<div style="margin:6px 0 2px 28px;display:flex;flex-direction:column;gap:6px">' +
+          '<p class="muted" id="act-tasks-msg" style="margin:0;font-size:13px">Vou procurar (ou criar) uma base de Tarefas no seu Notion.</p>' +
+          '<div id="act-tasks-actions" style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<button class="btn btn-ghost btn-sm" type="button" id="act-tasks-detect-btn">Detectar minha base de Tarefas</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" id="act-tasks-create-btn">Criar base de Tarefas para mim</button>' +
+          '</div>' +
+        '</div>';
+      }
+      btn += inner;
+    }
+    return btn;
+  }).join('');
+
+  stepsEl.innerHTML = html;
+
+  /* Wiring dos botoes do sub-fluxo de Tarefas (existem apenas quando step 2 incompleto e notion conectado) */
+  var detectBtn = document.getElementById('act-tasks-detect-btn');
+  if (detectBtn) detectBtn.addEventListener('click', function (e) { e.stopPropagation(); runDetectTasks(); });
+  var createBtn = document.getElementById('act-tasks-create-btn');
+  if (createBtn) createBtn.addEventListener('click', function (e) { e.stopPropagation(); runCreateTasks(); });
 }
 
 /* ==================== PLANO ====================  */
@@ -940,6 +977,8 @@ function wireGlobal(me) {
       var b = e.target.closest('[data-step]');
       if (!b) return;
       var i = +b.getAttribute('data-step');
+      /* Step 2 (Tarefas) com sub-fluxo inline: nao navega; os botoes internos tratam os cliques */
+      if (i === 2 && !_actDone[2] && _actNotionConnected) return;
       if (ACT_STEPS[i].go) go(ACT_STEPS[i].go);
     });
   }
@@ -1098,18 +1137,85 @@ function wireGlobal(me) {
    /portal/activation/ask, /portal/activation/dismiss
    ===================================================================== */
 
-async function detectTasks() {
-  var res = await apiJSON('/portal/tasks/detect', 'POST');
-  var det = await res.json().catch(function () { return { status: 'error' }; });
-  return det;
+function _tasksMsg(txt) {
+  var el = document.getElementById('act-tasks-msg');
+  if (el) el.textContent = txt;
 }
 
-async function createTasks() {
-  return apiJSON('/portal/tasks/create', 'POST');
+function _tasksActions(html) {
+  var el = document.getElementById('act-tasks-actions');
+  if (el) el.innerHTML = html;
 }
 
-async function useTasks(dataSourceId) {
-  return apiJSON('/portal/tasks/use', 'POST', { data_source_id: dataSourceId });
+function _tasksActionsWire() {
+  /* Botoes dinamicos gerados apos detectar: "Usar esta" e "Criar nova" */
+  var el = document.getElementById('act-tasks-actions');
+  if (!el) return;
+  el.querySelectorAll('[data-use-tasks]').forEach(function (b) {
+    b.addEventListener('click', function () { runUseTasks(b.getAttribute('data-use-tasks')); });
+  });
+  var cb = el.querySelector('[data-create-tasks]');
+  if (cb) cb.addEventListener('click', function () { runCreateTasks(); });
+}
+
+async function runDetectTasks() {
+  _tasksMsg('Procurando no seu Notion…');
+  _tasksActions('');
+  var res, det;
+  try {
+    res = await apiJSON('/portal/tasks/detect', 'POST');
+    det = await res.json();
+  } catch (e) {
+    _tasksMsg('Erro de rede. Tente novamente.');
+    return;
+  }
+  if (det.status === 'no-notion') {
+    _tasksMsg('Conecte seu Notion em Fontes primeiro.');
+    return;
+  }
+  if (det.status === 'none' || det.status === 'error' || !det.candidates || !det.candidates.length) {
+    _tasksMsg('Nao encontrei base de tarefas. Quer que eu crie uma ("Zinom › Tarefas")?');
+    _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-create-tasks>Criar base de Tarefas para mim</button>');
+    _tasksActionsWire();
+    return;
+  }
+  /* candidatos encontrados */
+  _tasksMsg('Encontrei isto no seu Notion. Use uma, ou crie uma nova:');
+  var btns = det.candidates.map(function (c) {
+    return '<button class="btn btn-ghost btn-sm" type="button" data-use-tasks="' + escHtml(c.id) + '">Usar "' + escHtml(c.title) + '"</button>';
+  }).join('');
+  btns += '<button class="btn btn-ghost btn-sm" type="button" data-create-tasks>Criar nova</button>';
+  _tasksActions(btns);
+  _tasksActionsWire();
+}
+
+async function runCreateTasks() {
+  _tasksMsg('Criando base de Tarefas…');
+  _tasksActions('');
+  var res;
+  try {
+    res = await apiJSON('/portal/tasks/create', 'POST');
+  } catch (e) {
+    _tasksMsg('Erro de rede. Tente novamente.');
+    return;
+  }
+  if (res.ok) {
+    load();
+  } else {
+    var b = await res.json().catch(function () { return {}; });
+    _tasksMsg(b.error || 'Nao consegui criar. Tente configurar o token (PAT) em Fontes.');
+  }
+}
+
+async function runUseTasks(dataSourceId) {
+  _tasksMsg('Configurando…');
+  _tasksActions('');
+  try {
+    await apiJSON('/portal/tasks/use', 'POST', { data_source_id: dataSourceId });
+    load();
+  } catch (e) {
+    _tasksMsg('Erro ao salvar. Tente novamente.');
+  }
 }
 
 async function markAskDone() {
