@@ -14,6 +14,16 @@ import { blockAccount, unblockAccount } from "./block.js";
 import { monthStartUTC } from "../billing/usage.js";
 import { getPlanLimits } from "../billing/plans.js";
 import { ACTIVE_STATUS } from "../account-status.js";
+import {
+  buildFunnel,
+  estimateCost,
+  engagementOf,
+  mrrFromSubscriptions,
+  type FunnelRow,
+  type EngagementRow,
+  type StripeSub,
+} from "./business.js";
+import { getStripe } from "../billing/stripe.js";
 
 interface AccountRow {
   id: string;
@@ -26,10 +36,71 @@ interface AccountRow {
   current_period_end: Date | null;
 }
 
+// In-memory cache for Stripe subscription data (60s TTL).
+interface StripeCache {
+  subs: StripeSub[];
+  fetchedAt: number; // Date.now()
+  source: "stripe" | "db";
+}
+let stripeCache: StripeCache | null = null;
+const STRIPE_CACHE_TTL_MS = 60_000;
+
+async function fetchStripeSubs(
+  pool: ReturnType<typeof getPool>,
+  now: number,
+): Promise<{ subs: StripeSub[]; source: "stripe" | "db" }> {
+  // Return cached result if fresh.
+  if (stripeCache && now - stripeCache.fetchedAt < STRIPE_CACHE_TTL_MS) {
+    return { subs: stripeCache.subs, source: stripeCache.source };
+  }
+
+  // Try live Stripe API.
+  try {
+    const stripe = getStripe();
+    const list = await stripe.subscriptions.list({ limit: 100, expand: ["data.items.data.price"] });
+    const subs: StripeSub[] = list.data.map((sub) => {
+      const item = sub.items.data[0];
+      const price = item?.price;
+      return {
+        id: sub.id,
+        status: sub.status,
+        amount: price?.unit_amount ?? 0,
+        currency: price?.currency ?? "brl",
+        current_period_end: item?.current_period_end ?? 0,
+        customer: typeof sub.customer === "string" ? sub.customer : sub.customer.id,
+        account_id: (sub.metadata as Record<string, string>)?.account_id ?? null,
+      };
+    });
+    stripeCache = { subs, fetchedAt: now, source: "stripe" };
+    return { subs, source: "stripe" };
+  } catch (_err) {
+    // Fallback: derive from DB account rows.
+    const res = await pool.query<{
+      id: string;
+      stripe_subscription_id: string | null;
+      stripe_customer_id: string | null;
+      plan: string | null;
+      plan_status: string | null;
+      current_period_end: Date | null;
+    }>(`SELECT id, stripe_subscription_id, stripe_customer_id, plan, plan_status, current_period_end FROM account WHERE stripe_subscription_id IS NOT NULL`);
+    const subs: StripeSub[] = res.rows.map((r) => ({
+      id: r.stripe_subscription_id ?? "",
+      status: r.plan_status ?? "unknown",
+      amount: getPlanLimits(r.plan).priceBRLCents,
+      currency: "brl",
+      current_period_end: r.current_period_end ? Math.floor(r.current_period_end.getTime() / 1000) : 0,
+      customer: r.stripe_customer_id ?? "",
+      account_id: r.id,
+    }));
+    stripeCache = { subs, fetchedAt: now, source: "db" };
+    return { subs, source: "db" };
+  }
+}
+
 async function gather() {
   const p = getPool();
   const monthStart = monthStartUTC();
-  const [accounts, secrets, workspaces, tokens, usage, runs, errors, invites, sessions] = await Promise.all([
+  const [accounts, secrets, workspaces, tokens, usage, runs, errors, invites, sessions, funnelRows, allSearchRows] = await Promise.all([
     p.query<AccountRow>(`SELECT id, kind, email, status, created_at, plan, plan_status, current_period_end FROM account ORDER BY created_at`),
     p.query<{ account_id: string; kinds: string[] }>(
       `SELECT account_id, array_agg(kind ORDER BY kind) AS kinds FROM account_secrets GROUP BY account_id`),
@@ -55,8 +126,25 @@ async function gather() {
     p.query<{ total: string; redeemed: string }>(
       `SELECT count(*)::text AS total, count(redeemed_at)::text AS redeemed FROM invite_codes`),
     p.query<{ n: string }>(`SELECT count(*)::text AS n FROM portal_sessions WHERE expires_at > now()`),
+    // Funnel: counts over 30d window + total (we compute both; use total for the funnel table)
+    p.query<FunnelRow>(`
+      SELECT
+        (SELECT count(*)::int FROM invite_codes) AS invites_created,
+        (SELECT count(*)::int FROM invite_codes WHERE redeemed_at IS NOT NULL) AS invites_redeemed,
+        (SELECT count(DISTINCT account_id)::int FROM account_secrets) AS has_source,
+        (SELECT count(DISTINCT account_id)::int FROM usage_log WHERE metric = 'search') AS has_search,
+        (SELECT count(*)::int FROM account WHERE plan != 'free' AND plan_status = 'active') AS is_paying
+    `),
+    // All search events (last 30d) for engagement computation
+    p.query<EngagementRow>(`
+      SELECT account_id, ts, metric FROM usage_log
+      WHERE metric = 'search' AND ts >= now() - interval '30 days'
+      ORDER BY ts DESC
+    `),
   ]);
   const leads = await listInviteRequests().catch(() => [] as InviteRequest[]);
+
+  const { subs, source: stripeSource } = await fetchStripeSubs(p, Date.now());
 
   const byAcct = <T extends { account_id: string }>(rows: T[]) => {
     const m = new Map<string, T[]>();
@@ -79,6 +167,10 @@ async function gather() {
     invites: invites.rows[0] ?? { total: "0", redeemed: "0" },
     activeSessions: sessions.rows[0]?.n ?? "0",
     leads,
+    funnel: buildFunnel(funnelRows.rows),
+    engagement: engagementOf(allSearchRows.rows, new Date()),
+    stripeSubs: subs,
+    stripeSource,
   };
 }
 
@@ -89,7 +181,143 @@ function sourceFlags(kinds: string[] | undefined): string {
   if (has("notion_access") || has("notion_pat")) tags.push("Notion");
   if (kinds.includes("granola")) tags.push("Granola");
   if (kinds.includes("ical")) tags.push("iCal");
+  if (kinds.includes("google_oauth")) tags.push("Google");
   return tags.length ? tags.join(", ") : "—";
+}
+
+function renderFunnelSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const steps = data.funnel;
+  const bars = steps
+    .map(
+      (s) => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
+        <span>${escapeHtml(s.label)}</span>
+        <span style="color:#888">${s.count} (${s.pct}%)</span>
+      </div>
+      <div style="background:#262a33;border-radius:4px;height:10px;overflow:hidden">
+        <div style="background:#1f8b4c;height:10px;width:${s.pct}%"></div>
+      </div>
+    </div>`,
+    )
+    .join("");
+  return `<h2>Funil de ativação</h2>
+<div style="max-width:480px">${bars}</div>`;
+}
+
+function renderStripeSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const { mrrCents, byStatus } = mrrFromSubscriptions(data.stripeSubs);
+  const sourceLabel = data.stripeSource === "stripe" ? "Stripe API" : "DB (fallback)";
+  const mrrFmt = `R$${(mrrCents / 100).toFixed(2)}`;
+  const subRows = data.stripeSubs
+    .map((s) => {
+      const renewsAt = s.current_period_end
+        ? new Date(s.current_period_end * 1000).toISOString().slice(0, 10)
+        : "—";
+      const amtFmt = `R$${(s.amount / 100).toFixed(2)}`;
+      const acct = s.account_id ?? escapeHtml(s.customer);
+      return `<tr>
+        <td class="small"><code>${escapeHtml(acct)}</code></td>
+        <td class="small">${amtFmt}</td>
+        <td><span class="tag ${s.status === "active" ? "ok" : s.status === "canceled" ? "bad" : ""}">${escapeHtml(s.status)}</span></td>
+        <td class="small">${escapeHtml(renewsAt)}</td>
+      </tr>`;
+    })
+    .join("\n");
+  return `<h2>Receita real (Stripe) <span class="tag" style="font-size:11px;vertical-align:middle">fonte: ${escapeHtml(sourceLabel)}</span></h2>
+<div class="cards">
+  <div class="card"><div class="n">${mrrFmt}</div><div class="l">MRR real</div></div>
+  <div class="card"><div class="n">${byStatus.active ?? 0}</div><div class="l">active</div></div>
+  <div class="card"><div class="n">${byStatus.past_due ?? 0}</div><div class="l">past_due</div></div>
+  <div class="card"><div class="n">${byStatus.canceled ?? 0}</div><div class="l">canceled</div></div>
+</div>
+<table>
+  <thead><tr><th>conta / customer</th><th>valor</th><th>status</th><th>renova em</th></tr></thead>
+  <tbody>
+${subRows || '<tr><td colspan="4" class="small">Nenhuma subscription encontrada.</td></tr>'}
+  </tbody>
+</table>`;
+}
+
+function renderEngagementSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const engMap = new Map(data.engagement.map((e) => [e.account_id, e]));
+  // Top 5 by searches30d
+  const top5 = [...data.engagement].sort((a, b) => b.searches30d - a.searches30d).slice(0, 5);
+  const top5Html = top5.length
+    ? top5
+        .map(
+          (e) =>
+            `<li><code>${escapeHtml(e.account_id)}</code> — ${e.searches30d} buscas/30d</li>`,
+        )
+        .join("")
+    : "<li>Nenhuma busca registrada.</li>";
+
+  const rows = data.accounts
+    .map((a) => {
+      const eng = engMap.get(a.id);
+      const s7 = eng?.searches7d ?? 0;
+      const s30 = eng?.searches30d ?? 0;
+      const last = eng?.lastSearch ? eng.lastSearch.toISOString().slice(0, 10) : "—";
+      const dormantTag = eng?.dormant
+        ? '<span class="tag bad">dormente</span>'
+        : eng && eng.searches30d > 0
+          ? '<span class="tag ok">ativo</span>'
+          : "";
+      return `<tr>
+        <td class="small"><code>${escapeHtml(a.id)}</code></td>
+        <td class="small">${s7}</td>
+        <td class="small">${s30}</td>
+        <td class="small">${escapeHtml(last)}</td>
+        <td>${dormantTag}</td>
+      </tr>`;
+    })
+    .join("\n");
+  return `<h2>Uso e engajamento</h2>
+<p class="sub">Top 5 do mês: <ol style="margin:4px 0 12px 18px;font-size:13px">${top5Html}</ol></p>
+<table>
+  <thead><tr><th>conta</th><th>buscas 7d</th><th>buscas 30d</th><th>última busca</th><th>estado</th></tr></thead>
+  <tbody>
+${rows || '<tr><td colspan="5" class="small">Nenhuma conta.</td></tr>'}
+  </tbody>
+</table>`;
+}
+
+function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const costEnv: import("./business.js").CostEnv = {
+    COST_EMBED_PER_MTOK: process.env.COST_EMBED_PER_MTOK,
+    COST_PER_SEARCH: process.env.COST_PER_SEARCH,
+  };
+  const hasCostConfig = costEnv.COST_EMBED_PER_MTOK !== undefined && costEnv.COST_PER_SEARCH !== undefined;
+  const warning = hasCostConfig ? "" : `<div class="banner" style="margin-bottom:12px">Configure COST_EMBED_PER_MTOK e COST_PER_SEARCH no .env para habilitar estimativas de custo.</div>`;
+
+  const rows = data.accounts
+    .map((a) => {
+      const usageRows = data.usage.get(a.id) ?? [];
+      const embedTokens = Number(usageRows.find((u) => u.metric === "embed_tokens")?.total ?? 0);
+      const searches = Number(usageRows.find((u) => u.metric === "search")?.total ?? 0);
+      const cost = estimateCost({ embed_tokens: embedTokens, searches }, costEnv);
+      const planPrice = getPlanLimits(a.plan).priceBRLCents / 100;
+      const margin = hasCostConfig ? planPrice - cost.totalCost : null;
+      const fmtCost = hasCostConfig ? `$${cost.totalCost.toFixed(4)}` : "—";
+      const fmtMargin = margin !== null ? `R$${margin.toFixed(2)}` : "—";
+      return `<tr>
+        <td class="small"><code>${escapeHtml(a.id)}</code></td>
+        <td class="small">${escapeHtml(a.plan ?? "free")}</td>
+        <td class="small">${embedTokens.toLocaleString()}</td>
+        <td class="small">${searches}</td>
+        <td class="small">${fmtCost}</td>
+        <td class="small">${fmtMargin}</td>
+      </tr>`;
+    })
+    .join("\n");
+  return `<h2>Custo estimado / conta (mês) <span class="tag" style="font-size:11px;vertical-align:middle">estimativa</span></h2>
+${warning}
+<table>
+  <thead><tr><th>conta</th><th>plano</th><th>embed_tokens</th><th>buscas</th><th>custo est.</th><th>margem</th></tr></thead>
+  <tbody>
+${rows || '<tr><td colspan="6" class="small">Nenhuma conta.</td></tr>'}
+  </tbody>
+</table>`;
 }
 
 function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
@@ -140,12 +368,16 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
                <input type="hidden" name="account_id" value="${escapeHtml(a.id)}">
                <button type="submit" class="danger">Bloquear</button>
              </form>`;
+      const periodEnd = a.current_period_end
+        ? new Date(a.current_period_end).toISOString().slice(0, 10)
+        : "—";
       return `<tr>
         <td><code>${escapeHtml(a.id)}</code></td>
         <td>${escapeHtml(a.email ?? "—")}</td>
         <td>${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
         <td>${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
+        <td class="small">${escapeHtml(periodEnd)}</td>
         <td>${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
         <td>${data.tokens.get(a.id) ? "🔑×" + data.tokens.get(a.id) : "—"}</td>
         <td class="small">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
@@ -233,13 +465,21 @@ ${leadRows || '<tr><td colspan="5" class="small">Nenhuma solicitação ainda.</t
 <p class="sub">Uso da coluna abaixo é do mês corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}).</p>
 <table>
   <thead><tr>
-    <th>account_id</th><th>email</th><th>tipo</th><th>status</th><th>plano</th><th>fontes</th><th>MCP</th>
+    <th>account_id</th><th>email</th><th>tipo</th><th>status</th><th>plano</th><th>renova em</th><th>fontes</th><th>MCP</th>
     <th>workspaces</th><th>últimos índices</th><th>uso (mês)</th><th>criada</th><th>ação</th>
   </tr></thead>
   <tbody>
 ${rows}
   </tbody>
 </table>
+
+${renderStripeSection(data)}
+
+${renderFunnelSection(data)}
+
+${renderEngagementSection(data)}
+
+${renderCostSection(data)}
 </body></html>`;
 }
 
