@@ -11,7 +11,7 @@
     "dev:indexer": "tsx src/index-indexer.ts",
     "dev:classifier": "tsx src/index-classifier.ts",
     "dev:portal": "tsx src/portal/dev-server.ts",
-    "test": "tsx --test src/rag/__tests__/*.test.ts src/portal/__tests__/*.test.ts src/billing/__tests__/*.test.ts src/google/__tests__/*.test.ts src/admin/__tests__/*.test.ts",
+    "test": "tsx --test src/__tests__/*.test.ts src/rag/__tests__/*.test.ts src/portal/__tests__/*.test.ts src/billing/__tests__/*.test.ts src/google/__tests__/*.test.ts src/admin/__tests__/*.test.ts",
     "make-invite": "tsx scripts/make-invite.mts",
     "migrate": "tsx scripts/migrate.mts",
     "stripe:prices": "tsx scripts/stripe-setup-prices.mts",

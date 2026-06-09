@@ -572,7 +572,8 @@ app.get("/status", async (req, res) => {
 });
 
 const PORT = process.env.PORT ?? 3456;
-app.listen(PORT, () => {
-  console.log(`notion-mcp listening on port ${PORT}`);
+const BIND_HOST = process.env.BIND_HOST ?? "0.0.0.0";
+app.listen(Number(PORT), BIND_HOST, () => {
+  console.log(`notion-mcp listening on ${BIND_HOST}:${PORT}`);
   console.log(`OAuth base URL: ${BASE_URL}`);
 });
