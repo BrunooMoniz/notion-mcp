@@ -7,6 +7,51 @@ import { QuotaExceededError } from "../billing/usage.js";
 import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
 import { toBrainResult, type BrainResult } from "./brain-format.js";
 
+/** A single citable source entry for the portal chat UI. */
+export interface BrainCite {
+  icon: string;       // source_type — used to pick icon in app.js SRC_SVG
+  title: string;
+  url: string | null;
+  meta: string;       // metadata.data ?? db ?? source_type
+}
+
+/**
+ * Build the `cites` array from search results. Pure function, no IO.
+ * Meta priority: metadata.data → db → source_type.
+ */
+export function buildCites(results: BrainResult[]): BrainCite[] {
+  return results.map((r) => ({
+    icon: r.source_type,
+    title: r.title,
+    url: r.source_url,
+    meta: String(r.metadata?.data ?? r.db ?? r.source_type),
+  }));
+}
+
+/**
+ * Build a presentation_hint string instructing the model how to cite sources.
+ * Returns "" when there are no results (so the field is omitted by the caller).
+ */
+export function buildPresentationHint(results: BrainResult[]): string {
+  if (!results.length) return "";
+  const examples = results
+    .slice(0, 3)
+    .map((r, i) => {
+      const n = i + 1;
+      const titleMeta = r.title + (r.metadata?.data ? ` — ${r.metadata.data}` : "");
+      const srcLabel =
+        r.source_type === "notion" ? "Notion"
+        : r.source_type === "granola" ? "Granola"
+        : r.source_type === "calendar" ? "Calendar"
+        : r.source_type === "web" ? "Web"
+        : r.source_type;
+      const link = r.source_url ? ` ${r.source_url}` : "";
+      return `[${n}] ${titleMeta} (${srcLabel})${link}`;
+    })
+    .join("\n");
+  return `Ao responder, cite as fontes: liste cada afirmação com [n] e termine com a lista de fontes (título + link), como:\n${examples}`;
+}
+
 /**
  * Format a single brain_search result as a JSON string.
  * Web results are wrapped in an untrusted-content fence to guard against
@@ -111,6 +156,9 @@ Options:
         hits.length === 0 && isFriend
           ? "Nenhum resultado no seu Zinom para essa busca. Se você conectou ou editou suas fontes agora há pouco, abra o portal (zinom.ai), clique em 'Indexar agora' e tente de novo."
           : undefined;
+      const brainResults = hits.map((hit) => toBrainResult(hit));
+      const cites = buildCites(brainResults);
+      const presentationHint = buildPresentationHint(brainResults);
       return {
         content: [
           {
@@ -120,7 +168,9 @@ Options:
                 query: args.query,
                 mode: args.mode,
                 ...(hint ? { hint } : {}),
-                results: hits.map((hit) => JSON.parse(formatSearchResult(toBrainResult(hit)))),
+                ...(presentationHint ? { presentation_hint: presentationHint } : {}),
+                cites,
+                results: brainResults.map((r) => JSON.parse(formatSearchResult(r))),
               },
               null,
               2,
