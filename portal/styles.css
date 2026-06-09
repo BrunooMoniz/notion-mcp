@@ -38,3 +38,9 @@ hr { border: none; border-top: 1px solid #eee; margin: 28px 0; }
 .meter-bar.warn { background: #d9a521; }
 .meter-bar.over { background: var(--bad); }
 #billing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+/* P1 — ask card */
+#ask-card textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font: 15px/1.5 inherit; resize: vertical; }
+#ask-card textarea:focus { outline: 2px solid var(--green); border-color: transparent; }
+.ask-answer-body { line-height: 1.6; font-size: 15px; }
+.ask-answer-body a { color: var(--green); font-weight: 600; text-decoration: none; }
+.ask-answer-body a:hover { text-decoration: underline; }

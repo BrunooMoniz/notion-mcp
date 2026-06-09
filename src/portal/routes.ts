@@ -6,6 +6,7 @@
 // are loaded lazily inside handlers so this router can also run in the light
 // dev server without booting clients.ts.
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { randomUUID, randomBytes } from "node:crypto";
 import {
   createSession,
@@ -611,6 +612,25 @@ export function createPortalRouter(): express.Router {
     const { dismissActivation } = await import("./activation.js");
     await dismissActivation(res.locals.accountId);
     res.sendStatus(200);
+  });
+
+  // --- P1: chat com o cérebro --------------------------------------------------
+  // 10 requisições/min por conta (keyed by accountId — behind the Tailscale funnel
+  // all IPs are loopback, so an IP key would bucket all callers into one window).
+  const askLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req, res) => (res as any).locals?.accountId ?? req.ip ?? "anon",
+    validate: { keyGeneratorIpFallback: false },
+    message: { error: "Too many requests, try again later" },
+    skip: () => false,
+  });
+
+  router.post("/portal/ask", requireSession, askLimiter, async (req, res) => {
+    const { handleAsk } = await import("./ask.js");
+    await handleAsk(req, res);
   });
 
   return router;

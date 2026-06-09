@@ -13,6 +13,19 @@
   </div>
   <p class="sub" id="who">Carregando…</p>
 
+  <!-- P1: Pergunte ao seu cérebro — primeiro card após o header -->
+  <div class="card" id="ask-card">
+    <strong>💬 Pergunte ao seu cérebro</strong>
+    <p class="muted">Faça uma pergunta em linguagem natural. O Zinom busca nos seus documentos e responde com citações.</p>
+    <textarea id="ask-question" rows="3" placeholder="Ex: Quais foram as decisões da última reunião com o time?"></textarea>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+      <button class="small" id="ask-btn" type="button">Perguntar</button>
+      <span class="muted hidden" id="ask-spinner">Buscando e respondendo…</span>
+    </div>
+    <div id="ask-error" class="notice err hidden" style="margin-top:10px"></div>
+    <div id="ask-answer" class="hidden" style="margin-top:14px"></div>
+  </div>
+
   <!-- WS3: Estado do meu Zinom (status da indexação + contagens, auto-refresh) -->
   <div class="card" id="brain-status-card">
     <div class="row" style="border:none">
