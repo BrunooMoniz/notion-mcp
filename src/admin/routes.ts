@@ -190,53 +190,86 @@ function renderFunnelSection(data: Awaited<ReturnType<typeof gather>>): string {
   const bars = steps
     .map(
       (s) => `
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
-        <span>${escapeHtml(s.label)}</span>
-        <span style="color:#888">${s.count} (${s.pct}%)</span>
+    <div class="funnel-step">
+      <div class="funnel-label">
+        <span class="funnel-name">${escapeHtml(s.label)}</span>
+        <span class="funnel-count">${s.count} <span class="funnel-pct">(${s.pct}%)</span></span>
       </div>
-      <div style="background:#262a33;border-radius:4px;height:10px;overflow:hidden">
-        <div style="background:#1f8b4c;height:10px;width:${s.pct}%"></div>
+      <div class="funnel-track">
+        <div class="funnel-bar" style="width:${s.pct}%"></div>
       </div>
     </div>`,
     )
     .join("");
-  return `<h2>Funil de ativação</h2>
-<div style="max-width:480px">${bars}</div>`;
+  return `<section class="section" id="funil">
+  <div class="section-header">
+    <h2 class="section-title">Funil de ativação</h2>
+    <p class="section-desc">De todos os convites criados, quantos viraram contas, conectaram uma fonte, fizeram a primeira busca e pagam hoje. Quedas grandes entre etapas mostram onde os usuários travam.</p>
+  </div>
+  <div class="funnel-wrap">${bars}</div>
+</section>`;
 }
 
 function renderStripeSection(data: Awaited<ReturnType<typeof gather>>): string {
   const { mrrCents, byStatus } = mrrFromSubscriptions(data.stripeSubs);
   const sourceLabel = data.stripeSource === "stripe" ? "Stripe API" : "DB (fallback)";
-  const mrrFmt = `R$${(mrrCents / 100).toFixed(2)}`;
+  const mrrFmt = formatBRL(mrrCents);
   const subRows = data.stripeSubs
     .map((s) => {
       const renewsAt = s.current_period_end
         ? new Date(s.current_period_end * 1000).toISOString().slice(0, 10)
         : "—";
-      const amtFmt = `R$${(s.amount / 100).toFixed(2)}`;
+      const amtFmt = formatBRL(s.amount);
       const acct = s.account_id ?? escapeHtml(s.customer);
       return `<tr>
-        <td class="small"><code>${escapeHtml(acct)}</code></td>
-        <td class="small">${amtFmt}</td>
+        <td class="mono xs">${escapeHtml(acct)}</td>
+        <td class="xs">${amtFmt}</td>
         <td><span class="tag ${s.status === "active" ? "ok" : s.status === "canceled" ? "bad" : ""}">${escapeHtml(s.status)}</span></td>
-        <td class="small">${escapeHtml(renewsAt)}</td>
+        <td class="xs">${escapeHtml(renewsAt)}</td>
       </tr>`;
     })
     .join("\n");
-  return `<h2>Receita real (Stripe) <span class="tag" style="font-size:11px;vertical-align:middle">fonte: ${escapeHtml(sourceLabel)}</span></h2>
-<div class="cards">
-  <div class="card"><div class="n">${mrrFmt}</div><div class="l">MRR real</div></div>
-  <div class="card"><div class="n">${byStatus.active ?? 0}</div><div class="l">active</div></div>
-  <div class="card"><div class="n">${byStatus.past_due ?? 0}</div><div class="l">past_due</div></div>
-  <div class="card"><div class="n">${byStatus.canceled ?? 0}</div><div class="l">canceled</div></div>
-</div>
-<table>
-  <thead><tr><th>conta / customer</th><th>valor</th><th>status</th><th>renova em</th></tr></thead>
-  <tbody>
-${subRows || '<tr><td colspan="4" class="small">Nenhuma subscription encontrada.</td></tr>'}
-  </tbody>
-</table>`;
+  return `<section class="section" id="receita">
+  <div class="section-header">
+    <h2 class="section-title">Receita real <span class="tag" style="margin-left:6px;vertical-align:middle">fonte: ${escapeHtml(sourceLabel)}</span></h2>
+    <p class="section-desc">Dados ao vivo do Stripe (cache 60 s). MRR soma apenas assinaturas ativas. Assinaturas <em>past_due</em> ainda cobram; <em>canceled</em> não entram no MRR.</p>
+  </div>
+  <div class="cards">
+    <div class="card" title="Receita Mensal Recorrente: soma do valor das assinaturas ativas no Stripe">
+      <div class="card-n">${mrrFmt}</div>
+      <div class="card-l">MRR real</div>
+      <small class="card-hint">somente assinaturas ativas</small>
+    </div>
+    <div class="card" title="Assinaturas com status 'active' no Stripe">
+      <div class="card-n">${byStatus.active ?? 0}</div>
+      <div class="card-l">Ativas</div>
+      <small class="card-hint">cobradas normalmente</small>
+    </div>
+    <div class="card" title="Assinaturas com pagamento pendente (past_due)">
+      <div class="card-n">${byStatus.past_due ?? 0}</div>
+      <div class="card-l">Inadimplentes</div>
+      <small class="card-hint">pagamento em atraso</small>
+    </div>
+    <div class="card" title="Assinaturas canceladas — não contam no MRR">
+      <div class="card-n">${byStatus.canceled ?? 0}</div>
+      <div class="card-l">Canceladas</div>
+      <small class="card-hint">fora do MRR</small>
+    </div>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="ID da conta Zinom ou customer ID do Stripe">conta / customer</th>
+      <th title="Valor mensal da assinatura em BRL">valor/mês</th>
+      <th title="Status atual no Stripe">status</th>
+      <th title="Data de renovação do ciclo atual">renova em</th>
+    </tr></thead>
+    <tbody>
+${subRows || '<tr><td colspan="4" class="xs muted">Nenhuma subscription encontrada.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
 }
 
 function renderEngagementSection(data: Awaited<ReturnType<typeof gather>>): string {
@@ -247,10 +280,10 @@ function renderEngagementSection(data: Awaited<ReturnType<typeof gather>>): stri
     ? top5
         .map(
           (e) =>
-            `<li><code>${escapeHtml(e.account_id)}</code> — ${e.searches30d} buscas/30d</li>`,
+            `<li class="top-item"><span class="mono xs">${escapeHtml(e.account_id)}</span><span class="top-count">${e.searches30d} buscas</span></li>`,
         )
         .join("")
-    : "<li>Nenhuma busca registrada.</li>";
+    : '<li class="top-item muted">Nenhuma busca registrada.</li>';
 
   const rows = data.accounts
     .map((a) => {
@@ -262,24 +295,40 @@ function renderEngagementSection(data: Awaited<ReturnType<typeof gather>>): stri
         ? '<span class="tag bad">dormente</span>'
         : eng && eng.searches30d > 0
           ? '<span class="tag ok">ativo</span>'
-          : "";
+          : '<span class="tag">inativo</span>';
       return `<tr>
-        <td class="small"><code>${escapeHtml(a.id)}</code></td>
-        <td class="small">${s7}</td>
-        <td class="small">${s30}</td>
-        <td class="small">${escapeHtml(last)}</td>
+        <td class="mono xs">${escapeHtml(a.id)}</td>
+        <td class="xs">${s7}</td>
+        <td class="xs">${s30}</td>
+        <td class="xs">${escapeHtml(last)}</td>
         <td>${dormantTag}</td>
       </tr>`;
     })
     .join("\n");
-  return `<h2>Uso e engajamento</h2>
-<p class="sub">Top 5 do mês: <ol style="margin:4px 0 12px 18px;font-size:13px">${top5Html}</ol></p>
-<table>
-  <thead><tr><th>conta</th><th>buscas 7d</th><th>buscas 30d</th><th>última busca</th><th>estado</th></tr></thead>
-  <tbody>
-${rows || '<tr><td colspan="5" class="small">Nenhuma conta.</td></tr>'}
-  </tbody>
-</table>`;
+  return `<section class="section" id="engajamento">
+  <div class="section-header">
+    <h2 class="section-title">Uso e engajamento</h2>
+    <p class="section-desc">Dormente = já usou, mas está sem buscar há 14+ dias: risco de churn. Ativo = buscou nos últimos 30 dias. Inativo = nunca buscou ou sem dados no período.</p>
+  </div>
+  <div class="top5">
+    <p class="top5-label">Top 5 do mês (por buscas nos últimos 30 dias)</p>
+    <ol class="top5-list">${top5Html}</ol>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="Identificador único da conta no Zinom">conta</th>
+      <th title="Número de buscas realizadas nos últimos 7 dias">buscas 7d</th>
+      <th title="Número de buscas realizadas nos últimos 30 dias">buscas 30d</th>
+      <th title="Data da última busca registrada pelo usuário">última busca</th>
+      <th title="Ativo = buscou nos últimos 30d; Dormente = buscou antes, mas parou há 14d+">estado</th>
+    </tr></thead>
+    <tbody>
+${rows || '<tr><td colspan="5" class="xs muted">Nenhuma conta.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
 }
 
 function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
@@ -288,7 +337,7 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
     COST_PER_SEARCH: process.env.COST_PER_SEARCH,
   };
   const hasCostConfig = costEnv.COST_EMBED_PER_MTOK !== undefined && costEnv.COST_PER_SEARCH !== undefined;
-  const warning = hasCostConfig ? "" : `<div class="banner" style="margin-bottom:12px">Configure COST_EMBED_PER_MTOK e COST_PER_SEARCH no .env para habilitar estimativas de custo.</div>`;
+  const warning = hasCostConfig ? "" : `<div class="alert">Configure <code>COST_EMBED_PER_MTOK</code> e <code>COST_PER_SEARCH</code> no <code>.env</code> para habilitar estimativas de custo.</div>`;
 
   const rows = data.accounts
     .map((a) => {
@@ -301,23 +350,42 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
       const fmtCost = hasCostConfig ? `$${cost.totalCost.toFixed(4)}` : "—";
       const fmtMargin = margin !== null ? `R$${margin.toFixed(2)}` : "—";
       return `<tr>
-        <td class="small"><code>${escapeHtml(a.id)}</code></td>
-        <td class="small">${escapeHtml(a.plan ?? "free")}</td>
-        <td class="small">${embedTokens.toLocaleString()}</td>
-        <td class="small">${searches}</td>
-        <td class="small">${fmtCost}</td>
-        <td class="small">${fmtMargin}</td>
+        <td class="mono xs">${escapeHtml(a.id)}</td>
+        <td class="xs">${escapeHtml(a.plan ?? "free")}</td>
+        <td class="xs">${embedTokens.toLocaleString("pt-BR")}</td>
+        <td class="xs">${searches}</td>
+        <td class="xs">${fmtCost}</td>
+        <td class="xs">${fmtMargin}</td>
       </tr>`;
     })
     .join("\n");
-  return `<h2>Custo estimado / conta (mês) <span class="tag" style="font-size:11px;vertical-align:middle">estimativa</span></h2>
-${warning}
-<table>
-  <thead><tr><th>conta</th><th>plano</th><th>embed_tokens</th><th>buscas</th><th>custo est.</th><th>margem</th></tr></thead>
-  <tbody>
-${rows || '<tr><td colspan="6" class="small">Nenhuma conta.</td></tr>'}
-  </tbody>
-</table>`;
+  return `<section class="section" id="custo">
+  <div class="section-header">
+    <h2 class="section-title">Custo estimado por conta <span class="tag" style="margin-left:6px;vertical-align:middle">estimativa</span></h2>
+    <p class="section-desc">Estimativa de custo de infraestrutura de IA por conta no mês (embeddings + buscas). Margem = preço do plano &minus; custo estimado. Configure <code>COST_EMBED_PER_MTOK</code> e <code>COST_PER_SEARCH</code> no <code>.env</code> para habilitar os valores.</p>
+  </div>
+  ${warning}
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="Identificador único da conta no Zinom">conta</th>
+      <th title="Plano de assinatura atual da conta">plano</th>
+      <th title="Total de tokens usados em embeddings no mês corrente">embed_tokens</th>
+      <th title="Total de buscas realizadas no mês corrente">buscas</th>
+      <th title="Estimativa de custo total em USD com base nos tokens e buscas">custo est.</th>
+      <th title="Receita do plano menos custo estimado — positivo é saudável">margem</th>
+    </tr></thead>
+    <tbody>
+${rows || '<tr><td colspan="6" class="xs muted">Nenhuma conta.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
+}
+
+/** Format cents as BRL currency string. */
+function formatBRL(cents: number): string {
+  return `R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
 }
 
 function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
@@ -329,23 +397,26 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
     (sum, a) => sum + (a.plan_status !== "canceled" ? getPlanLimits(a.plan).priceBRLCents : 0),
     0,
   );
-  const mrr = `R$${(mrrCents / 100).toFixed(2)}`;
+  const mrr = formatBRL(mrrCents);
   const action = `/admin/invite?token=${encodeURIComponent(token)}`;
   const blockAction = `/admin/block?token=${encodeURIComponent(token)}`;
   const unblockAction = `/admin/unblock?token=${encodeURIComponent(token)}`;
+
   const rows = data.accounts
     .map((a) => {
-      const usage = (data.usage.get(a.id) ?? []).map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
+      const usageStr = (data.usage.get(a.id) ?? []).map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
       // Latest failed-run error per source (truncated), shown beneath the ✓/✗ flags
       // so a red source explains itself.
       const errs = (data.errors.get(a.id) ?? [])
         .filter((e) => e.error)
         .map((e) => `${escapeHtml(e.source)}: ${escapeHtml(String(e.error).slice(0, 160))}`);
-      const runs =
-        ((data.runs.get(a.id) ?? [])
-          .map((r) => `${escapeHtml(r.source)}${r.ok ? "✓" : "✗"}`)
-          .join(" ") || "—") +
-        (errs.length ? `<div class="err">${errs.join("<br>")}</div>` : "");
+      const runFlags =
+        (data.runs.get(a.id) ?? [])
+          .map((r) => `${escapeHtml(r.source)}${r.ok ? "&#10003;" : "&#10007;"}`)
+          .join(" ") || "—";
+      const runs = runFlags + (errs.length
+        ? `<details class="err-details"><summary>${errs.length} erro(s)</summary><div class="err">${errs.join("<br>")}</div></details>`
+        : "");
       const ws = data.workspaces.get(a.id);
       const status = a.status ?? ACTIVE_STATUS;
       const suspended = status !== ACTIVE_STATUS;
@@ -356,7 +427,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
       // auth path and must always keep access).
       const isOwner = a.kind === "owner";
       const actCell = isOwner
-        ? '<span class="small">—</span>'
+        ? '<span class="muted xs">—</span>'
         : suspended
           ? `<form method="POST" action="${escapeHtml(unblockAction)}" style="margin:0"
                  onsubmit="return confirm('Reativar ${escapeHtml(a.id)}?')">
@@ -371,19 +442,20 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
       const periodEnd = a.current_period_end
         ? new Date(a.current_period_end).toISOString().slice(0, 10)
         : "—";
+      const tokenCount = data.tokens.get(a.id);
       return `<tr>
-        <td><code>${escapeHtml(a.id)}</code></td>
-        <td>${escapeHtml(a.email ?? "—")}</td>
-        <td>${escapeHtml(a.kind ?? "—")}</td>
+        <td class="mono xs">${escapeHtml(a.id)}</td>
+        <td class="xs">${escapeHtml(a.email ?? "—")}</td>
+        <td class="xs">${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
-        <td>${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
-        <td class="small">${escapeHtml(periodEnd)}</td>
-        <td>${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
-        <td>${data.tokens.get(a.id) ? "🔑×" + data.tokens.get(a.id) : "—"}</td>
-        <td class="small">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
-        <td class="small">${runs}</td>
-        <td class="small">${escapeHtml(usage)}</td>
-        <td class="small">${new Date(a.created_at).toLocaleString("pt-BR")}</td>
+        <td class="xs">${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
+        <td class="xs">${escapeHtml(periodEnd)}</td>
+        <td class="xs">${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
+        <td class="xs">${tokenCount ? `${tokenCount} token(s)` : "—"}</td>
+        <td class="xs trunc">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
+        <td class="xs">${runs}</td>
+        <td class="xs">${escapeHtml(usageStr)}</td>
+        <td class="xs">${new Date(a.created_at).toLocaleString("pt-BR")}</td>
         <td>${actCell}</td>
       </tr>`;
     })
@@ -399,10 +471,10 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
              </form>`
           : `<span class="tag ok">convidado ${l.invited_at ? new Date(l.invited_at).toLocaleString("pt-BR") : ""}</span>`;
       return `<tr>
-        <td>${escapeHtml(l.email)}</td>
-        <td>${escapeHtml(l.name ?? "—")}</td>
-        <td class="small">${escapeHtml(l.note ?? "—")}</td>
-        <td class="small">${new Date(l.requested_at).toLocaleString("pt-BR")}</td>
+        <td class="xs">${escapeHtml(l.email)}</td>
+        <td class="xs">${escapeHtml(l.name ?? "—")}</td>
+        <td class="xs trunc">${escapeHtml(l.note ?? "—")}</td>
+        <td class="xs">${new Date(l.requested_at).toLocaleString("pt-BR")}</td>
         <td>${act}</td>
       </tr>`;
     })
@@ -412,75 +484,364 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
     ? `<div class="banner">${escapeHtml(msg)}</div>`
     : "";
 
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+  const logoSvg = `<svg width="28" height="28" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+    <rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/>
+    <path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="8" cy="8" r="1.7" fill="#fff"/>
+    <circle cx="18" cy="8" r="1.7" fill="#fff"/>
+    <circle cx="8" cy="18" r="1.7" fill="#fff"/>
+    <circle cx="18" cy="18" r="1.7" fill="#fff"/>
+  </svg>`;
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zinom.ai — Admin</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>
-  body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px}
-  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:26px 0 10px} .sub{color:#888;margin:0 0 20px;font-size:13px}
-  .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
-  .card{background:#1a1d24;border:1px solid #262a33;border-radius:10px;padding:14px 18px;min-width:120px}
-  .card .n{font-size:24px;font-weight:700} .card .l{color:#888;font-size:12px}
-  table{width:100%;border-collapse:collapse;background:#1a1d24;border-radius:10px;overflow:hidden}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #262a33;vertical-align:top}
-  th{color:#9aa;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-  td.small{font-size:12px;color:#bbb} code{font:12px ui-monospace,monospace;color:#7fd1b9}
-  tr:hover td{background:#20242d}
-  button{background:#1f8b4c;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer}
-  button:hover{background:#43a047}
-  input[type=email],input[type=text]{background:#0f1115;border:1px solid #333;border-radius:7px;color:#fff;padding:7px 10px;font-size:13px}
-  .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#2a2f3a;color:#cbd5e1}
-  .tag.ok{background:#15301f;color:#5fd39a}
-  .tag.bad{background:#3a1517;color:#f49a9a}
-  button.danger{background:#b3261e} button.danger:hover{background:#d33a30}
-  .err{margin-top:4px;color:#f49a9a;font-size:11px;line-height:1.35;max-width:340px;word-break:break-word}
-  .banner{background:#15301f;border:1px solid #2a5a3a;color:#9ae6b4;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px}
-  .manual{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
-</style></head><body>
-<h1>🧠 Zinom.ai — Admin</h1>
-<p class="sub">${now}</p>
-${banner}
-<div class="cards">
-  <div class="card"><div class="n">${data.accounts.length}</div><div class="l">contas</div></div>
-  <div class="card"><div class="n">${friends.length}</div><div class="l">amigos</div></div>
-  <div class="card"><div class="n">${data.activeSessions}</div><div class="l">sessões ativas</div></div>
-  <div class="card"><div class="n">${data.invites.redeemed}/${data.invites.total}</div><div class="l">convites usados</div></div>
-  <div class="card"><div class="n">${pending}</div><div class="l">leads pendentes</div></div>
-  <div class="card"><div class="n">${mrr}</div><div class="l">MRR (aprox.)</div></div>
+@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');
+@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.2.6/index.css');
+</style>
+<style>
+/* --- Design tokens (identidade Zinom, tema claro) --- */
+:root{
+  --bg:#fff;
+  --paper:#f7f6f3;
+  --ink:#26241f;
+  --ink-soft:#4a4740;
+  --muted:#827d73;
+  --line:#eae7df;
+  --line-2:#e0ddd3;
+  --accent:#1f8b4c;
+  --accent-strong:#15633a;
+  --accent-soft:#ecf5ef;
+  --r:16px;
+  --r-sm:11px;
+  --r-xs:8px;
+  --shadow-sm:0 1px 2px rgba(38,36,31,.05),0 1px 1px rgba(38,36,31,.04);
+  --sans:"Geist Variable",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --mono:"Geist Mono Variable",ui-monospace,"SF Mono",Menlo,monospace;
+  --maxw:1180px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--sans);
+  font-size:14px;
+  line-height:1.55;
+  color:var(--ink);
+  background:var(--bg);
+  margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accent-strong)}
+h1,h2,h3,p{margin:0}
+code{
+  font-family:var(--mono);
+  font-size:12px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:1px 5px;
+  color:var(--accent-strong);
+}
+
+/* --- Layout --- */
+.page{max-width:var(--maxw);margin:0 auto;padding:0 24px 80px}
+
+/* --- Top nav --- */
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:saturate(150%) blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.topbar-inner{
+  max-width:var(--maxw);margin:0 auto;padding:0 24px;
+  display:flex;align-items:center;justify-content:space-between;height:60px;gap:16px;
+}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:17px;letter-spacing:-.02em;color:var(--ink)}
+.brand-sub{font-size:12px;font-weight:400;color:var(--muted);margin-left:2px}
+.timestamp{font-size:12px;color:var(--muted)}
+
+/* --- Anchor nav --- */
+.anav{
+  display:flex;gap:0;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);
+  background:var(--paper);
+  padding:0 24px;
+  max-width:var(--maxw);margin:0 auto;
+}
+.anav a{
+  font-size:13px;font-weight:500;color:var(--ink-soft);
+  padding:10px 14px;
+  border-bottom:2px solid transparent;
+  transition:color .15s,border-color .15s;
+}
+.anav a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* --- Banner / alert --- */
+.banner{
+  background:var(--accent-soft);border:1px solid rgba(31,139,76,.25);
+  color:var(--accent-strong);border-radius:var(--r-xs);
+  padding:10px 16px;margin-bottom:20px;font-size:13px;
+}
+.alert{
+  background:#fff8e1;border:1px solid #f9a825;
+  color:#5d4037;border-radius:var(--r-xs);
+  padding:10px 16px;margin-bottom:16px;font-size:13px;
+}
+
+/* --- Summary metric cards --- */
+.cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:0}
+.card{
+  background:var(--bg);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  padding:16px 20px;
+  min-width:130px;
+  box-shadow:var(--shadow-sm);
+  transition:box-shadow .15s;
+}
+.card:hover{box-shadow:0 4px 12px rgba(38,36,31,.1)}
+.card-n{font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.card-l{font-size:12px;font-weight:500;color:var(--ink-soft);margin-top:2px}
+.card-hint{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+
+/* --- Sections --- */
+.section{padding:36px 0 0}
+.section-header{margin-bottom:20px}
+.section-title{font-size:17px;font-weight:650;letter-spacing:-.02em;color:var(--ink);margin-bottom:6px}
+.section-desc{font-size:13px;color:var(--ink-soft);line-height:1.55;max-width:720px}
+.section-desc em{font-style:normal;font-weight:600;color:var(--ink)}
+
+/* --- Tags --- */
+.tag{
+  display:inline-block;font-size:11.5px;font-weight:500;
+  padding:2px 8px;border-radius:999px;
+  background:var(--paper);color:var(--ink-soft);
+  border:1px solid var(--line);
+}
+.tag.ok{background:var(--accent-soft);color:var(--accent-strong);border-color:rgba(31,139,76,.2)}
+.tag.bad{background:#fdecec;color:#9a2820;border-color:rgba(154,40,32,.2)}
+
+/* --- Table wrapper --- */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm)}
+table{width:100%;border-collapse:collapse;background:var(--bg)}
+thead tr{background:var(--paper)}
+th{
+  text-align:left;padding:10px 14px;
+  font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);
+  border-bottom:1px solid var(--line);
+  white-space:nowrap;
+  cursor:default;
+}
+th[title]{text-decoration:underline dotted var(--line-2)}
+td{
+  padding:9px 14px;
+  border-bottom:1px solid var(--line);
+  vertical-align:top;
+  color:var(--ink);
+}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even) td{background:rgba(247,246,243,.5)}
+tbody tr:hover td{background:var(--accent-soft)}
+td.xs{font-size:12.5px;color:var(--ink-soft)}
+td.mono{font-family:var(--mono);font-size:12px;color:var(--accent-strong)}
+.muted{color:var(--muted)}
+.trunc{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* --- Buttons --- */
+button{
+  font-family:var(--sans);
+  background:var(--accent);color:#fff;
+  border:none;border-radius:var(--r-xs);
+  padding:7px 14px;font-size:13px;font-weight:600;
+  cursor:pointer;
+  transition:background .15s;
+}
+button:hover{background:var(--accent-strong)}
+button.danger{background:#b3261e}
+button.danger:hover{background:#9a1f18}
+
+/* --- Inputs --- */
+input[type=email],input[type=text]{
+  font-family:var(--sans);
+  background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-xs);
+  color:var(--ink);padding:7px 12px;font-size:13px;
+  transition:border-color .15s;
+}
+input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--accent)}
+
+/* --- Inline form row --- */
+.inline-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+
+/* --- Error details (expandable) --- */
+.err-details>summary{font-size:11.5px;color:#9a2820;cursor:pointer}
+.err{margin-top:4px;color:#9a2820;font-size:11px;line-height:1.4;max-width:360px;word-break:break-word}
+
+/* --- Funnel bars --- */
+.funnel-wrap{max-width:540px;display:flex;flex-direction:column;gap:14px}
+.funnel-step{}
+.funnel-label{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;gap:8px}
+.funnel-name{font-size:13.5px;font-weight:500;color:var(--ink)}
+.funnel-count{font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.funnel-pct{font-weight:400;color:var(--muted);font-size:12px}
+.funnel-track{background:var(--paper);border:1px solid var(--line);border-radius:999px;height:10px;overflow:hidden}
+.funnel-bar{background:var(--accent);height:10px;border-radius:999px;min-width:3px;transition:width .3s ease}
+
+/* --- Engagement top5 --- */
+.top5{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:16px 20px;margin-bottom:18px}
+.top5-label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px}
+.top5-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.top-item{font-size:13px;color:var(--ink-soft);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.top-count{font-weight:600;color:var(--accent-strong);white-space:nowrap}
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      ${logoSvg}
+      Zinom <span class="brand-sub">Admin</span>
+    </div>
+    <span class="timestamp">${escapeHtml(now)}</span>
+  </div>
 </div>
 
-<h2>Solicitações de convite (leads)</h2>
-<form method="POST" action="${escapeHtml(action)}" class="manual">
-  <input type="email" name="email" placeholder="convidar e-mail manualmente…" required>
-  <button type="submit">Gerar e enviar convite</button>
-</form>
-<table>
-  <thead><tr><th>email</th><th>nome</th><th>nota</th><th>solicitado</th><th>ação</th></tr></thead>
-  <tbody>
-${leadRows || '<tr><td colspan="5" class="small">Nenhuma solicitação ainda.</td></tr>'}
-  </tbody>
-</table>
+<!-- Anchor navigation -->
+<div style="background:var(--paper);border-bottom:1px solid var(--line)">
+  <nav class="anav" aria-label="Seções">
+    <a href="#resumo">Resumo</a>
+    <a href="#receita">Receita</a>
+    <a href="#funil">Funil</a>
+    <a href="#engajamento">Engajamento</a>
+    <a href="#custo">Custo</a>
+    <a href="#leads">Leads</a>
+    <a href="#contas">Contas</a>
+  </nav>
+</div>
 
-<h2>Contas</h2>
-<p class="sub">Uso da coluna abaixo é do mês corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}).</p>
-<table>
-  <thead><tr>
-    <th>account_id</th><th>email</th><th>tipo</th><th>status</th><th>plano</th><th>renova em</th><th>fontes</th><th>MCP</th>
-    <th>workspaces</th><th>últimos índices</th><th>uso (mês)</th><th>criada</th><th>ação</th>
-  </tr></thead>
-  <tbody>
-${rows}
-  </tbody>
-</table>
+<div class="page">
+${banner}
 
+<!-- ============================== RESUMO ============================== -->
+<section class="section" id="resumo">
+  <div class="section-header">
+    <h2 class="section-title">Resumo</h2>
+    <p class="section-desc">Visao geral do estado atual da plataforma. MRR aproximado calculado com base nos planos ativos no banco de dados (veja Receita para o valor ao vivo do Stripe).</p>
+  </div>
+  <div class="cards">
+    <div class="card" title="Total de contas cadastradas na plataforma, incluindo owner e amigos">
+      <div class="card-n">${data.accounts.length}</div>
+      <div class="card-l">Contas</div>
+      <small class="card-hint">total cadastrado</small>
+    </div>
+    <div class="card" title="Contas do tipo 'friend' — convidados pelo operador">
+      <div class="card-n">${friends.length}</div>
+      <div class="card-l">Amigos</div>
+      <small class="card-hint">tipo friend</small>
+    </div>
+    <div class="card" title="Sessoes de portal ativas agora (cookie nao expirado)">
+      <div class="card-n">${data.activeSessions}</div>
+      <div class="card-l">Sessoes ativas</div>
+      <small class="card-hint">cookies validos</small>
+    </div>
+    <div class="card" title="Convites resgatados sobre total emitido">
+      <div class="card-n">${data.invites.redeemed}/${data.invites.total}</div>
+      <div class="card-l">Convites usados</div>
+      <small class="card-hint">resgatados / emitidos</small>
+    </div>
+    <div class="card" title="Solicitacoes de convite ainda aguardando envio">
+      <div class="card-n">${pending}</div>
+      <div class="card-l">Leads pendentes</div>
+      <small class="card-hint">sem convite enviado</small>
+    </div>
+    <div class="card" title="MRR aproximado: soma dos planos ativos (nao cancelados) no banco">
+      <div class="card-n">${mrr}</div>
+      <div class="card-l">MRR (aprox.)</div>
+      <small class="card-hint">via banco, nao Stripe</small>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== RECEITA ============================== -->
 ${renderStripeSection(data)}
 
+<!-- ============================== FUNIL ============================== -->
 ${renderFunnelSection(data)}
 
+<!-- ============================== ENGAJAMENTO ============================== -->
 ${renderEngagementSection(data)}
 
+<!-- ============================== CUSTO ============================== -->
 ${renderCostSection(data)}
-</body></html>`;
+
+<!-- ============================== LEADS ============================== -->
+<section class="section" id="leads">
+  <div class="section-header">
+    <h2 class="section-title">Solicitacoes de convite</h2>
+    <p class="section-desc">Pessoas que solicitaram acesso. Clique em "Gerar e enviar convite" para emitir um codigo de uso unico e envia-lo por e-mail. Use o formulario abaixo para convidar um e-mail diretamente sem solicitacao previa.</p>
+  </div>
+  <form method="POST" action="${escapeHtml(action)}" class="inline-form">
+    <input type="email" name="email" placeholder="convidar e-mail manualmente…" required>
+    <button type="submit">Gerar e enviar convite</button>
+  </form>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="E-mail da pessoa que solicitou acesso">E-mail</th>
+      <th title="Nome informado na solicitacao">Nome</th>
+      <th title="Mensagem livre da solicitacao">Nota</th>
+      <th title="Data e hora da solicitacao">Solicitado em</th>
+      <th title="Enviar convite ou ver status">Acao</th>
+    </tr></thead>
+    <tbody>
+${leadRows || '<tr><td colspan="5" class="xs muted">Nenhuma solicitacao ainda.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============================== CONTAS ============================== -->
+<section class="section" id="contas">
+  <div class="section-header">
+    <h2 class="section-title">Contas</h2>
+    <p class="section-desc">Todas as contas cadastradas. Colunas de uso mostram o mes corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}). Passe o cursor sobre os cabecalhos para ver a descricao de cada coluna. Erros de indexacao ficam expansiveis na coluna "Indices".</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="Identificador unico da conta no Zinom">ID da conta</th>
+      <th title="E-mail de acesso ao portal">E-mail</th>
+      <th title="Tipo: owner (operador), friend (convidado)">Tipo</th>
+      <th title="Estado atual: active ou suspended">Status</th>
+      <th title="Plano contratado e status da assinatura">Plano</th>
+      <th title="Data de renovacao do plano atual">Renova em</th>
+      <th title="Fontes de dados conectadas (Notion, Granola, iCal, Google)">Fontes</th>
+      <th title="Quantidade de tokens MCP emitidos para esta conta">MCP</th>
+      <th title="Workspaces Notion vinculados a conta">Workspaces</th>
+      <th title="Resultado do ultimo ciclo de indexacao por fonte — expanda para ver erros">Indices</th>
+      <th title="Uso de metricas no mes corrente (embed_tokens, search, etc.)">Uso (mes)</th>
+      <th title="Data de criacao da conta">Criada</th>
+      <th title="Bloquear ou reativar a conta">Acao</th>
+    </tr></thead>
+    <tbody>
+${rows}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+</div><!-- /page -->
+</body>
+</html>`;
 }
 
 export function createAdminRouter(bearerToken?: string): express.Router {
