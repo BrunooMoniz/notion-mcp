@@ -11,6 +11,8 @@ const DATA_DIR = join(__dirname, "..", "..", "data");
 const CREDS_PATH = join(DATA_DIR, "google-creds.json");
 
 export const SCOPES = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar.events",
 ];
@@ -118,6 +120,21 @@ export async function exchangeCodeRaw(code: string): Promise<GoogleCreds> {
     }
   } catch {
     /* ignore */
+  }
+  // Fallback: the primary calendar id IS the account email, and the calendar
+  // scope is always granted here — covers grants made without the email scope.
+  if (!granted_email) {
+    try {
+      const cal = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary", {
+        headers: { Authorization: `Bearer ${data.access_token}` },
+      });
+      if (cal.ok) {
+        const c = (await cal.json()) as { id?: string };
+        if (c.id && c.id.includes("@")) granted_email = c.id;
+      }
+    } catch {
+      /* ignore */
+    }
   }
   return {
     refresh_token: data.refresh_token,
