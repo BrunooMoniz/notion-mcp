@@ -42,7 +42,7 @@ function memPool() {
 
 test("generateInviteCode/hashInvite: random code, deterministic sha256 hex", () => {
   const a = generateInviteCode();
-  assert.match(a, /^[0-9a-f]{24}$/);
+  assert.match(a, /^ZIN-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
   assert.notEqual(a, generateInviteCode());
   assert.equal(hashInvite("ABC"), hashInvite(" ABC ")); // trims
   assert.match(hashInvite("ABC"), /^[0-9a-f]{64}$/);
