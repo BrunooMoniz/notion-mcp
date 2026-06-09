@@ -546,8 +546,9 @@ function renderAskSources(sources) {
     const label = escapeHtml(s.title || "(sem título)");
     const db = s.db ? ` · ${escapeHtml(s.db)}` : "";
     const date = s.date ? ` · ${escapeHtml(s.date)}` : "";
-    const titleHtml = s.source_url
-      ? `<a href="${escapeHtml(s.source_url)}" target="_blank" rel="noopener">${label}</a>`
+    const safeUrl = /^https?:\/\//i.test(s.source_url || "") ? s.source_url : null;
+    const titleHtml = safeUrl
+      ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${label}</a>`
       : label;
     const snippetHtml = s.snippet
       ? `<details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">ver trecho original</summary>`
