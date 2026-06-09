@@ -27,6 +27,7 @@ import {
 } from "./storage.js";
 import { prefixChunkIds } from "./account-chunks.js";
 import { FRIEND_WORKSPACE, accountIcalConfigs, ensureAccountWorkspace } from "./account-sources.js";
+import { indexGcalOAuthForAccount } from "./gcal-oauth-source.js";
 import type { Workspace } from "./types.js";
 import { accountHasFeature } from "../billing/usage.js";
 
@@ -192,6 +193,18 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         });
       }
     });
+  }
+
+  // ---- Google OAuth calendar pass (many accounts per tenant, from vault) ----
+  if (canGranolaCalendar) {
+    const gcalResult = await indexGcalOAuthForAccount(accountId, FRIEND_WORKSPACE);
+    documents += gcalResult.documents;
+    chunks += gcalResult.chunks;
+    if (gcalResult.documents > 0 || gcalResult.chunks > 0) {
+      console.log(
+        `[index-account] ${accountId} gcal documents=${gcalResult.documents} chunks=${gcalResult.chunks}`,
+      );
+    }
   }
 
   return { documents, chunks };
