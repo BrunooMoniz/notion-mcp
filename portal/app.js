@@ -516,3 +516,103 @@ loadBilling();
 loadStatus();
 renderBrainFilters();
 loadBrain(true);
+
+// --- P1: Pergunte ao seu cérebro ---------------------------------------------
+
+function renderParagraphs(text) {
+  // Split answer on double newlines, wrap each non-empty block in a <p>.
+  return text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p style="margin:0 0 8px">${escapeHtml(p)}</p>`)
+    .join("");
+}
+
+function replaceCitations(html, sources) {
+  // Replace [n] with anchor links to the source anchor #ask-source-n.
+  return html.replace(/\[(\d+)\]/g, (_, n) => {
+    const idx = parseInt(n, 10) - 1;
+    const src = sources[idx];
+    if (!src) return `[${n}]`;
+    return `<a href="#ask-source-${n}">[${n}]</a>`;
+  });
+}
+
+function renderAskSources(sources) {
+  if (!sources || !sources.length) return "";
+  const items = sources.map((s) => {
+    const n = s.n;
+    const label = escapeHtml(s.title || "(sem título)");
+    const db = s.db ? ` · ${escapeHtml(s.db)}` : "";
+    const date = s.date ? ` · ${escapeHtml(s.date)}` : "";
+    const titleHtml = s.source_url
+      ? `<a href="${escapeHtml(s.source_url)}" target="_blank" rel="noopener">${label}</a>`
+      : label;
+    const snippetHtml = s.snippet
+      ? `<details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">ver trecho original</summary>`
+        + `<p style="margin:6px 0 0;font-size:12px;color:var(--muted)">${escapeHtml(s.snippet)}</p></details>`
+      : "";
+    const citedMark = s.cited ? "" : ' <span class="tag" style="font-size:11px;opacity:.6">não citado</span>';
+    return `<li id="ask-source-${n}" style="margin:6px 0">`
+      + `<span style="font-weight:600">[${n}]</span> ${titleHtml}${citedMark}`
+      + `<span class="muted">${db}${date}</span>`
+      + snippetHtml
+      + `</li>`;
+  });
+  return `<p style="margin:12px 0 4px;font-weight:600;font-size:13px">Fontes:</p><ul style="list-style:none;padding:0;margin:0">${items.join("")}</ul>`;
+}
+
+document.getElementById("ask-btn").onclick = async () => {
+  const question = document.getElementById("ask-question").value.trim();
+  const btn = document.getElementById("ask-btn");
+  const spinner = document.getElementById("ask-spinner");
+  const errEl = document.getElementById("ask-error");
+  const answerEl = document.getElementById("ask-answer");
+
+  errEl.classList.add("hidden");
+  errEl.innerHTML = "";
+  answerEl.classList.add("hidden");
+  answerEl.innerHTML = "";
+
+  if (!question) return;
+
+  btn.disabled = true;
+  spinner.classList.remove("hidden");
+
+  try {
+    const res = await apiJSON("/portal/ask", "POST", { question });
+
+    if (res.status === 402) {
+      errEl.innerHTML = 'Limite de consultas atingido. <a href="/plano.html">Faça upgrade do plano</a> para continuar.';
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      errEl.textContent = body.error === "invalid_question"
+        ? "A pergunta deve ter entre 3 e 500 caracteres."
+        : body.error === "llm"
+          ? "Não consegui gerar uma resposta agora. Tente de novo em instantes."
+          : "Erro inesperado. Tente de novo.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    const { answer, sources } = await res.json();
+
+    const paragraphsHtml = renderParagraphs(answer);
+    const withCitations = replaceCitations(paragraphsHtml, sources);
+    const sourcesHtml = renderAskSources(sources);
+
+    answerEl.innerHTML = `<div class="ask-answer-body">${withCitations}</div>${sourcesHtml}`;
+    answerEl.classList.remove("hidden");
+  } catch {
+    errEl.textContent = "Erro de rede. Verifique sua conexão e tente de novo.";
+    errEl.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    spinner.classList.add("hidden");
+  }
+};
