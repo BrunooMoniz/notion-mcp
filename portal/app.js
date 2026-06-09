@@ -247,8 +247,8 @@ document.getElementById("reindex").onclick = async () => {
   const el = document.getElementById("notion-notice");
   el.classList.remove("hidden");
   el.className = "notice";
-  el.textContent = res.ok ? "Indexação iniciada — acompanhe em “Estado do meu Zinom” acima." : "Indexação indisponível neste ambiente.";
-  if (res.ok) loadStatus(); // reflect "indexando…" + start polling immediately
+  el.textContent = res.ok ? “Indexação iniciada — acompanhe em Atividade.” : “Indexação indisponível neste ambiente.”;
+  if (res.ok) loadStatus();
 };
 
 // --- Ativação (checklist one-time) ------------------------------------------
@@ -259,8 +259,14 @@ async function renderActivation(sources) {
   if (!res.ok) return;
   const st = await res.json();
   const card = document.getElementById("activation");
-  if (st.complete) { card.classList.add("hidden"); return; }
+  const bannerWrap = document.getElementById("activation-banner-wrap");
+  if (st.complete) {
+    card.classList.add("hidden");
+    if (bannerWrap) bannerWrap.classList.add("hidden");
+    return;
+  }
   card.classList.remove("hidden");
+  if (bannerWrap) bannerWrap.classList.remove("hidden");
 
   const ul = document.getElementById("activation-items");
   ul.innerHTML = "";
@@ -517,7 +523,72 @@ document.getElementById("brain-q").addEventListener("input", (e) => {
 });
 document.getElementById("brain-more").onclick = () => loadBrain(false);
 
+// --- Hash routing (sidebar views) -------------------------------------------
+const VIEW_HASHES = ["chat", "fontes", "atividade", "conectar"];
+
+function showView(rawHash) {
+  // Normaliza: "#chat" ou "chat" → "chat"; default "chat"
+  const hash = (rawHash || "").replace(/^#/, "").split("?")[0];
+  const view = VIEW_HASHES.includes(hash) ? hash : "chat";
+
+  // Mostrar/ocultar sections
+  for (const v of VIEW_HASHES) {
+    const el = document.getElementById("view-" + v);
+    if (el) el.classList.toggle("active", v === view);
+  }
+
+  // Marcar item ativo na sidebar
+  for (const v of VIEW_HASHES) {
+    const btn = document.getElementById("nav-" + v);
+    if (btn) btn.classList.toggle("active", v === view);
+  }
+
+  // Fechar o menu mobile se aberto
+  const nav = document.getElementById("sidebar-nav");
+  if (nav) nav.classList.remove("open");
+  const toggle = document.getElementById("nav-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", "false");
+}
+
+window.addEventListener("hashchange", () => showView(location.hash));
+// Inicializar na hash atual (ou default "chat")
+showView(location.hash || "#chat");
+
+// Sidebar nav buttons: ao clicar, navegar para o hash correspondente
+for (const v of VIEW_HASHES) {
+  const btn = document.getElementById("nav-" + v);
+  if (btn && btn.dataset.hash) {
+    btn.addEventListener("click", () => {
+      location.hash = btn.dataset.hash;
+    });
+  }
+}
+
+// --- Mobile hamburger ---
+const navToggle = document.getElementById("nav-toggle");
+if (navToggle) {
+  navToggle.addEventListener("click", () => {
+    const nav = document.getElementById("sidebar-nav");
+    const open = nav.classList.toggle("open");
+    navToggle.setAttribute("aria-expanded", String(open));
+  });
+}
+
+// --- Google unconfigured notice -----------------------------------------------
+function googleUnconfiguredNotice() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("google") === "unconfigured") {
+    const el = document.getElementById("google-unconfigured-notice");
+    if (el) el.classList.remove("hidden");
+    // Navegar para #fontes para que o aviso apareça na view correta
+    if ((location.hash || "").replace(/^#/, "") !== "fontes") {
+      location.replace("/app.html#fontes?" + params.toString());
+    }
+  }
+}
+
 notionNotice();
+googleUnconfiguredNotice();
 load();
 loadBilling();
 loadStatus();

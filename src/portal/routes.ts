@@ -381,6 +381,10 @@ export function createPortalRouter(): express.Router {
 
   // Google Calendar (multi-conta OAuth) --------------------------------------
   router.get("/portal/google/connect", requireSession, (_req, res) => {
+    if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+      res.redirect(302, "/app.html#fontes?google=unconfigured");
+      return;
+    }
     const state = randomBytes(16).toString("base64url");
     putPortalGoogleState(state, res.locals.accountId);
     res.redirect(302, authUrl(state));

@@ -324,3 +324,212 @@ hr { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 summary { cursor: pointer; font-weight: 580; font-size: 13px; color: var(--ink-soft); }
 details[open] summary { margin-bottom: 8px; }
 ol.muted, ul.muted { color: var(--muted); font-size: 13.5px; padding-left: 18px; margin: 8px 0; line-height: 1.6; }
+
+/* ============================================================
+   SIDEBAR LAYOUT (app.html chat-first)
+   ============================================================ */
+
+/* Root layout: sidebar fixa + área de conteúdo */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  width: 220px;
+  flex: 0 0 220px;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  z-index: 100;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-brand:hover { text-decoration: none; }
+
+.sidebar-nav {
+  flex: 1;
+  padding: 10px 0;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-radius: 0;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+.sidebar-item:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+  text-decoration: none;
+}
+.sidebar-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 580;
+}
+.sidebar-item svg { flex: 0 0 auto; }
+
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sidebar-email {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Main content area ---------- */
+.app-main {
+  margin-left: 220px;
+  flex: 1;
+  min-width: 0;
+  padding: 28px 32px 60px;
+  max-width: calc(100vw - 220px);
+}
+
+/* ---------- Views (hash routing) ---------- */
+.view { display: none; }
+.view.active { display: block; }
+
+/* Chat view: thread fills available height */
+.view-chat-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 120px);
+}
+.view-chat-inner .chat-thread-wrap {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Activation banner (collapsible, top of chat view) */
+.activation-banner {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.activation-banner summary {
+  font-size: 13px;
+  font-weight: 580;
+  color: var(--ink-soft);
+}
+
+/* ---------- Google unconfigured notice ---------- */
+.notice-warn {
+  background: #fff8e6;
+  border: 1px solid #e8d9a0;
+  color: #7a5c00;
+  padding: 10px 13px;
+  border-radius: var(--r-xs);
+  font-size: 13.5px;
+  margin-bottom: 12px;
+}
+
+/* ---------- Mobile topbar (< 900px) ---------- */
+@media (max-width: 899px) {
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+    z-index: 200;
+    padding: 0;
+    flex: none;
+  }
+
+  .sidebar-brand {
+    border-bottom: none;
+    padding: 12px 14px;
+  }
+
+  .sidebar-nav {
+    display: none;
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    padding: 8px 0;
+    z-index: 201;
+    box-shadow: 0 8px 20px -4px rgba(38,36,31,.12);
+  }
+  .sidebar-nav.open { display: block; }
+
+  .sidebar-footer {
+    display: none;
+  }
+  .sidebar-footer.mobile-open { display: flex; padding: 8px 14px; border-top: 1px solid var(--line); }
+
+  .sidebar-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: 8px 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    color: var(--ink);
+  }
+
+  .app-main {
+    margin-left: 0;
+    margin-top: 49px;
+    padding: 20px 16px 60px;
+    max-width: 100%;
+  }
+}
+
+/* Ocultar o hamburger no desktop */
+.sidebar-hamburger { display: none; }
+@media (max-width: 899px) {
+  .sidebar-hamburger { display: flex; }
+}
