@@ -393,6 +393,13 @@ async function loadBilling() {
 }
 
 // --- WS3: Estado do meu Zinom (status) + Navegar no meu cérebro -------------
+// Inline SVG icons per source_type (copied from landing.js ICONS; do NOT import landing.js)
+const SRC_SVG = {
+  notion: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="2.5" width="19" height="19" rx="3.2" fill="#fff" stroke="#26241f" stroke-width="1.4"/><path d="M7 7.4 13.3 7l3.7 5.1V7.6" stroke="#26241f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M7 7.4v9.2M17 7.6v9l-3.8-.5-3.5-4.9v5l-2.7-.4" stroke="#26241f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+  granola: '<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#F6C544"/><circle cx="12" cy="12" r="4.4" fill="#26241f"/><circle cx="12" cy="12" r="1.7" fill="#F6C544"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="#3A7BE0" stroke-width="1.7"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9h18M8 2.5v4M16 2.5v4" stroke-linecap="round"/><circle cx="8.5" cy="13.5" r="1.1" fill="#3A7BE0" stroke="none"/><circle cx="12" cy="13.5" r="1.1" fill="#3A7BE0" stroke="none"/></svg>',
+  web: '<svg viewBox="0 0 24 24" fill="none" stroke="#827d73" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18"/></svg>',
+};
 const SRC_ICON = { notion: "📄", granola: "🎙️", calendar: "📅", web: "🌐" };
 const SRC_LABEL = { notion: "Notion", granola: "Granola", calendar: "Calendário", web: "Web" };
 let statusPollTimer = null;
@@ -525,7 +532,7 @@ function renderParagraphs(text) {
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 8px">${escapeHtml(p)}</p>`)
+    .map((p) => `<p>${escapeHtml(p)}</p>`)
     .join("");
 }
 
@@ -539,29 +546,46 @@ function replaceCitations(html, sources) {
   });
 }
 
-function renderAskSources(sources) {
-  if (!sources || !sources.length) return "";
-  const items = sources.map((s) => {
-    const n = s.n;
-    const label = escapeHtml(s.title || "(sem título)");
-    const db = s.db ? ` · ${escapeHtml(s.db)}` : "";
-    const date = s.date ? ` · ${escapeHtml(s.date)}` : "";
-    const safeUrl = /^https?:\/\//i.test(s.source_url || "") ? s.source_url : null;
-    const titleHtml = safeUrl
-      ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${label}</a>`
-      : label;
-    const snippetHtml = s.snippet
-      ? `<details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">ver trecho original</summary>`
-        + `<p style="margin:6px 0 0;font-size:12px;color:var(--muted)">${escapeHtml(s.snippet)}</p></details>`
-      : "";
-    const citedMark = s.cited ? "" : ' <span class="tag" style="font-size:11px;opacity:.6">não citado</span>';
-    return `<li id="ask-source-${n}" style="margin:6px 0">`
-      + `<span style="font-weight:600">[${n}]</span> ${titleHtml}${citedMark}`
-      + `<span class="muted">${db}${date}</span>`
-      + snippetHtml
-      + `</li>`;
-  });
-  return `<p style="margin:12px 0 4px;font-weight:600;font-size:13px">Fontes:</p><ul style="list-style:none;padding:0;margin:0">${items.join("")}</ul>`;
+function srcIcon(sourceType) {
+  const svg = SRC_SVG[sourceType] || SRC_SVG.web;
+  return `<span class="ci">${svg}</span>`;
+}
+
+function renderAskAnswer(answer, sources) {
+  const paragraphsHtml = renderParagraphs(answer);
+  const withCitations = replaceCitations(paragraphsHtml, sources);
+
+  // Render the AI side: tool-call chip + bubble.ai + cites.
+  const query = document.getElementById("ask-question").value.trim();
+  const truncQ = query.length > 60 ? query.slice(0, 57) + "…" : query;
+  const nSrc = sources ? sources.length : 0;
+
+  const toolChip = `<div class="tool-call">`
+    + `<span class="tk">brain_search</span>`
+    + `<span class="arg">("${escapeHtml(truncQ)}")</span>`
+    + `<span class="score">${nSrc} fonte${nSrc !== 1 ? "s" : ""}</span>`
+    + `</div>`;
+
+  const aiBubble = `<div class="bubble ai">${withCitations}</div>`;
+
+  const citesHtml = (sources && sources.length)
+    ? `<div class="cites">${sources.map((s, i) => {
+        const n = i + 1;
+        const label = escapeHtml(s.title || "(sem título)");
+        const safeUrl = /^https?:\/\//i.test(s.source_url || "") ? s.source_url : null;
+        const meta = escapeHtml(s.date || s.db || s.source_type || "");
+        const inner = `${srcIcon(s.source_type)}<span class="ttl" id="ask-source-${n}">${label}</span>`
+          + (meta ? `<span class="meta">${meta}</span>` : "");
+        return safeUrl
+          ? `<a class="cite" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${inner}</a>`
+          : `<div class="cite">${inner}</div>`;
+      }).join("")}</div>`
+    : "";
+
+  return `<div class="msg ai">`
+    + `<div class="av">Z</div>`
+    + `<div class="stack">${toolChip}${aiBubble}${citesHtml}</div>`
+    + `</div>`;
 }
 
 document.getElementById("ask-btn").onclick = async () => {
@@ -603,11 +627,10 @@ document.getElementById("ask-btn").onclick = async () => {
 
     const { answer, sources } = await res.json();
 
-    const paragraphsHtml = renderParagraphs(answer);
-    const withCitations = replaceCitations(paragraphsHtml, sources);
-    const sourcesHtml = renderAskSources(sources);
-
-    answerEl.innerHTML = `<div class="ask-answer-body">${withCitations}</div>${sourcesHtml}`;
+    // Show user's question as a bubble above the AI response
+    const question = document.getElementById("ask-question").value.trim();
+    const userBubble = `<div class="msg user"><div class="bubble">${escapeHtml(question)}</div></div>`;
+    answerEl.innerHTML = userBubble + renderAskAnswer(answer, sources || []);
     answerEl.classList.remove("hidden");
   } catch {
     errEl.textContent = "Erro de rede. Verifique sua conexão e tente de novo.";
