@@ -105,7 +105,7 @@ button { font-family: var(--sans); }
   border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
-.tabbar button, .tabbar a {
+.tabbar button, .tabbar a, .tabbar-link {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding: 8px 2px 9px;
   min-height: 54px;
@@ -113,9 +113,9 @@ button { font-family: var(--sans); }
   font-size: 10.5px; font-weight: 540; color: var(--muted);
   text-decoration: none;
 }
-.tabbar button svg, .tabbar a svg { width: 19px; height: 19px; }
-.tabbar button.active, .tabbar a.active { color: var(--accent-strong); }
-.tabbar button.active svg, .tabbar a.active svg { color: var(--accent); }
+.tabbar button svg, .tabbar a svg, .tabbar-link svg { width: 19px; height: 19px; }
+.tabbar button.active, .tabbar a.active, .tabbar-link.active { color: var(--accent-strong); }
+.tabbar button.active svg, .tabbar a.active svg, .tabbar-link.active svg { color: var(--accent); }
 
 .main {
   padding: 0 16px calc(86px + env(safe-area-inset-bottom, 0));
@@ -739,6 +739,12 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 .pl-k { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--muted); text-transform: lowercase; }
 .pl-icons { display: flex; gap: 9px; align-items: center; min-height: 22px; }
 .pl-icons .si { width: 17px; height: 17px; display: inline-flex; }
+/* ícones nomeados de fonte no pipeline (pl-icon-notion, pl-icon-granola, pl-icon-cal) */
+.pl-icon-notion, .pl-icon-granola, .pl-icon-cal {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; flex: 0 0 auto;
+}
+.pl-icon-notion svg, .pl-icon-granola svg, .pl-icon-cal svg { width: 100%; height: 100%; }
 .pl-v { font-weight: 640; font-size: 16px; letter-spacing: -.02em; color: var(--ink); }
 .pl-sub { font-size: 11.5px; color: var(--muted); }
 .pl-arrow {
