@@ -855,8 +855,7 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 .brain-view-toggle .fchip { border: 1px solid #e2e2e2; background: #f7f7f7; color: var(--muted); border-radius: 999px; padding: 4px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .brain-view-toggle .fchip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
 #brain-graph-wrap { position: relative; width: 100%; background: #fff; border: 1px solid #eee; border-radius: 10px; overflow: hidden; }
-#brain-graph-canvas { display: block; width: 100%; height: 480px; cursor: grab; touch-action: none; }
-#brain-graph-canvas:active { cursor: grabbing; }
+#brain-graph-canvas { display: block; width: 100%; height: 480px; }
 #graph-panel { position: absolute; top: 0; right: 0; width: 220px; height: 100%; background: rgba(255,255,255,0.96); border-left: 1px solid #eee; padding: 14px; display: none; flex-direction: column; gap: 8px; overflow-y: auto; }
 #graph-panel.open { display: flex; }
 #graph-panel .panel-close { align-self: flex-end; background: none; border: none; font-size: 16px; cursor: pointer; padding: 0; margin: 0; color: var(--muted); }
@@ -898,5 +897,5 @@ details[open] > .explorer-entities-toggle::before { transform: rotate(90deg); }
 /* Mobile: entity panel starts open on desktop, collapses on narrow */
 @media (max-width: 600px) {
   .explorer-entities-panel { padding: 8px 10px; }
-  #brain-graph-canvas { height: 60vh; }
+  #brain-graph-canvas { height: 60vh; min-height: 300px; }
 }
