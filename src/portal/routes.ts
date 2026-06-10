@@ -45,6 +45,7 @@ import { assertCanAddWorkspace, WorkspaceLimitError, getUsageSnapshot, assertCre
 import { PAID_PLANS, priceIdForPlan, getPlanLimits, type PlanId } from "../billing/plans.js";
 import { getBillingRow, setStripeCustomerId } from "../billing/account-plan.js";
 import { getStripe } from "../billing/stripe.js";
+import { deleteAccountCompletely } from "./account-deletion.js";
 
 const BASE_URL = process.env.PORTAL_BASE_URL ?? process.env.BASE_URL ?? "http://localhost:3456";
 // The canonical server origin where the MCP endpoint (/mcp) lives — what a friend
@@ -335,6 +336,27 @@ export function createPortalRouter(): express.Router {
     } catch (err: any) {
       console.error(`[portal] manage: ${err?.message ?? err}`);
       res.status(502).json({ error: "falha ao abrir portal de assinatura" });
+    }
+  });
+
+  // DELETE account + all data (LGPD). Requires exact confirmation phrase.
+  router.post("/portal/delete-account", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (req.body?.confirm !== "EXCLUIR") {
+      res.status(400).json({ error: "confirmação inválida", hint: 'Envie {confirm:"EXCLUIR"}' });
+      return;
+    }
+    try {
+      const sid = readCookie(req, SESSION_COOKIE);
+      // Destroy session first so even if deletion is partial the user is logged out.
+      await destroySession(sid);
+      clearSessionCookie(res);
+      const counts = await deleteAccountCompletely(accountId);
+      console.log(`[portal] delete-account: ${accountId} deleted counts=${JSON.stringify(counts)}`);
+      res.json({ deleted: true, counts });
+    } catch (err: any) {
+      console.error(`[portal] delete-account failed: ${err?.message ?? err}`);
+      res.status(500).json({ error: "falha ao excluir conta" });
     }
   });
 
