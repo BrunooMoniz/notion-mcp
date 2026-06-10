@@ -40,7 +40,8 @@ test.describe("US1 — invite + magic link", () => {
 
     await page.goto(link);
     await page.waitForURL("**/app.html", { timeout: 10000 });
-    await expect(page.locator("#who")).toHaveText(`Conectado como ${email}`, { timeout: 10000 });
+    // After design handoff: #who was replaced by #user-email (email text only, no prefix).
+    await expect(page.locator("#user-email")).toHaveText(email, { timeout: 10000 });
   });
 
   test("the magic link is single-use", async ({ page, request }) => {

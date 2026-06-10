@@ -63,7 +63,8 @@ export async function registerAndSignIn(
   const link = await getLastMagicLink(request);
   await page.goto(link);
   await page.waitForURL("**/app.html", { timeout: 10000 });
-  await expect(page.locator("#who")).toHaveText(`Conectado como ${email}`, { timeout: 10000 });
+  // After design handoff: #who was replaced by #user-email (shows the email directly, no prefix).
+  await expect(page.locator("#user-email")).toHaveText(email, { timeout: 10000 });
 
   return { email, link };
 }

@@ -6,20 +6,23 @@ import { registerAndSignIn } from "./helpers.js";
 test("friend generates an MCP token and a ready-to-paste connect command", async ({ page, request }) => {
   await registerAndSignIn(page, request);
 
-  // The MCP endpoint URL is shown and the generate button is present.
-  await expect(page.locator("#mcp-url")).not.toHaveText("—");
+  // After design handoff: #mcp-url was replaced by #endpoint-block (static URL shown in a code block).
+  await expect(page.locator("#endpoint-block")).toContainText("/mcp");
 
-  // Generate the token.
-  await page.click("#mcp-gen");
-  await expect(page.locator("#mcp-result")).toBeVisible({ timeout: 10000 });
+  // After design handoff: #mcp-gen was replaced by #token-gen-btn.
+  await page.click("#token-gen-btn");
 
-  const token = await page.locator("#mcp-token").inputValue();
-  expect(token).toMatch(/^acct_[0-9a-f]{48}$/);
+  // After design handoff: #mcp-result was replaced by #token-area which renders
+  // the token in a .tk element and the command in a .code-block.
+  await expect(page.locator("#token-area .tk")).toBeVisible({ timeout: 10000 });
 
-  const cmd = await page.locator("#mcp-cmd").inputValue();
-  expect(cmd).toContain("claude mcp add");
-  expect(cmd).toContain(token);
-  expect(cmd).toContain("/mcp");
+  const tokenText = await page.locator("#token-area .tk").innerText();
+  expect(tokenText).toMatch(/^acct_[0-9a-f]{48}$/);
+
+  const cmdText = await page.locator("#token-area .code-block").innerText();
+  expect(cmdText).toContain("claude mcp add");
+  expect(cmdText).toContain(tokenText.trim());
+  expect(cmdText).toContain("/mcp");
 
   // The token is persisted server-side (only its hash) — /portal/me reflects it.
   const me = await page.context().request.get("/portal/me");
