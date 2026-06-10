@@ -654,10 +654,26 @@ export function titleFromHeaderLine(line: string | null | undefined): string {
  * the portal brain navigator. Optional source_type and a cheap ILIKE substring
  * filter (over the chunk text, which includes the header: title/db/workspace +
  * content). Paginated. Pure SQL — no Voyage, no search-quota usage. Newest first.
+ *
+ * Multi-entity filter:
+ *   entityIds (number[]) + match ("all" | "any", default "all"):
+ *     all  — documents whose mentions cover ALL of the selected entities
+ *            (GROUP BY source_id HAVING count(distinct entity_id) = N)
+ *     any  — documents that mention AT LEAST ONE of the selected entities
+ *   entityId (single, legacy) — still supported; treated as entityIds=[n], match="all".
+ *   When both entityIds and entityId are provided, entityIds takes precedence.
  */
 export async function listBrainDocuments(
   accountId: string,
-  opts: { sourceType?: string; q?: string; limit?: number; offset?: number; entityId?: number } = {},
+  opts: {
+    sourceType?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+    entityId?: number;           // legacy single-entity filter
+    entityIds?: number[];        // multi-entity filter (overrides entityId when present)
+    match?: "all" | "any";       // default "all"
+  } = {},
 ): Promise<BrainDocument[]> {
   const p = getPool();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
@@ -672,15 +688,43 @@ export async function listBrainDocuments(
     params.push(`%${opts.q.trim()}%`);
     where += ` AND text ILIKE $${params.length}`;
   }
-  if (opts.entityId !== undefined) {
-    params.push(opts.entityId);
-    where += ` AND source_id IN (
-      SELECT DISTINCT bc2.source_id
-      FROM entity_mentions em2
-      JOIN brain_chunks bc2 ON bc2.id = em2.chunk_id AND bc2.account_id = $1
-      WHERE em2.entity_id = $${params.length}
-    )`;
+
+  // Resolve effective entity filter: entityIds takes precedence over entityId.
+  const effectiveEntityIds: number[] | undefined =
+    opts.entityIds && opts.entityIds.length > 0
+      ? opts.entityIds
+      : opts.entityId !== undefined
+        ? [opts.entityId]
+        : undefined;
+
+  if (effectiveEntityIds && effectiveEntityIds.length > 0) {
+    const matchMode = opts.match ?? "all";
+    params.push(effectiveEntityIds); // array param, e.g. $2
+    const arrIdx = params.length;
+    if (matchMode === "any") {
+      // ANY: source must be mentioned by at least one of the selected entities.
+      where += ` AND source_id IN (
+        SELECT DISTINCT bc2.source_id
+        FROM entity_mentions em2
+        JOIN brain_chunks bc2 ON bc2.id = em2.chunk_id AND bc2.account_id = $1
+        WHERE em2.entity_id = ANY($${arrIdx}::bigint[])
+      )`;
+    } else {
+      // ALL: source must be mentioned by every selected entity.
+      const n = effectiveEntityIds.length;
+      params.push(n); // $n+1
+      const countIdx = params.length;
+      where += ` AND source_id IN (
+        SELECT bc2.source_id
+        FROM entity_mentions em2
+        JOIN brain_chunks bc2 ON bc2.id = em2.chunk_id AND bc2.account_id = $1
+        WHERE em2.entity_id = ANY($${arrIdx}::bigint[])
+        GROUP BY bc2.source_id
+        HAVING count(DISTINCT em2.entity_id) >= $${countIdx}
+      )`;
+    }
   }
+
   params.push(limit);
   const limIdx = params.length;
   params.push(offset);
