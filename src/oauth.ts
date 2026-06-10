@@ -6,6 +6,7 @@ import {
   timingSafeEqual,
   scryptSync,
 } from "node:crypto";
+import { safeEqual } from "./crypto-utils.js";
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,10 +53,9 @@ function generateToken(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
 }
 
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
+// safeEqual is imported from crypto-utils.ts and re-exported for callers that
+// already import it from this module (backward-compatible).
+export { safeEqual };
 
 function sha256base64url(value: string): string {
   return createHash("sha256").update(value).digest("base64url");

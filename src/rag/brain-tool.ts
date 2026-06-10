@@ -7,6 +7,17 @@ import { QuotaExceededError } from "../billing/usage.js";
 import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
 import { toBrainResult, type BrainResult } from "./brain-format.js";
 
+/**
+ * Returns true for source_types whose content is controlled by third parties
+ * and must be wrapped in an untrusted-content fence before being passed to the LLM.
+ * "conversation" is the user's own memory (saved via remember) and is trusted.
+ *
+ * Exported for unit tests.
+ */
+export function isUntrustedSourceType(sourceType: string): boolean {
+  return sourceType === "web" || sourceType === "notion" || sourceType === "granola" || sourceType === "calendar";
+}
+
 /** A single citable source entry for the portal chat UI. */
 export interface BrainCite {
   icon: string;       // source_type — used to pick icon in app.js SRC_SVG
@@ -54,11 +65,12 @@ export function buildPresentationHint(results: BrainResult[]): string {
 
 /**
  * Format a single brain_search result as a JSON string.
- * Web results are wrapped in an untrusted-content fence to guard against
- * prompt-injection from indexed external pages.
+ * Results from third-party sources (web, notion, granola, calendar) are wrapped
+ * in an untrusted-content fence to guard against prompt-injection.
+ * "conversation" (user's own remembered notes) is trusted and not fenced.
  */
 export function formatSearchResult(result: BrainResult): string {
-  if (result.source_type === "web") {
+  if (isUntrustedSourceType(result.source_type)) {
     return JSON.stringify(
       {
         ...result,

@@ -35,22 +35,26 @@ test("buildAskContext: numera de 1 e inclui título, source_type e texto", () =>
   assert.ok(ctx.includes("Conteúdo A"), "deve incluir o texto");
 });
 
-test("buildAskContext: aplica fence <<<untrusted>>> somente em source_type=web", () => {
+test("buildAskContext: aplica fence <<<untrusted>>> em fontes de terceiros (web, notion, granola, calendar)", () => {
+  // F-3: notion/granola/calendar são terceiros e devem ser cercados, assim como web.
+  // Apenas "conversation" (memória do próprio usuário) não recebe fence.
   const hits = [
     makeHit({ source_type: "web", title: "Artigo externo", text: "Texto web" }),
-    makeHit({ source_type: "notion", title: "Nota interna", text: "Texto notion" }),
+    makeHit({ source_type: "notion", title: "Nota Notion", text: "Texto notion" }),
+    makeHit({ source_type: "conversation", title: "Memória", text: "Texto conversation" }),
   ];
   const ctx = buildAskContext(hits);
 
-  // O bloco [1] (web) deve ter a fence
   const block1Start = ctx.indexOf("[1]");
   const block2Start = ctx.indexOf("[2]");
+  const block3Start = ctx.indexOf("[3]");
   const block1 = ctx.slice(block1Start, block2Start);
-  assert.ok(block1.includes("<<<untrusted>>>"), "web deve ter fence untrusted");
+  const block2 = ctx.slice(block2Start, block3Start);
+  const block3 = ctx.slice(block3Start);
 
-  // O bloco [2] (notion) não deve ter a fence
-  const block2 = ctx.slice(block2Start);
-  assert.ok(!block2.includes("<<<untrusted>>>"), "notion NÃO deve ter fence");
+  assert.ok(block1.includes("<<<untrusted>>>"), "web deve ter fence untrusted");
+  assert.ok(block2.includes("<<<untrusted>>>"), "notion deve ter fence untrusted (F-3)");
+  assert.ok(!block3.includes("<<<untrusted>>>"), "conversation NÃO deve ter fence (memória do usuário)");
 });
 
 test("buildAskContext: inclui data quando metadata.data existe", () => {
