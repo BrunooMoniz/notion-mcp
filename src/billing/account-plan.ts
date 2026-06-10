@@ -7,6 +7,7 @@ import { getPool, hasInjectedPool } from "../rag/storage.js";
 export interface BillingRow {
   plan: string;
   plan_status: string | null;
+  plan_comp: boolean;
   current_period_end: Date | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
@@ -37,7 +38,7 @@ export async function getAccountPlan(accountId: string): Promise<string> {
 export async function getBillingRow(accountId: string): Promise<BillingRow | null> {
   const p = getPool();
   const { rows } = await p.query<BillingRow>(
-    `SELECT plan, plan_status, current_period_end, stripe_customer_id, stripe_subscription_id
+    `SELECT plan, plan_status, plan_comp, current_period_end, stripe_customer_id, stripe_subscription_id
        FROM account WHERE id=$1`,
     [accountId],
   );
@@ -57,7 +58,11 @@ export async function accountIdForCustomer(customerId: string): Promise<string |
 }
 
 /** Webhook write: set plan/status/subscription by Stripe customer id. Returns the
- *  updated account id (or null if no account maps to this customer). Busts cache. */
+ *  updated account id (or null if no account maps to this customer). Busts cache.
+ *
+ *  Guard: when the account has plan_comp=true, the Stripe event does NOT
+ *  overwrite the plan. The courtesy grant prevails. The operator must revoke
+ *  the comp first if the friend later subscribes for real. */
 export async function applySubscriptionState(s: {
   customerId: string;
   plan: string;
@@ -66,6 +71,30 @@ export async function applySubscriptionState(s: {
   currentPeriodEnd: Date | null;
 }): Promise<string | null> {
   const p = getPool();
+
+  // Resolve the account so we can check plan_comp before writing.
+  const lookup = await p.query<{ id: string; plan_comp: boolean }>(
+    `SELECT id, plan_comp FROM account WHERE stripe_customer_id=$1`,
+    [s.customerId],
+  );
+  const acct = lookup.rows[0] ?? null;
+  if (!acct) return null;
+
+  // Comp guard: skip Stripe overwrite for courtesy accounts.
+  if (acct.plan_comp) {
+    console.log(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        action: "comp_stripe_guard",
+        account_id: acct.id,
+        stripe_plan: s.plan,
+        stripe_status: s.status,
+        note: "plan_comp=true — Stripe event ignored to protect courtesy grant",
+      }),
+    );
+    return acct.id;
+  }
+
   const { rows } = await p.query<{ id: string }>(
     `UPDATE account SET plan=$2, plan_status=$3, stripe_subscription_id=$4, current_period_end=$5
        WHERE stripe_customer_id=$1 RETURNING id`,
