@@ -23,7 +23,8 @@ test("friend saves an iCal link and Granola key; secrets stored masked", async (
 
   // Reload to render the persisted, masked state from /portal/me.
   await page.reload();
-  await expect(page.locator("#who")).toHaveText(/Conectado como/, { timeout: 10000 });
+  // After design handoff: #who was replaced by #user-email (shows email directly).
+  await expect(page.locator("#user-email")).not.toHaveText("—", { timeout: 10000 });
 
   // iCal link appears (masked) and the raw secret is NOT in the DOM anywhere.
   await expect(page.locator("#ical-list .row")).toHaveCount(1);

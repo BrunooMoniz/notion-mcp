@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zinom — Entrar</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin="anonymous">
+<link rel="stylesheet" href="/styles.css">
+<style>
+/* login.html — standalone auth page using the portal design system */
+html, body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  padding: 24px;
+}
+.login-card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 40px 36px;
+  max-width: 400px;
+  width: 100%;
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--ink);
+  letter-spacing: -.02em;
+  margin-bottom: 28px;
+  text-decoration: none;
+}
+.login-brand svg { flex-shrink: 0; }
+.login-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.login-sub {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.login-field label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.login-field input[type=email] {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 15px;
+  font-family: var(--sans);
+  transition: border-color .15s;
+  outline: none;
+}
+.login-field input[type=email]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.login-btn {
+  width: 100%;
+  padding: 11px 18px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-xs);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: background .15s, opacity .15s;
+  margin-bottom: 12px;
+}
+.login-btn:hover { background: var(--accent-strong); }
+.login-btn:disabled { opacity: .55; cursor: default; }
+.login-hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.login-ok {
+  display: none;
+  text-align: center;
+  padding: 12px 0 4px;
+}
+.login-ok .check-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--accent-soft);
+  border-radius: 50%;
+  margin-bottom: 12px;
+}
+.login-ok h3 { font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.login-ok p { font-size: 14px; color: var(--muted); line-height: 1.6; }
+.login-err {
+  display: none;
+  background: var(--bad-soft);
+  border: 1px solid var(--bad-line);
+  border-radius: var(--r-xs);
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--bad);
+  margin-bottom: 12px;
+}
+.login-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 24px 0 20px;
+}
+.login-invite-link {
+  display: block;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+}
+.login-invite-link a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.login-invite-link a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="login-card">
+
+  <a class="login-brand" href="/">
+    <svg width="28" height="28" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="24" height="24" rx="7.5" fill="#1f8b4c"/>
+      <path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="8" cy="8" r="1.7" fill="#fff"/>
+      <circle cx="18" cy="8" r="1.7" fill="#fff"/>
+      <circle cx="8" cy="18" r="1.7" fill="#fff"/>
+      <circle cx="18" cy="18" r="1.7" fill="#fff"/>
+    </svg>
+    Zinom
+  </a>
+
+  <h1 class="login-title">Entrar na conta</h1>
+  <p class="login-sub">Login sem senha — enviamos um link mágico para o seu e-mail.</p>
+
+  <div class="login-err" id="login-err" role="alert"></div>
+
+  <form id="login-form" novalidate>
+    <div class="login-field">
+      <label for="login-email">E-mail</label>
+      <input type="email" id="login-email" name="email" placeholder="voce@email.com" autocomplete="email" required>
+    </div>
+    <button class="login-btn" type="submit" id="login-btn">Enviar link de acesso</button>
+    <p class="login-hint">Você receberá um link de acesso válido por 15 minutos.</p>
+  </form>
+
+  <div class="login-ok" id="login-ok">
+    <div class="check-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1f8b4c" stroke-width="2.4" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h3>Link enviado</h3>
+    <p>Verifique sua caixa de entrada. Se o e-mail tiver uma conta, o link chegará em instantes.</p>
+  </div>
+
+  <hr class="login-divider">
+  <p class="login-invite-link">Não tem conta? <a href="/#acesso">Solicitar convite →</a></p>
+
+</div>
+
+<script>
+'use strict';
+(function () {
+  var form = document.getElementById('login-form');
+  var btn = document.getElementById('login-btn');
+  var errEl = document.getElementById('login-err');
+  var okEl = document.getElementById('login-ok');
+
+  function showErr(msg) {
+    errEl.textContent = msg;
+    errEl.style.display = 'block';
+  }
+  function hideErr() { errEl.style.display = 'none'; }
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    hideErr();
+    var email = (document.getElementById('login-email').value || '').trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showErr('E-mail inválido. Confira e tente de novo.');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    try {
+      var res = await fetch('/portal/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        var data = await res.json().catch(function () { return {}; });
+        showErr(data.error || 'Erro ao enviar o link. Tente de novo.');
+        btn.disabled = false;
+        btn.textContent = 'Enviar link de acesso';
+        return;
+      }
+      // Always show success (generic response — doesn't reveal whether email exists)
+      form.style.display = 'none';
+      okEl.style.display = 'block';
+    } catch (err) {
+      showErr('Sem conexão. Verifique a internet e tente de novo.');
+      btn.disabled = false;
+      btn.textContent = 'Enviar link de acesso';
+    }
+  });
+})();
+</script>
+</body>
+</html>

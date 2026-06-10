@@ -18,6 +18,7 @@ import { takePortalNotionState } from "./portal/notion-link.js";
 import { escapeHtml } from "./rag/status.js";
 import { indexAccount } from "./rag/index-account.js";
 import { issueBearer } from "./account-bearer.js";
+import { buildSuccessPage, buildErrorPage } from "./portal/callback-page.js";
 
 /** Render the post-connect page: issues a per-account MCP bearer (shown once) and
  *  the Claude Code setup command so the user can query their own brain. */
@@ -126,13 +127,15 @@ export function createNotionOnboardRouter(): express.Router {
     sweep();
     const state = randomUUID();
     states.set(state, Date.now());
+    // 1.5: log redirect_uri for diagnostics (no secret exposed — URI is public)
+    console.log(`[notion-authorize] redirect_uri="${redirectUri}"`);
     res.redirect(buildAuthorizeUrl({ clientId, redirectUri, state }));
   });
 
   router.get("/notion/callback", async (req, res) => {
     const { code, state, error } = req.query;
     if (error) {
-      res.status(400).type("html").send(page("Autorização negada", `<h1 class="bad">Autorização negada</h1><p>${escapeHtml(String(error))}</p>`));
+      res.status(400).type("html").send(buildErrorPage("notion", String(error), "/notion/connect"));
       return;
     }
     if (!clientId || !clientSecret) {
@@ -163,7 +166,8 @@ export function createNotionOnboardRouter(): express.Router {
         const wsName = tok.workspace_name ?? tok.workspace_id;
         console.log(`[notion-onboard] portal account=${portalAccount} workspace="${wsName}" connected`);
         kickoffIndex(portalAccount);
-        res.redirect("/app.html?notion=connected");
+        // 1.1: show branded success page in the new tab instead of redirecting back
+        res.type("html").send(buildSuccessPage("notion", String(wsName)));
         return;
       }
       const { accountId } = await onboardAccount(tok);
@@ -173,7 +177,7 @@ export function createNotionOnboardRouter(): express.Router {
       res.type("html").send(await connectedPageHtml(String(wsName), accountId, BASE_URL));
     } catch (e: any) {
       console.error(`[notion-onboard] FAILED: ${e?.message ?? e}`);
-      res.status(500).type("html").send(page("Falha", `<h1 class="bad">Falha ao conectar</h1><p>${escapeHtml(e?.message ?? "erro desconhecido")}</p>`));
+      res.status(500).type("html").send(buildErrorPage("notion", e?.message ?? "erro desconhecido", "/notion/connect"));
     }
   });
 

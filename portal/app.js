@@ -248,9 +248,11 @@ function renderFontes(me) {
       ? ws.map(function (w) {
           var name = w.name || w.workspace || '(workspace)';
           var when = w.connected_at ? new Date(w.connected_at).toLocaleDateString('pt-BR') : '';
+          var connChip = w.connection_type === 'pat' ? '<span class="tag">Token (PAT)</span>' : w.connection_type === 'oauth' ? '<span class="tag">OAuth</span>' : '';
           return '<div class="row">' + srcIcon('notion') +
             '<span class="grow"><span class="ttl">' + escapeHtml(name) + '</span>' +
-            '<span class="meta">' + (when ? 'conectado em ' + when + ' · ' : '') + 'via ' + escapeHtml(w.via || 'OAuth') + '</span></span>' +
+            '<span class="meta">' + (when ? 'conectado em ' + when : '') + '</span></span>' +
+            connChip +
             '<button class="btn btn-danger-ghost btn-sm" type="button" data-rm-notion="' + escapeHtml(w.workspace || name) + '">Remover</button></div>';
         }).join('')
       : '<p class="muted">Nenhum workspace conectado ainda. O Notion costuma ser a fonte mais rica do cerebro.</p>';
@@ -367,6 +369,14 @@ async function loadStatus() {
   /* por fonte */
   var srcStatus = document.getElementById('src-status');
   if (srcStatus) {
+    /* 1.2: build a workspace_id -> name map from /portal/me (already loaded) */
+    var wsNameMap = {};
+    var meNotion = window._lastMe && window._lastMe.sources && window._lastMe.sources.notion;
+    if (meNotion && Array.isArray(meNotion.workspaces)) {
+      meNotion.workspaces.forEach(function (w) {
+        if (w.workspace) wsNameMap[w.workspace] = w.name || null;
+      });
+    }
     srcStatus.innerHTML = (st.sources || []).map(function (s) {
       var t = s.source && s.source.startsWith('notion') ? 'notion'
         : s.source && s.source.startsWith('granola') ? 'granola'
@@ -374,8 +384,16 @@ async function loadStatus() {
       var bySrc = (st.counts && st.counts.bySource || []).find(function (b) { return b.source_type === t; }) || {};
       var err = s.ok === false ? '<span class="meta" style="color:var(--bad)">⚠ ' + escapeHtml(s.error || 'erro') + '</span>' : '';
       var when = s.run_at ? 'sincronizado ' + new Date(s.run_at).toLocaleString('pt-BR') : '';
+      /* 1.2: for Notion sources, resolve workspace name from source id (format: "notion-<ws_id>") */
+      var displayName;
+      if (t === 'notion' && s.source) {
+        var wsId = s.source.replace(/^notion-/, '');
+        displayName = wsNameMap[wsId] || s.source;
+      } else {
+        displayName = s.source || t;
+      }
       return '<div class="row">' + srcIcon(t) +
-        '<span class="grow"><span class="ttl">' + escapeHtml(s.source || t) + '</span>' +
+        '<span class="grow"><span class="ttl">' + escapeHtml(displayName) + '</span>' +
         (err || (when ? '<span class="meta">' + when + '</span>' : '')) + '</span>' +
         '<span class="nums">' + fmt(bySrc.documents || 0) + ' docs<br>' + fmt(bySrc.chunks || 0) + ' trechos</span>' +
         (s.ok === false ? '<span class="tag off">erro</span>' : '<span class="tag ok">ok</span>') +
@@ -1022,10 +1040,10 @@ function wireGlobal(me) {
       }
     });
 
-    /* notion connect */
+    /* notion connect: open in new tab so the success page shows without leaving portal */
     var notionAdd = document.getElementById('notion-add');
     if (notionAdd) notionAdd.addEventListener('click', function () {
-      location.href = API + '/portal/notion/connect';
+      window.open(API + '/portal/notion/connect', '_blank', 'noopener');
     });
 
     /* PAT form */
@@ -1047,10 +1065,10 @@ function wireGlobal(me) {
       }
     });
 
-    /* google add: redireciona para OAuth */
+    /* google add: open in new tab so the success page shows without leaving portal */
     var googleAdd = document.getElementById('google-add');
     if (googleAdd) googleAdd.addEventListener('click', function () {
-      location.href = API + '/portal/google/connect';
+      window.open(API + '/portal/google/connect', '_blank', 'noopener');
     });
 
     /* ical form */
@@ -1300,6 +1318,13 @@ window.addEventListener('hashchange', function () {
   var h = (location.hash || '#inicio').slice(1).split('?')[0];
   var validViews = ['inicio', 'chat', 'fontes', 'atividade'];
   if (validViews.includes(h)) go(h);
+});
+
+/* 1.1: Refetch when the user returns from the OAuth tab (visibilitychange). */
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') {
+    load();
+  }
 });
 
 document.addEventListener('DOMContentLoaded', init);
