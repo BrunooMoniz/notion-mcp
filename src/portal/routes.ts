@@ -530,18 +530,44 @@ export function createPortalRouter(): express.Router {
   router.get("/portal/status", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
     const running = reindexInFlight.has(accountId);
-    let sources: unknown[] = [];
+    let activitySources: unknown[] = [];
     let counts: unknown = { bySource: [], totals: { documents: 0, chunks: 0 } };
     try {
       const { getStatus, getBrainCounts } = await import("../rag/storage.js");
       const { summarizeStatus } = await import("../rag/status.js");
-      sources = summarizeStatus(await getStatus(accountId));
-      counts = await getBrainCounts(accountId);
+      const { buildActivitySources } = await import("./activity-status.js");
+      const { listNotionWorkspaces: lnw } = await import("./notion-workspaces.js");
+      const { listIcalMasked: lim } = await import("./sources.js");
+      const { getGranolaMasked: ggm } = await import("./sources.js");
+      const { listGoogleAccountsMasked: lgam } = await import("../google/google-accounts.js");
+
+      const [rawRuns, brainCounts, notionWs, icalLinks, granolaState, googleAccounts] =
+        await Promise.all([
+          getStatus(accountId),
+          getBrainCounts(accountId),
+          lnw(accountId).catch(() => [] as { workspace: string; name: string | null }[]),
+          lim(accountId).catch(() => [] as { id: string; label: string }[]),
+          ggm(accountId).catch(() => ({ set: false, masked: null })),
+          lgam(accountId).catch(() => [] as { email: string }[]),
+        ]);
+
+      const summarized = summarizeStatus(rawRuns);
+      activitySources = buildActivitySources(
+        {
+          notionWorkspaces: notionWs.map((w) => ({ workspace: w.workspace, name: w.name })),
+          hasGranola: granolaState.set,
+          icalLinks: icalLinks.map((l) => ({ id: l.id, label: l.label })),
+          googleAccounts: googleAccounts.map((g) => ({ email: g.email })),
+        },
+        summarized,
+        running,
+      );
+      counts = brainCounts;
     } catch (err: any) {
       // light dev server / no pgvector — still report the running flag.
       console.warn(`[portal] status unavailable: ${err?.message ?? err}`);
     }
-    res.json({ running, sources, counts });
+    res.json({ running, sources: activitySources, counts });
   });
 
   // GET /portal/brain/documents — browse the account's indexed documents (one row
