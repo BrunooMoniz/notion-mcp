@@ -326,9 +326,17 @@ function renderFontes(me) {
 
 /* ==================== ENTIDADES ====================  */
 
-var entityState = { expanded: { pessoa: false, empresa: false, projeto: false } };
+var entityState = { expanded: { pessoa: false, empresa: false, projeto: false }, entityQ: '' };
 var _entitiesCache = null;
-var _activeEntityId = null;
+
+// COMPAT: kept for any code that reads _activeEntityId (e.g. openGraphPanel)
+Object.defineProperty(window, '_activeEntityId', {
+  get: function() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : null; },
+  set: function(v) {
+    if (v === null) { explorerState.entityIds.clear(); }
+    else { explorerState.entityIds.add(v); }
+  }
+});
 
 async function loadEntities() {
   var wrap = document.getElementById('entities-block');
@@ -340,6 +348,9 @@ async function loadEntities() {
     var data = res.ok ? await res.json() : { entities: [], total: 0 };
     _entitiesCache = data.entities || [];
     renderEntities(wrap, _entitiesCache);
+    // Show entity search input when there are many entities
+    var esInput = document.getElementById('entity-search');
+    if (esInput) esInput.style.display = _entitiesCache.length > 30 ? 'block' : 'none';
   } catch (e) {
     wrap.innerHTML = '<span class="muted" style="font-size:13px">Erro ao carregar entidades. <button class="btn btn-ghost btn-sm" type="button" onclick="loadEntities()">Tentar de novo</button></span>';
   }
@@ -355,41 +366,52 @@ function renderEntities(wrap, entities) {
   var TYPES = ['pessoa', 'empresa', 'projeto'];
   var TYPE_LABEL_E = { pessoa: 'Pessoas', empresa: 'Empresas', projeto: 'Projetos' };
 
+  // Apply entity search filter when active
+  var q = entityState.entityQ ? entityState.entityQ.toLowerCase() : '';
+  var filtered = q ? entities.filter(function(e) { return e.name.toLowerCase().includes(q); }) : entities;
+
   var html = TYPES.map(function(type) {
-    var items = entities.filter(function(e) { return e.type === type; });
+    var items = filtered.filter(function(e) { return e.type === type; });
     if (items.length === 0) return '';
     var SHOW = 10;
-    var visible = entityState.expanded[type] ? items : items.slice(0, SHOW);
+    var visible = (entityState.expanded[type] || q) ? items : items.slice(0, SHOW);
     var chips = visible.map(function(e) {
-      var active = _activeEntityId === e.id;
+      var active = explorerState.entityIds.has(e.id);
       return '<button class="fchip entity-chip' + (active ? ' active' : '') + '" type="button" data-testid="entity-chip" data-entity-id="' + e.id + '" data-entity-name="' + escapeHtml(e.name) + '">' +
         escapeHtml(e.name) + ' <span class="cnt">' + e.mention_count + '</span></button>';
     }).join('');
-    var moreBtn = (!entityState.expanded[type] && items.length > SHOW)
+    var moreBtn = (!entityState.expanded[type] && !q && items.length > SHOW)
       ? '<button class="btn btn-ghost btn-sm" style="font-size:12px" type="button" data-expand-type="' + type + '">ver mais (' + (items.length - SHOW) + ')</button>'
       : '';
+    var typeCount = entities.filter(function(e) { return e.type === type; }).length;
+    var label = TYPE_LABEL_E[type] + (q ? ' (' + items.length + '/' + typeCount + ')' : '');
     return '<div class="entity-group" style="margin-bottom:10px">' +
-      '<div class="meta" style="margin-bottom:4px;font-weight:600">' + TYPE_LABEL_E[type] + '</div>' +
+      '<div class="meta" style="margin-bottom:4px;font-weight:600">' + label + '</div>' +
       '<div class="entity-chips" style="display:flex;flex-wrap:wrap;gap:6px">' + chips + moreBtn + '</div>' +
       '</div>';
   }).join('');
 
-  wrap.innerHTML = html;
+  if (!html) {
+    wrap.innerHTML = '<span class="muted" style="font-size:13px">Nenhuma entidade encontrada para "' + escapeHtml(entityState.entityQ) + '".</span>';
+  } else {
+    wrap.innerHTML = html;
+  }
 
-  // Wire click handlers
+  // Wire click handlers — MULTI-SELECT: toggle adds/removes from Set
   wrap.querySelectorAll('.entity-chip').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var id = parseInt(btn.getAttribute('data-entity-id'), 10);
-      if (_activeEntityId === id) {
-        // Deselect
-        _activeEntityId = null;
-        docState.entityId = undefined;
+      var name = btn.getAttribute('data-entity-name') || '';
+      if (explorerState.entityIds.has(id)) {
+        explorerState.entityIds.delete(id);
+        delete explorerState.entityNames[id];
       } else {
-        _activeEntityId = id;
-        docState.entityId = id;
+        explorerState.entityIds.add(id);
+        explorerState.entityNames[id] = name;
       }
       renderEntities(wrap, _entitiesCache);
-      loadBrain(true);
+      renderExplorerSelection();
+      refreshExplorer(true);
     });
   });
 
@@ -402,10 +424,43 @@ function renderEntities(wrap, entities) {
   });
 }
 
+/** Render the selected entity pills and update selection UI visibility. */
+function renderExplorerSelection() {
+  var selEl = document.getElementById('explorer-selection');
+  var pillsEl = document.getElementById('explorer-selection-pills');
+  var cntEl = document.getElementById('explorer-sel-count');
+  var n = explorerState.entityIds.size;
+
+  if (selEl) selEl.style.display = n > 0 ? 'flex' : 'none';
+  if (cntEl) {
+    cntEl.style.display = n > 0 ? 'inline' : 'none';
+    cntEl.textContent = n + ' selecionada' + (n !== 1 ? 's' : '');
+  }
+
+  if (!pillsEl) return;
+  pillsEl.innerHTML = Array.from(explorerState.entityIds).map(function(id) {
+    var name = explorerState.entityNames[id] || String(id);
+    return '<span class="explorer-pill">' + escapeHtml(name) +
+      ' <button class="explorer-pill-rm" type="button" aria-label="Remover ' + escapeHtml(name) + '" data-remove-id="' + id + '">✕</button></span>';
+  }).join('');
+
+  pillsEl.querySelectorAll('[data-remove-id]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = parseInt(btn.getAttribute('data-remove-id'), 10);
+      explorerState.entityIds.delete(id);
+      delete explorerState.entityNames[id];
+      if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
+      renderExplorerSelection();
+      refreshExplorer(true);
+    });
+  });
+}
+
 /* ==================== BRAIN GRAPH (F5) ====================  */
 
 var _graphData = null;          // {nodes, edges} from /portal/brain/graph
 var _graphLoaded = false;
+var _graphSig = '';             // filter signature at last graph load (for change detection)
 var _graphInstance = null;      // ForceGraph instance
 
 /**
@@ -717,24 +772,30 @@ function ForceGraph(canvas, data) {
 
 /**
  * loadGraph: fetch /portal/brain/graph, render canvas.
- * Called once when the user first switches to the Grafo tab.
- * entity_id param: when a brain entity filter is active, pass it to focus the subgraph.
+ * Fetches fresh data when explorerState changed; uses cached otherwise.
+ * FIX: reads canvas dimensions AFTER display:block via requestAnimationFrame
+ * so offsetWidth/offsetHeight are always correct.
  */
 async function loadGraph() {
-  if (_graphLoaded) {
-    // Already loaded — just ensure canvas is sized
-    if (_graphInstance) { _graphInstance.redraw(); }
-    return;
-  }
   var wrap = document.getElementById('brain-graph-wrap');
   var empty = document.getElementById('brain-graph-empty');
   if (!wrap || !empty) return;
 
+  // Build a signature of the current filter state to detect changes.
+  var sig = Array.from(explorerState.entityIds).sort().join(',') + '|' + explorerState.sourceType;
+
+  if (_graphLoaded && _graphSig === sig) {
+    // Same filters — just ensure canvas fits current dimensions and redraw.
+    if (_graphInstance) {
+      _resizeAndRedrawGraph();
+    }
+    return;
+  }
+
   try {
     var params = new URLSearchParams();
-    // Pass active entity filter if any
-    if (typeof docState !== 'undefined' && docState.entityId !== undefined) {
-      params.set('entity_id', String(docState.entityId));
+    if (explorerState.entityIds.size > 0) {
+      params.set('entity_ids', Array.from(explorerState.entityIds).join(','));
     }
     var res = await api('/portal/brain/graph?' + params.toString());
     if (!res.ok) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
@@ -743,22 +804,44 @@ async function loadGraph() {
 
     if (!data.nodes || data.nodes.length === 0) {
       empty.style.display = 'block'; wrap.style.display = 'none';
+      _graphLoaded = true;
+      _graphSig = sig;
     } else {
       empty.style.display = 'none'; wrap.style.display = 'block';
       var canvas = document.getElementById('brain-graph-canvas');
       if (!canvas) return;
       if (_graphInstance) _graphInstance.stop();
-      _graphInstance = new ForceGraph(canvas, data);
-      _graphInstance.onSelect = openGraphPanel;
-      _graphInstance.start();
+      // FIX: yield to the browser paint cycle so offsetWidth/Height are non-zero
+      // even on the very first render when the parent just became display:block.
+      requestAnimationFrame(function() {
+        _graphInstance = new ForceGraph(canvas, data);
+        _graphInstance.onSelect = openGraphPanel;
+        _graphInstance.start();
+      });
+      _graphLoaded = true;
+      _graphSig = sig;
     }
-    _graphLoaded = true;
   } catch (e) {
     empty.style.display = 'block'; wrap.style.display = 'none';
   }
 }
 
-/** Open the side panel for a selected node (entity click). */
+/** Resize the canvas to match current parent dimensions, then redraw. */
+function _resizeAndRedrawGraph() {
+  var canvas = document.getElementById('brain-graph-canvas');
+  if (!canvas || !_graphInstance) return;
+  // Force canvas buffer to match its CSS layout size
+  var w = canvas.offsetWidth;
+  var h = canvas.offsetHeight;
+  if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  _graphInstance.redraw();
+}
+
+/** Open the side panel for a selected node (entity click).
+ *  Entity click: ADDS the entity to the multi-selection (does not replace). */
 function openGraphPanel(node) {
   var panel = document.getElementById('graph-panel');
   var nameEl = document.getElementById('graph-panel-name');
@@ -774,17 +857,16 @@ function openGraphPanel(node) {
     var TYPE_PT = { pessoa: 'Pessoa', empresa: 'Empresa', projeto: 'Projeto' };
     metaEl.textContent = (TYPE_PT[node.type] || node.type) + ' · ' + node.weight + ' menções';
     docsBtn.style.display = 'inline-block';
-    docsBtn.textContent = 'Ver documentos →';
+    docsBtn.textContent = 'Adicionar ao filtro →';
     docsBtn.onclick = function() {
-      // Switch to Lista view, filter by this entity
+      // ADD to selection (multi-select), switch to lista view
       var id = parseInt(node.id.slice(2), 10); // strip "e:"
-      _activeEntityId = id;
-      docState.entityId = id;
-      // re-render entities to show active chip
+      explorerState.entityIds.add(id);
+      explorerState.entityNames[id] = node.label;
       if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
-      // switch to lista view
+      renderExplorerSelection();
       switchBrainView('lista');
-      loadBrain(true);
+      refreshExplorer(true);
     };
   } else {
     // doc node
@@ -799,7 +881,7 @@ function openGraphPanel(node) {
   }
 }
 
-/** Switch between Lista and Grafo views inside Atividade. */
+/** Switch between Lista and Grafo views. Filters are preserved across switches. */
 function switchBrainView(view) {
   var listaEl = document.getElementById('brain-lista-view');
   var grafoEl = document.getElementById('brain-grafo-view');
@@ -807,11 +889,14 @@ function switchBrainView(view) {
   var btnGrafo = document.getElementById('brain-toggle-grafo');
   if (!listaEl || !grafoEl) return;
 
+  explorerState.view = view;
+
   if (view === 'grafo') {
     listaEl.style.display = 'none';
     grafoEl.style.display = 'block';
     if (btnLista) btnLista.classList.remove('active');
     if (btnGrafo) btnGrafo.classList.add('active');
+    // Load graph after display:block is set (RAF inside loadGraph handles the rest)
     loadGraph();
   } else {
     grafoEl.style.display = 'none';
@@ -823,7 +908,41 @@ function switchBrainView(view) {
 
 /* ==================== ATIVIDADE ====================  */
 
-var docState = { filter: 'all', q: '', offset: 0, entityId: undefined };
+/**
+ * Unified explorer state.
+ * - entityIds: Set of selected entity IDs (multi-select)
+ * - entityNames: map id -> name (for pill labels)
+ * - match: 'all' | 'any'
+ * - sourceType: 'all' | 'notion' | 'granola' | 'calendar' | 'web'
+ * - q: text search
+ * - view: 'lista' | 'grafo'
+ * - offset: pagination
+ */
+var explorerState = {
+  entityIds: new Set(),
+  entityNames: {},
+  match: 'all',
+  sourceType: 'all',
+  q: '',
+  view: 'lista',
+  offset: 0,
+};
+
+// COMPAT: docState alias (old code may reference docState.filter, docState.entityId)
+var docState = {
+  get filter() { return explorerState.sourceType; },
+  set filter(v) { explorerState.sourceType = v; },
+  get q() { return explorerState.q; },
+  set q(v) { explorerState.q = v; },
+  get offset() { return explorerState.offset; },
+  set offset(v) { explorerState.offset = v; },
+  get entityId() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : undefined; },
+  set entityId(v) {
+    if (v === undefined || v === null) { explorerState.entityIds.clear(); }
+    else { explorerState.entityIds.add(v); }
+  },
+};
+
 var PAGE = 50;
 var statusPollTimer = null;
 /* E2.3: last counts from /portal/status for filter button rendering */
@@ -941,14 +1060,27 @@ function renderDocFilters(countsByType, total) {
   el.innerHTML = types.map(function (t) {
     var lbl = t === 'all' ? 'Tudo' : (TYPE_LABEL[t] || t);
     var cnt = t === 'all' ? total : (countsByType[t] || 0);
-    return '<button class="fchip' + (docState.filter === t ? ' active' : '') + '" type="button" data-filter="' + t + '">' +
+    return '<button class="fchip' + (explorerState.sourceType === t ? ' active' : '') + '" type="button" data-filter="' + t + '">' +
       lbl + ' <span class="cnt">' + cnt + '</span></button>';
   }).join('');
 }
 
+/**
+ * refreshExplorer: central refresh that updates BOTH lista and grafo
+ * based on current explorerState. When view=lista, loads documents.
+ * When view=grafo, refreshes graph. Always refreshes the other lazily.
+ */
+function refreshExplorer(reset) {
+  if (explorerState.view === 'grafo') {
+    loadGraph();
+  } else {
+    loadBrain(reset);
+  }
+}
+
 async function loadBrain(reset) {
   if (reset) {
-    docState.offset = 0;
+    explorerState.offset = 0;
     /* E2.3: restore filter buttons above search using cached counts from /portal/status */
     var bySrc = (_lastStatusCounts && _lastStatusCounts.bySource) || [];
     var countsByType = {};
@@ -957,11 +1089,15 @@ async function loadBrain(reset) {
     renderDocFilters(countsByType, total);
   }
   var params = new URLSearchParams();
-  if (docState.q) params.set('q', docState.q);
-  if (docState.filter !== 'all') params.set('source_type', docState.filter);
-  if (docState.entityId !== undefined) params.set('entity_id', String(docState.entityId));
+  if (explorerState.q) params.set('q', explorerState.q);
+  if (explorerState.sourceType !== 'all') params.set('source_type', explorerState.sourceType);
+  // Multi-entity filter: send entity_ids CSV + match
+  if (explorerState.entityIds.size > 0) {
+    params.set('entity_ids', Array.from(explorerState.entityIds).join(','));
+    params.set('match', explorerState.match);
+  }
   params.set('limit', String(PAGE));
-  params.set('offset', String(docState.offset));
+  params.set('offset', String(explorerState.offset));
   var docs = [];
   try {
     var res = await api('/portal/brain/documents?' + params.toString());
@@ -969,10 +1105,27 @@ async function loadBrain(reset) {
   } catch (e) { /* ignore */ }
 
   var wrap = document.getElementById('doc-list');
+  var emptyEl = document.getElementById('doc-empty');
+  var emptyHint = document.getElementById('doc-empty-hint');
   if (reset && wrap) wrap.innerHTML = '';
-  if (reset && docs.length === 0 && wrap) {
-    wrap.innerHTML = '<p class="muted" style="padding:18px 2px">Nada por aqui ainda. Conecte fontes e indexe, ou ajuste o filtro.</p>';
+
+  if (reset && docs.length === 0) {
+    // Show appropriate empty state
+    if (emptyEl) {
+      emptyEl.classList.remove('hidden');
+      // Hint: suggest switching to 'any' when match=all and entities selected
+      if (emptyHint) {
+        var showHint = explorerState.entityIds.size > 1 && explorerState.match === 'all';
+        emptyHint.style.display = showHint ? 'block' : 'none';
+      }
+    }
+    if (!explorerState.entityIds.size && wrap) {
+      wrap.innerHTML = '<p class="muted" style="padding:18px 2px">Nada por aqui ainda. Conecte fontes e indexe, ou ajuste o filtro.</p>';
+    }
+  } else {
+    if (emptyEl) emptyEl.classList.add('hidden');
   }
+
   for (var d of docs) {
     var title = d.title || '(sem titulo)';
     var inner = (d.parent_url && isHttpUrl(d.parent_url))
@@ -986,14 +1139,14 @@ async function loadBrain(reset) {
       '<span class="meta" style="white-space:nowrap">' + date + escapeHtml(d.db_name || TYPE_LABEL[d.source_type] || '') + '</span>';
     if (wrap) wrap.appendChild(row);
   }
-  docState.offset += docs.length;
+  explorerState.offset += docs.length;
 
   var pager = document.getElementById('doc-pager');
   var pagerMore = document.getElementById('pager-next');
   var pagerInfo = document.getElementById('pager-info');
   if (pager) pager.classList.toggle('hidden', docs.length < PAGE);
   if (pagerMore) pagerMore.disabled = docs.length < PAGE;
-  if (pagerInfo) pagerInfo.textContent = docState.offset ? docState.offset + ' documentos' : '';
+  if (pagerInfo) pagerInfo.textContent = explorerState.offset ? explorerState.offset + ' documentos' : '';
 }
 
 var brainQTimer = null;
@@ -1004,16 +1157,16 @@ function wireAtividade() {
     docFilters.addEventListener('click', function (e) {
       var b = e.target.closest('[data-filter]');
       if (!b) return;
-      docState.filter = b.getAttribute('data-filter');
-      loadBrain(true);
+      explorerState.sourceType = b.getAttribute('data-filter');
+      refreshExplorer(true);
     });
   }
   var docSearch = document.getElementById('doc-search');
   if (docSearch) {
     docSearch.addEventListener('input', function (e) {
-      docState.q = e.target.value.trim();
+      explorerState.q = e.target.value.trim();
       clearTimeout(brainQTimer);
-      brainQTimer = setTimeout(function () { loadBrain(true); }, 300);
+      brainQTimer = setTimeout(function () { refreshExplorer(true); }, 300);
     });
   }
   var pagerPrev = document.getElementById('pager-prev');
@@ -1021,11 +1174,36 @@ function wireAtividade() {
   var pagerNext = document.getElementById('pager-next');
   if (pagerNext) pagerNext.addEventListener('click', function () { loadBrain(false); });
 
-  // Brain view toggle (Lista | Grafo)
+  // Brain view toggle (Lista | Grafo) — filters are preserved
   var toggleLista = document.getElementById('brain-toggle-lista');
   var toggleGrafo = document.getElementById('brain-toggle-grafo');
   if (toggleLista) toggleLista.addEventListener('click', function() { switchBrainView('lista'); });
   if (toggleGrafo) toggleGrafo.addEventListener('click', function() { switchBrainView('grafo'); });
+
+  // Match toggle (Todas | Qualquer)
+  var matchAllBtn = document.getElementById('match-all-btn');
+  var matchAnyBtn = document.getElementById('match-any-btn');
+  if (matchAllBtn) matchAllBtn.addEventListener('click', function() {
+    explorerState.match = 'all';
+    matchAllBtn.classList.add('active');
+    if (matchAnyBtn) matchAnyBtn.classList.remove('active');
+    refreshExplorer(true);
+  });
+  if (matchAnyBtn) matchAnyBtn.addEventListener('click', function() {
+    explorerState.match = 'any';
+    matchAnyBtn.classList.add('active');
+    if (matchAllBtn) matchAllBtn.classList.remove('active');
+    refreshExplorer(true);
+  });
+
+  // Entity search input (filters entity chips when >30 entities)
+  var entitySearchInput = document.getElementById('entity-search');
+  if (entitySearchInput) {
+    entitySearchInput.addEventListener('input', function(e) {
+      entityState.entityQ = e.target.value.trim();
+      if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
+    });
+  }
 
   // Graph side panel close
   var panelClose = document.getElementById('graph-panel-close');

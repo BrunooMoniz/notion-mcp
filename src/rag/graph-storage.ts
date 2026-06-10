@@ -26,9 +26,10 @@ export interface BrainGraph {
 }
 
 export interface BuildGraphOpts {
-  type?: string;       // filter entity nodes by type
-  entity_id?: number;  // subgraph: only return this entity + its neighbours
-  max_nodes?: number;  // cap, default 120, max 300
+  type?: string;         // filter entity nodes by type
+  entity_id?: number;   // legacy single-entity subgraph
+  entityIds?: number[]; // multi-entity subgraph (overrides entity_id when present)
+  max_nodes?: number;   // cap, default 120, max 300
 }
 
 export async function buildBrainGraph(
@@ -37,6 +38,14 @@ export async function buildBrainGraph(
 ): Promise<BrainGraph> {
   const p = getPool();
   const maxNodes = Math.min(Math.max(opts.max_nodes ?? 120, 1), 300);
+
+  // Resolve effective selection: entityIds takes precedence over entity_id.
+  const focusIds: number[] | undefined =
+    opts.entityIds && opts.entityIds.length > 0
+      ? opts.entityIds
+      : opts.entity_id !== undefined
+        ? [opts.entity_id]
+        : undefined;
 
   // --- 1. Entity nodes -------------------------------------------------
   const eParams: unknown[] = [accountId, maxNodes];
@@ -47,21 +56,22 @@ export async function buildBrainGraph(
     eClauses.push(`e.type = $${eIdx++}`);
     eParams.push(opts.type);
   }
-  if (opts.entity_id !== undefined) {
-    // Subgraph: include the target entity + its first-degree entity neighbours
-    // (entities that share at least one document with the target).
+  if (focusIds && focusIds.length > 0) {
+    // Subgraph: include selected entities + their first-degree entity neighbours
+    // (entities that share at least one document with any of the selected entities).
+    eParams.push(focusIds);
+    const focusArrIdx = eIdx++;
     eClauses.push(`(
-      e.id = $${eIdx}
+      e.id = ANY($${focusArrIdx}::bigint[])
       OR e.id IN (
         SELECT DISTINCT em2.entity_id
         FROM entity_mentions em1
-        JOIN entity_mentions em2 ON em2.chunk_id = em1.chunk_id AND em2.entity_id <> em1.entity_id
-        WHERE em1.entity_id = $${eIdx}
+        JOIN entity_mentions em2 ON em2.chunk_id = em1.chunk_id
+          AND em2.entity_id <> ALL($${focusArrIdx}::bigint[])
+        WHERE em1.entity_id = ANY($${focusArrIdx}::bigint[])
           AND em1.chunk_id IN (SELECT id FROM brain_chunks WHERE account_id = $1)
       )
     )`);
-    eParams.push(opts.entity_id);
-    eIdx++;
   }
 
   const eWhere = eClauses.join(" AND ");
@@ -104,14 +114,15 @@ export async function buildBrainGraph(
     let docWhere = `bc.account_id = $1`;
     const docParams: unknown[] = [accountId, entityIds, docLimit];
 
-    if (opts.entity_id !== undefined) {
-      // Subgraph: only docs that mention the target entity.
-      docParams.push(opts.entity_id);
+    if (focusIds && focusIds.length > 0) {
+      // Subgraph: only docs that mention at least one of the focus entities.
+      docParams.push(focusIds);
+      const focusDocIdx = docParams.length;
       docWhere += ` AND bc.source_id IN (
         SELECT DISTINCT bc2.source_id
         FROM entity_mentions em2
         JOIN brain_chunks bc2 ON bc2.id = em2.chunk_id AND bc2.account_id = $1
-        WHERE em2.entity_id = $4
+        WHERE em2.entity_id = ANY($${focusDocIdx}::bigint[])
       )`;
     }
 

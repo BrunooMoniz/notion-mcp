@@ -573,17 +573,26 @@ export function createPortalRouter(): express.Router {
   // GET /portal/brain/documents — browse the account's indexed documents (one row
   // per source_id), optional ?source_type= and ?q= (cheap ILIKE substring),
   // paginated (?limit=&offset=). Pure SQL, no Voyage, no search-quota usage.
+  // Multi-entity filter: ?entity_ids=1,2,3&match=all|any (default all).
+  // Legacy single: ?entity_id=N (still supported).
   router.get("/portal/brain/documents", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     try {
       const { listBrainDocuments } = await import("../rag/storage.js");
       const entityId = typeof req.query.entity_id === "string" ? parseInt(req.query.entity_id, 10) || undefined : undefined;
+      // Multi-entity: ?entity_ids=1,2,3
+      const entityIds = typeof req.query.entity_ids === "string"
+        ? req.query.entity_ids.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+        : undefined;
+      const match = typeof req.query.match === "string" && req.query.match === "any" ? "any" as const : "all" as const;
       const documents = await listBrainDocuments(accountId, {
         q: typeof req.query.q === "string" ? req.query.q : undefined,
         sourceType: typeof req.query.source_type === "string" ? req.query.source_type : undefined,
         limit: typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || undefined : undefined,
         offset: typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || undefined : undefined,
         entityId,
+        entityIds: entityIds && entityIds.length > 0 ? entityIds : undefined,
+        match,
       });
       res.json({ documents });
     } catch (err: any) {
@@ -830,7 +839,9 @@ export function createPortalRouter(): express.Router {
 
   // GET /portal/brain/graph — entity+document co-occurrence graph for the account.
   // Gated by ENTITIES_ENABLED (same as /portal/brain/entities).
-  // Params: ?type=, ?entity_id=, ?max_nodes= (default 120, cap 300).
+  // Params: ?type=, ?entity_ids=1,2,3 (multi, preferred), ?entity_id=N (legacy),
+  //         ?max_nodes= (default 120, cap 300).
+  // When entity_ids is set, returns the subgraph of those entities + co-occurring docs.
   router.get("/portal/brain/graph", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     if (process.env.ENTITIES_ENABLED !== "true") {
@@ -844,11 +855,20 @@ export function createPortalRouter(): express.Router {
         typeof req.query.entity_id === "string"
           ? parseInt(req.query.entity_id, 10) || undefined
           : undefined;
+      // Multi-entity subgraph: ?entity_ids=1,2,3
+      const entityIds = typeof req.query.entity_ids === "string"
+        ? req.query.entity_ids.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+        : undefined;
       const max_nodes =
         typeof req.query.max_nodes === "string"
           ? parseInt(req.query.max_nodes, 10) || undefined
           : undefined;
-      const graph = await buildBrainGraph(accountId, { type, entity_id, max_nodes });
+      const graph = await buildBrainGraph(accountId, {
+        type,
+        entity_id,
+        entityIds: entityIds && entityIds.length > 0 ? entityIds : undefined,
+        max_nodes,
+      });
       res.json(graph);
     } catch (err: any) {
       console.warn(`[portal] brain/graph unavailable: ${err?.message ?? err}`);
