@@ -136,6 +136,8 @@ body:not([data-zstate]) .z-ativo, body:not([data-zstate]) .z-novo { display: non
 .conv-item .cm { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); font-weight: 400; }
 .conv-new { margin: 0 0 8px; }
 .consult-main { flex: 1; min-width: 0; }
+/* botões sem listener em consultas restauradas (action-card/capture-card) */
+.restored-off { opacity: .45; pointer-events: none; cursor: default; }
 
 /* ---- captura de URL ---- */
 .capture-card { display: flex; align-items: center; gap: 12px; background: var(--accent-soft); border: 1px solid #cfe6d8; border-radius: var(--r-sm); padding: 12px 15px; font-size: 13.5px; margin: 8px 0; }

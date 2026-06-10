@@ -16,3 +16,14 @@ CREATE INDEX IF NOT EXISTS ai_search_log_acct_ts_idx ON ai_search_log (account_i
 -- portal_sessions.user_agent: shown in the "Sessões ativas" list so the user
 -- can recognize (and revoke) their own devices.
 ALTER TABLE portal_sessions ADD COLUMN IF NOT EXISTS user_agent text;
+
+-- Indexes for the app-v2 card queries (additive, idempotent):
+-- "Sua semana" / recent-documents scans filter by account and order by recency.
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_indexed_idx
+  ON brain_chunks (account_id, indexed_at DESC);
+-- "Próxima reunião": calendar chunks narrowed by account + event-date prefix
+-- (left(metadata->>'data',10) is exactly the expression getNextMeeting filters
+-- and orders by). Partial on source_type='calendar' keeps it tiny.
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_calendar_data_idx
+  ON brain_chunks (account_id, (left(metadata->>'data', 10)))
+  WHERE source_type = 'calendar';

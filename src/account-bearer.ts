@@ -49,11 +49,13 @@ export async function issueBearer(accountId: string, label?: string): Promise<st
 
 /** The account's currently-granted workspaces (its account_workspaces). Used to
  *  scope a friend's OAuth token FRESH per request, so sources connected after the
- *  token was issued are still visible without re-authorizing. */
+ *  token was issued are still visible without re-authorizing. Ordered by
+ *  created_at ASC (first workspace connected) so callers that fall back to
+ *  ws[0] (e.g. the index-web default workspace tag) are deterministic. */
 export async function accountWorkspaces(accountId: string): Promise<string[]> {
   const p = getPool();
   const { rows } = await p.query<{ workspace: string }>(
-    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1 ORDER BY created_at ASC`,
     [accountId],
   );
   return rows.map((r) => r.workspace);
@@ -90,8 +92,11 @@ export async function resolveBearer(
   );
   if (!rows[0]) return null;
   const accountId = rows[0].account_id;
+  // Same deterministic ordering as accountWorkspaces: the tool-side fallback
+  // (getAllowedWorkspaces()[0], e.g. brain_index_web) must always pick the
+  // first-connected workspace, not whatever the planner returned first.
   const ws = await p.query<{ workspace: string }>(
-    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1 ORDER BY created_at ASC`,
     [accountId],
   );
   const resolved = { accountId, workspaces: ws.rows.map((r) => r.workspace), label: rows[0].label ?? null };

@@ -93,3 +93,36 @@ test("revokeBearersForAccount deletes the account's tokens and returns the count
   assert.deepEqual(params, ["notion:ws-1"]);
   assert.equal(n, 2);
 });
+
+import { accountWorkspaces } from "../../account-bearer.js";
+
+test("accountWorkspaces orders by created_at ASC (deterministic ws[0] fallback)", async () => {
+  let sql = "";
+  __setPoolForTest({
+    query: async (q: string) => {
+      sql = q;
+      return { rows: [{ workspace: "first-connected" }, { workspace: "later" }] };
+    },
+  } as never);
+  const ws = await accountWorkspaces("notion:ws-1");
+  assert.deepEqual(ws, ["first-connected", "later"]);
+  // Multi-workspace accounts must get a stable order: first workspace connected
+  // first (callers use ws[0] as the default workspace tag, e.g. index-web).
+  assert.match(sql, /ORDER BY created_at ASC/i);
+});
+
+test("resolveBearer resolves workspaces with the same deterministic ordering", async () => {
+  let wsSql = "";
+  __setPoolForTest({
+    query: async (q: string) => {
+      if (/FROM account_api_tokens/i.test(q)) return { rows: [{ account_id: "notion:ws-1", label: null }] };
+      if (/FROM account_workspaces/i.test(q)) {
+        wsSql = q;
+        return { rows: [{ workspace: "ws-1" }] };
+      }
+      return { rows: [] };
+    },
+  } as never);
+  await resolveBearer("acct_orderedfetch");
+  assert.match(wsSql, /ORDER BY created_at ASC/i);
+});

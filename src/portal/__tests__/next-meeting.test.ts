@@ -1,8 +1,10 @@
 // src/portal/__tests__/next-meeting.test.ts
 // GET /portal/next-meeting core — robust event-start parsing across the three
 // calendar metadata shapes (iCal full ISO, gcal-oauth date-only + "Quando:"
-// line, all-day date-only) and the earliest-future picker. Account scoping is
-// enforced at the SQL layer (getNextMeeting passes the session account).
+// line, all-day date-only) and the picker: timed events strictly future,
+// all-day events kept while their day is today or later (all_day flag + bare
+// YYYY-MM-DD starts_at). Account scoping is enforced at the SQL layer
+// (getNextMeeting passes the session account).
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
@@ -28,26 +30,29 @@ function row(over: Partial<CalendarEventRow> & { metadata?: Record<string, unkno
 // --- parseEventStart ---
 
 test("parseEventStart: full ISO timestamp in metadata.data (iCal timed event)", () => {
-  const d = parseEventStart(row({ metadata: { data: "2026-06-11T14:30:00.000Z" } }));
-  assert.equal(d?.toISOString(), "2026-06-11T14:30:00.000Z");
+  const p = parseEventStart(row({ metadata: { data: "2026-06-11T14:30:00.000Z" } }));
+  assert.equal(p?.start.toISOString(), "2026-06-11T14:30:00.000Z");
+  assert.equal(p?.allDay, false);
 });
 
 test("parseEventStart: date-only metadata falls back to the text's Quando line (gcal-oauth)", () => {
-  const d = parseEventStart(
+  const p = parseEventStart(
     row({
       metadata: { data: "2026-06-11" },
       text: "[Calendar] Evento\n\n# Evento\n**Quando:** 2026-06-11T09:00:00-03:00\n**Calendário:** Trabalho",
     }),
   );
-  assert.equal(d?.toISOString(), "2026-06-11T12:00:00.000Z");
+  assert.equal(p?.start.toISOString(), "2026-06-11T12:00:00.000Z");
+  assert.equal(p?.allDay, false);
 });
 
-test("parseEventStart: all-day event (date-only, no Quando time) parses as midnight", () => {
-  const d = parseEventStart(row({ metadata: { data: "2026-06-12" }, text: "# Evento\n**Quando:** 2026-06-12" }));
-  assert.ok(d);
-  assert.equal(d!.getFullYear(), 2026);
-  assert.equal(d!.getMonth(), 5);
-  assert.equal(d!.getDate(), 12);
+test("parseEventStart: all-day event (date-only, no Quando time) is flagged allDay", () => {
+  const p = parseEventStart(row({ metadata: { data: "2026-06-12" }, text: "# Evento\n**Quando:** 2026-06-12" }));
+  assert.ok(p);
+  assert.equal(p!.allDay, true);
+  assert.equal(p!.start.getFullYear(), 2026);
+  assert.equal(p!.start.getMonth(), 5);
+  assert.equal(p!.start.getDate(), 12);
 });
 
 test("parseEventStart: garbage/missing dates return null", () => {
@@ -70,6 +75,44 @@ test("pickNextMeeting picks the EARLIEST future event and skips past ones", () =
   assert.equal(result.found, true);
   assert.equal(result.title, "Próxima");
   assert.equal(result.starts_at, "2026-06-11T10:00:00.000Z");
+  assert.equal(result.all_day, false);
+});
+
+test("pickNextMeeting INCLUDES today's all-day event (date >= today, not strictly future)", () => {
+  // NOW is mid-day: a timed event earlier today is past, but today's all-day
+  // event must still show (it lasts all day).
+  const today = new Date(NOW.getTime());
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const result = pickNextMeeting(
+    [row({ first_line: "[Cal] Feriado", metadata: { data: todayStr }, text: "# Feriado" })],
+    NOW,
+  );
+  assert.equal(result.found, true);
+  assert.equal(result.title, "Feriado");
+  assert.equal(result.all_day, true);
+  // All-day: starts_at is the bare YYYY-MM-DD, never a fabricated midnight ISO.
+  assert.equal(result.starts_at, todayStr);
+});
+
+test("pickNextMeeting still skips YESTERDAY's all-day event and past timed events", () => {
+  const result = pickNextMeeting(
+    [
+      row({ metadata: { data: "2026-06-09" }, text: "# Ontem dia todo" }), // all-day yesterday
+      row({ metadata: { data: "2026-06-10T08:00:00Z" } }), // timed earlier today
+    ],
+    NOW,
+  );
+  assert.deepEqual(result, { found: false });
+});
+
+test("pickNextMeeting: future all-day event returns the bare date + all_day flag", () => {
+  const result = pickNextMeeting(
+    [row({ first_line: "[Cal] Viagem", metadata: { data: "2026-06-12" }, text: "# Viagem" })],
+    NOW,
+  );
+  assert.equal(result.found, true);
+  assert.equal(result.all_day, true);
+  assert.equal(result.starts_at, "2026-06-12");
 });
 
 test("pickNextMeeting extracts calendar (calendar_label, db_name fallback) and attendees", () => {
@@ -103,7 +146,7 @@ test("pickNextMeeting returns {found:false} when nothing is in the future", () =
   assert.deepEqual(result, { found: false });
 });
 
-// --- getNextMeeting (SQL scoping) ---
+// --- getNextMeeting (SQL scoping + candidate ordering) ---
 
 test("getNextMeeting queries calendar chunks scoped to the given account only", async () => {
   const captured: { sql: string; params: any[] }[] = [];
@@ -120,6 +163,24 @@ test("getNextMeeting queries calendar chunks scoped to the given account only", 
     assert.match(captured[0].sql, /source_type = 'calendar'/);
     assert.equal(captured[0].params[0], "acct-a"); // account pinned in WHERE
     assert.equal(captured[0].params[1], "2026-06-10"); // coarse date prefix filter
+  } finally {
+    __setPoolForTest(null);
+  }
+});
+
+test("getNextMeeting orders candidates chronologically BEFORE the LIMIT (soonest 500 win)", async () => {
+  let sql = "";
+  __setPoolForTest({
+    query: async (q: string) => {
+      sql = q;
+      return { rows: [] };
+    },
+  } as never);
+  try {
+    await getNextMeeting("acct-a", NOW);
+    // Outer query: ORDER BY the event date (lexicographic = chronological for
+    // ISO / YYYY-MM-DD) and only then LIMIT — never an unordered slice.
+    assert.match(sql, /ORDER BY d\.metadata->>'data'\s+LIMIT 500/);
   } finally {
     __setPoolForTest(null);
   }

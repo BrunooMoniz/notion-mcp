@@ -232,10 +232,14 @@ export function createPortalRouter(): express.Router {
   // Generate (or regenerate) the per-account MCP bearer the friend puts in their
   // AI client. Shown ONCE; only its hash is stored. Regenerating revokes the old
   // one so there's a single active token (the friend updates their client).
-  router.post("/portal/mcp-token", requireSession, async (_req, res) => {
+  // Optional body {label}: which client this token is for (Claude Code / ChatGPT /
+  // Outra...) — it becomes the token label shown in "O que sua IA buscou".
+  router.post("/portal/mcp-token", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
+    const rawLabel = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+    const label = rawLabel ? rawLabel.slice(0, 40) : "portal";
     await revokeBearersForAccount(accountId);
-    const token = await issueBearer(accountId, "portal");
+    const token = await issueBearer(accountId, label);
     res.json({ token, mcp_url: `${MCP_BASE}/mcp` });
   });
 
@@ -814,18 +818,23 @@ export function createPortalRouter(): express.Router {
   });
 
   // --- P1: chat com o cérebro --------------------------------------------------
-  // 10 requisições/min por conta (keyed by accountId — behind the Tailscale funnel
-  // all IPs are loopback, so an IP key would bucket all callers into one window).
-  const askLimiter = rateLimit({
-    windowMs: 60_000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req, res) => (res as any).locals?.accountId ?? req.ip ?? "anon",
-    validate: { keyGeneratorIpFallback: false },
-    message: { error: "Too many requests, try again later" },
-    skip: () => false,
-  });
+  // Per-account rate limiter factory (keyed by accountId — behind the Tailscale
+  // funnel all IPs are loopback, so an IP key would bucket all callers into one
+  // window). Each caller gets its OWN limiter instance = its own window.
+  const makeRateLimiter = (opts: { windowMs?: number; max?: number } = {}) =>
+    rateLimit({
+      windowMs: opts.windowMs ?? 60_000,
+      max: opts.max ?? 10,
+      standardHeaders: true,
+      legacyHeaders: false,
+      keyGenerator: (req, res) => (res as any).locals?.accountId ?? req.ip ?? "anon",
+      validate: { keyGeneratorIpFallback: false },
+      message: { error: "Too many requests, try again later" },
+      skip: () => false,
+    });
+
+  // 10 requisições/min por conta.
+  const askLimiter = makeRateLimiter();
 
   router.post("/portal/ask", requireSession, askLimiter, async (req, res) => {
     const { handleAsk } = await import("./ask.js");
@@ -996,16 +1005,7 @@ export function createPortalRouter(): express.Router {
   // brain_index_web MCP tool, with the SESSION account passed explicitly.
   // Rate-limited per account like /portal/ask (own window — indexing pages must
   // not consume the chat budget).
-  const indexWebLimiter = rateLimit({
-    windowMs: 60_000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req, res) => (res as any).locals?.accountId ?? req.ip ?? "anon",
-    validate: { keyGeneratorIpFallback: false },
-    message: { error: "Too many requests, try again later" },
-    skip: () => false,
-  });
+  const indexWebLimiter = makeRateLimiter();
   router.post("/portal/index-web", requireSession, indexWebLimiter, async (req, res) => {
     const accountId: string = res.locals.accountId;
     const { parseHttpUrl } = await import("./index-web.js");
@@ -1036,9 +1036,14 @@ export function createPortalRouter(): express.Router {
   // GET /portal/sessions — active sessions for the account (id = session_hash).
   router.get("/portal/sessions", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
-    const sid = readCookie(req, SESSION_COOKIE);
-    const { listSessions } = await import("./sessions.js");
-    res.json({ sessions: await listSessions(accountId, sid ? hashSession(sid) : "") });
+    try {
+      const sid = readCookie(req, SESSION_COOKIE);
+      const { listSessions } = await import("./sessions.js");
+      res.json({ sessions: await listSessions(accountId, sid ? hashSession(sid) : "") });
+    } catch (err: any) {
+      console.warn(`[portal] sessions unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "sessões indisponíveis", sessions: [] });
+    }
   });
 
   // POST /portal/sessions/revoke {id} — 204; 404 if not this account's session.
@@ -1049,9 +1054,14 @@ export function createPortalRouter(): express.Router {
       res.status(400).json({ error: "id obrigatório" });
       return;
     }
-    const { revokeSession } = await import("./sessions.js");
-    const ok = await revokeSession(res.locals.accountId, id);
-    res.sendStatus(ok ? 204 : 404);
+    try {
+      const { revokeSession } = await import("./sessions.js");
+      const ok = await revokeSession(res.locals.accountId, id);
+      res.sendStatus(ok ? 204 : 404);
+    } catch (err: any) {
+      console.error(`[portal] sessions/revoke failed: ${err?.message ?? err}`);
+      res.status(500).json({ error: "server_error" });
+    }
   });
 
   // GET /portal/brain/graph — entity+document co-occurrence graph for the account.

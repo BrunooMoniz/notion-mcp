@@ -154,6 +154,13 @@ export interface SearchOptions {
    * RERANK_ENABLED=false overrides this to off (see rerankEnabled()).
    */
   rerank?: boolean;
+  /**
+   * 002-app-v2 — append this search to ai_search_log ("O que sua IA buscou").
+   * Default true. Internal, auto-generated searches (e.g. the daily-briefing
+   * per-event context, which carries attendee PII) pass false so the feed only
+   * shows what the user's assistant actually asked.
+   */
+  logEvent?: boolean;
 }
 
 // Minimum cosine-similarity cutoff for the RRF-fallback path (rerank disabled
@@ -427,10 +434,11 @@ export async function brainSearch(
   // 002-app-v2 — AI search transparency log. Companion to the recordUsage
   // metering above, but appended AFTER the hits are computed so the row carries
   // the real result count. Only in-request searches are logged (cron/eval have
-  // no RequestContext); best-effort — recordSearchEvent swallows every error,
+  // no RequestContext), and callers of internal auto-generated searches opt out
+  // via logEvent:false; best-effort — recordSearchEvent swallows every error,
   // so the search can never fail because of the log.
   const ctx = getContext();
-  if (ctx) {
+  if (ctx && opts.logEvent !== false) {
     await recordSearchEvent(accountId, query, hits.length, ctx.tokenLabel);
   }
 

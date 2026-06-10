@@ -170,8 +170,11 @@ function lastIndexedAt(st) {
 function updateZState() {
   var me = window._lastMe;
   var st = window._lastStatus;
-  if (!me || !st) return; // espera os dois antes de mostrar qualquer estado
-  var ativado = hasAnySource(me) && totalChunks(st) > 0;
+  if (!me) return;
+  /* sem status só renderiza em modo degradado (falha de /portal/status);
+     fora isso espera os dois antes de mostrar qualquer estado */
+  if (!st && !window._statusUnavailable) return;
+  var ativado = st ? (hasAnySource(me) && totalChunks(st) > 0) : hasAnySource(me);
   document.body.setAttribute('data-zstate', ativado ? 'ativado' : 'novo');
   if (ativado) {
     renderHello();
@@ -235,6 +238,16 @@ function computeHealth(st, tokens) {
         level: 'warn',
         html: '<strong>' + escapeHtml(name) + ' com erro de sincronização.</strong> As atualizações dessa fonte não estão entrando no cérebro.',
         act: { nav: 'fontes', label: 'corrigir →' }
+      });
+      return;
+    }
+    /* conectada mas nunca rodou (e não está indexando agora): pendência, não "ok" */
+    if (!s.last_run && estado !== 'indexando') {
+      score -= 10;
+      items.push({
+        level: 'warn',
+        html: '<strong>' + escapeHtml(name) + ' nunca sincronizou</strong> — rode Indexar agora.',
+        act: { nav: 'fontes', label: 'indexar →' }
       });
       return;
     }
@@ -453,8 +466,17 @@ async function loadAiSearches() {
 /* ---- Próxima reunião (GET /portal/next-meeting) ---- */
 window._nextMeeting = null;
 
-function meetingWhenParts(startsAt) {
-  var d = new Date(startsAt);
+/* YYYY-MM-DD (date-only) → Date local, sem deslocamento de fuso; null se não for date-only */
+function parseDateOnly(s) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3]);
+}
+
+function meetingWhenParts(startsAt, allDay) {
+  var dateOnly = parseDateOnly(startsAt);
+  var isAllDay = !!allDay || !!dateOnly;
+  var d = dateOnly || new Date(startsAt);
   if (!isFinite(d.getTime())) return { day: '', time: '' };
   var now = new Date();
   var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -465,13 +487,14 @@ function meetingWhenParts(startsAt) {
   else if (diffDays === 1) day = 'amanhã';
   else if (diffDays < 7) day = d.toLocaleDateString('pt-BR', { weekday: 'long' });
   else day = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  var time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  /* all-day: só o dia, sem horário fantasma */
+  var time = isAllDay ? '' : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   return { day: day, time: time };
 }
 
 function briefingPrompt(m) {
-  var w = meetingWhenParts(m.starts_at);
-  return 'Prepara meu briefing para a reunião "' + m.title + '" de ' + w.day + ' às ' + w.time +
+  var w = meetingWhenParts(m.starts_at, m.all_day);
+  return 'Prepara meu briefing para a reunião "' + m.title + '" de ' + w.day + (w.time ? ' às ' + w.time : '') +
     ': contexto, decisões anteriores e pendências.';
 }
 
@@ -498,13 +521,13 @@ async function loadNextMeeting() {
     var m = await res.json();
     if (!m || !m.found) { body.innerHTML = emptyHtml; window._nextMeeting = null; return; }
     window._nextMeeting = m;
-    var w = meetingWhenParts(m.starts_at);
+    var w = meetingWhenParts(m.starts_at, m.all_day);
     var sub = [m.calendar, (m.attendees && m.attendees.length ? 'com ' + m.attendees.slice(0, 3).join(' e ') : null)]
       .filter(Boolean).join(' · ');
     var prompt = briefingPrompt(m);
     body.innerHTML =
       '<div class="next-meeting">' +
-      '<span class="nm-when">' + escapeHtml(w.day) + '<br>' + escapeHtml(w.time) + '</span>' +
+      '<span class="nm-when">' + escapeHtml(w.day) + (w.time ? '<br>' + escapeHtml(w.time) : '') + '</span>' +
       '<div class="grow"><div class="nm-title">' + escapeHtml(m.title || '(sem título)') + '</div>' +
       (sub ? '<div class="nm-sub">' + escapeHtml(sub) + '</div>' : '') + '</div></div>' +
       '<div class="code-block mt-sm" style="white-space:pre-wrap" id="meeting-prompt">' + escapeHtml(prompt) +
@@ -717,9 +740,7 @@ function renderFontes(me) {
   }
 
   /* fontes-count + badge */
-  var nConn = (notion.connected ? 1 : 0) + (sources.google && sources.google.length ? 1 : 0)
-    + (sources.ical && sources.ical.links && sources.ical.links.length ? 1 : 0)
-    + (sources.granola && sources.granola.set ? 1 : 0);
+  var nConn = countSources(me);
   var fcEl = document.getElementById('fontes-count');
   if (fcEl) fcEl.textContent = '· ' + nConn + ' conectadas';
   var nbEl = document.getElementById('nav-fontes-badge');
@@ -883,15 +904,6 @@ function getAmbiguousNames() {
 function isAmbiguousName(name) {
   return !!getAmbiguousNames()[(name || '').toLowerCase()];
 }
-
-// COMPAT: kept for any code that reads _activeEntityId (e.g. openGraphPanel)
-Object.defineProperty(window, '_activeEntityId', {
-  get: function() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : null; },
-  set: function(v) {
-    if (v === null) { explorerState.entityIds.clear(); }
-    else { explorerState.entityIds.add(v); }
-  }
-});
 
 async function loadEntities() {
   var wrap = document.getElementById('entities-block');
@@ -1601,21 +1613,6 @@ var explorerState = {
   offset: 0,
 };
 
-// COMPAT: docState alias (old code may reference docState.filter, docState.entityId)
-var docState = {
-  get filter() { return explorerState.sourceType; },
-  set filter(v) { explorerState.sourceType = v; },
-  get q() { return explorerState.q; },
-  set q(v) { explorerState.q = v; },
-  get offset() { return explorerState.offset; },
-  set offset(v) { explorerState.offset = v; },
-  get entityId() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : undefined; },
-  set entityId(v) {
-    if (v === undefined || v === null) { explorerState.entityIds.clear(); }
-    else { explorerState.entityIds.add(v); }
-  },
-};
-
 var PAGE = 50;
 var statusPollTimer = null;
 /* E2.3: last counts from /portal/status for filter button rendering */
@@ -1625,14 +1622,22 @@ function stopStatusPolling() {
   if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
 }
 
+/* /portal/status falhou: deriva o estado do Início só de /portal/me para a home
+   não ficar em branco; um loadStatus bem-sucedido depois re-deriva normalmente. */
+function markStatusUnavailable() {
+  window._statusUnavailable = true;
+  if (!window._lastStatus) updateZState();
+}
+
 async function loadStatus() {
   var st;
   try {
     var res = await api('/portal/status');
-    if (!res.ok) return;
+    if (!res.ok) { markStatusUnavailable(); return; }
     st = await res.json();
-  } catch (e) { return; }
+  } catch (e) { markStatusUnavailable(); return; }
 
+  window._statusUnavailable = false;
   window._lastStatus = st;
   var busy = !!st.running;
   renderBrainMini(busy, st);
@@ -1719,10 +1724,10 @@ async function loadStatus() {
     }
   }
 
-  /* v2: estado do Início + saúde + pipeline do Guia derivam do status */
+  /* v2: estado do Início + saúde + pipeline do Guia derivam do status
+     (updateZState já chama renderHello/renderHealth no estado ativado
+      e renderOnboarding no estado novo) */
   updateZState();
-  renderHello();
-  if (document.body.getAttribute('data-zstate') === 'ativado') renderHealth();
   renderGuiaPipeline();
   /* tags de saúde por fonte na view Fontes */
   if (window._lastMe) renderFontes(window._lastMe);
@@ -2153,7 +2158,10 @@ async function runIndex() {
     }
     /* recarregar status e dados */
     if (statusData) {
+      window._lastStatus = statusData;
       renderBrainMini(false, statusData);
+      /* usuário novo: sai do onboarding assim que a 1ª indexação termina */
+      updateZState();
     } else {
       loadStatus();
     }
@@ -2243,9 +2251,11 @@ async function generateTokenFor(panel) {
   var btnId = panel === 'chatgpt' ? 'token-gen-btn-chatgpt' : 'token-gen-btn-outra';
   var area = document.getElementById(areaId);
   var btn = document.getElementById(btnId);
+  /* label conforme a aba; backend pode ignorar o body sem quebrar nada */
+  var label = panel === 'chatgpt' ? 'ChatGPT' : 'Outra IA';
   var res;
   try {
-    res = await apiJSON('/portal/mcp-token', 'POST');
+    res = await apiJSON('/portal/mcp-token', 'POST', { label: label });
   } catch (e) { toast('Erro de rede ao gerar token.'); return; }
   if (!res.ok) { toast('Não consegui gerar o token.'); return; }
   var data = await res.json();
@@ -2435,9 +2445,10 @@ function wireConnectWindow() {
 async function generateToken() {
   var res;
   try {
-    res = await apiJSON('/portal/mcp-token', 'POST');
+    /* botão vive no painel Claude Code; backend pode ignorar o body sem quebrar nada */
+    res = await apiJSON('/portal/mcp-token', 'POST', { label: 'Claude Code' });
   } catch (e) { toast('Erro de rede ao gerar token.'); return; }
-  if (!res.ok) { toast('Nao consegui gerar o token.'); return; }
+  if (!res.ok) { toast('Não consegui gerar o token.'); return; }
   var data = await res.json();
   var token = data.token;
   var mcpUrl = data.mcp_url || 'https://zinom.ai/mcp';
@@ -2515,7 +2526,8 @@ function appendToCurrentConv(q, aiHtml, role) {
     currentConvId = conv.id;
   }
   if (q != null) conv.msgs.push({ role: 'user', text: q });
-  if (aiHtml != null) conv.msgs.push({ role: role || 'ai', html: aiHtml });
+  /* guarda a pergunta junto da resposta para religar o feedback com a query real */
+  if (aiHtml != null) conv.msgs.push({ role: role || 'ai', html: aiHtml, q: q != null ? String(q) : '' });
   conv.ts = Date.now();
   conv.history = chatHistory.slice(-12);
   convs = [conv].concat(convs.filter(function (c) { return c.id !== conv.id; }));
@@ -2533,6 +2545,17 @@ function startNewConsult() {
   renderConvRail();
 }
 
+/* Botões de action-card/capture-card não têm listener depois do restore:
+   desabilita com visual claro para não parecerem vivos. (cite-n e fb-btn são
+   religados; copy-btn e data-nav usam delegação global, então continuam vivos.) */
+function neutralizeRestoredButtons(scope) {
+  scope.querySelectorAll('.action-confirm, .action-cancel, [data-retry], .capture-card button').forEach(function (b) {
+    b.disabled = true;
+    b.classList.add('restored-off');
+    b.title = 'Disponível só na consulta original';
+  });
+}
+
 function restoreConv(id) {
   var conv = loadConvs().find(function (c) { return c.id === id; });
   if (!conv) return;
@@ -2543,16 +2566,31 @@ function restoreConv(id) {
   if (emptyEl) emptyEl.classList.add('hidden');
   if (!threadEl) return;
   threadEl.classList.remove('hidden');
-  threadEl.innerHTML = (conv.msgs || []).map(function (m) {
+  threadEl.innerHTML = '';
+  (conv.msgs || []).forEach(function (m) {
     if (m.role === 'user') {
-      return '<div class="msg-user"><div class="q">' + escapeHtml(m.text || '') + '</div></div>';
+      var u = document.createElement('div');
+      u.className = 'msg-user';
+      u.innerHTML = '<div class="q"></div>';
+      u.querySelector('.q').textContent = m.text || '';
+      threadEl.appendChild(u);
+      return;
     }
-    if (m.role === 'block') return m.html || '';
-    return '<div class="msg-ai"><span class="av">' + logoSvg(30) + '</span><div class="stack">' + (m.html || '') + '</div></div>';
-  }).join('');
-  threadEl.querySelectorAll('.msg-ai .stack').forEach(function (stack) {
+    if (m.role === 'block') {
+      var holder = document.createElement('div');
+      holder.innerHTML = m.html || '';
+      neutralizeRestoredButtons(holder);
+      while (holder.firstChild) threadEl.appendChild(holder.firstChild);
+      return;
+    }
+    var ai = document.createElement('div');
+    ai.className = 'msg-ai';
+    ai.innerHTML = '<span class="av">' + logoSvg(30) + '</span><div class="stack">' + (m.html || '') + '</div>';
+    var stack = ai.querySelector('.stack');
     wireCiteRefs(stack);
-    wireFeedbackBtns(stack, '');
+    wireFeedbackBtns(stack, m.q || ''); // religa o feedback com a query original
+    neutralizeRestoredButtons(stack);
+    threadEl.appendChild(ai);
   });
   renderConvRail();
   scrollBottom();
@@ -3291,20 +3329,21 @@ async function load() {
     el.style.color = ICON_COLOR[t] || '';
   });
 
-  /* google accounts (lista separada de /portal/google/accounts) */
-  var googleAccounts = [];
-  try {
-    var gRes = await api('/portal/google/accounts');
-    if (gRes.ok) googleAccounts = await gRes.json();
-  } catch (e) { /* ignore */ }
+  /* chamadas independentes em paralelo: google accounts, ativação e tokens MCP */
   me.sources = me.sources || {};
+  var results = await Promise.all([
+    api('/portal/google/accounts')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .catch(function () { return []; }),
+    loadActivation(me.sources),
+    loadMcpTokens()
+  ]);
+  var googleAccounts = results[0] || [];
   me.sources.google = googleAccounts.map(function (a) { return a.email; });
   me.google_configured = me.google_configured !== false;
 
   renderFontes(me);
   renderConta(me);
-  await loadActivation(me.sources);
-  await loadMcpTokens();
   renderInicio(me, window._lastBilling);
   renderChatEmpty(me);
   renderGuiaPipeline();

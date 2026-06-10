@@ -179,3 +179,9 @@ CREATE TABLE IF NOT EXISTS brain_chunks (
 );
 CREATE INDEX IF NOT EXISTS brain_chunks_source_idx ON brain_chunks (source_type, source_id);
 CREATE INDEX IF NOT EXISTS brain_chunks_account_ws_idx ON brain_chunks (account_id, workspace, db_name);
+-- Mirror of migration 0015: app-v2 card query indexes.
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_indexed_idx
+  ON brain_chunks (account_id, indexed_at DESC);
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_calendar_data_idx
+  ON brain_chunks (account_id, (left(metadata->>'data', 10)))
+  WHERE source_type = 'calendar';

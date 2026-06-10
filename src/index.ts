@@ -318,6 +318,7 @@ app.use("/mcp", async (req, res, next) => {
       authType: "bearer",
       scopes: "all",
       ip,
+      tokenLabel: "Claude Code", // 002-app-v2: ai_search_log client
     };
     requestContext.run(ctx, () => next());
     return;

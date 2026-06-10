@@ -139,3 +139,12 @@ test("brainSearch does NOT log outside a request context (cron/eval)", async () 
   await brainSearch("nightly eval query");
   assert.equal(rows.length, 0);
 });
+
+test("brainSearch with logEvent:false does NOT log even inside a request (internal searches)", async () => {
+  __setSearchDepsForTest(fakeDeps as never);
+  await requestContext.run(
+    { authType: "bearer", scopes: "all", accountId: DEFAULT_ACCOUNT_ID, tokenLabel: "MeuBot" },
+    () => brainSearch("contexto interno do briefing", { logEvent: false }),
+  );
+  assert.equal(rows.length, 0);
+});

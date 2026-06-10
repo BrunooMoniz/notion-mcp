@@ -12,7 +12,8 @@ import { getPool, titleFromHeaderLine } from "../rag/storage.js";
 export interface NextMeeting {
   found: boolean;
   title?: string;
-  starts_at?: string; // ISO-8601 (or YYYY-MM-DD for all-day events)
+  starts_at?: string; // ISO-8601 for timed events; bare YYYY-MM-DD for all-day
+  all_day?: boolean;
   calendar?: string | null;
   attendees?: string[];
 }
@@ -25,23 +26,39 @@ export interface CalendarEventRow {
   metadata: Record<string, unknown> | null;
 }
 
+/** Parsed event start: the comparable Date plus whether the event is all-day
+ *  (date-only — no real time exists, so midnight is only an ordering anchor). */
+export interface ParsedEventStart {
+  start: Date;
+  allDay: boolean;
+}
+
+/** Local YYYY-MM-DD for a Date (all-day events live in the local calendar day). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /**
- * Resolve the event start as a Date from a candidate row, or null when no
- * parseable date exists. Preference order:
+ * Resolve the event start from a candidate row, or null when no parseable date
+ * exists. Preference order:
  *   1. metadata.data when it carries a time component (iCal timed events);
  *   2. a "**Quando:** <ISO>" line in the chunk text when it parses with a time
  *      (gcal-oauth timed events store date-only metadata);
- *   3. metadata.data as a date-only value (all-day events → local midnight).
+ *   3. metadata.data as a date-only value → all-day (local midnight is used only
+ *      as an ordering anchor; the caller must NOT treat it as a real time).
  * Exported pure for unit tests.
  */
-export function parseEventStart(row: CalendarEventRow): Date | null {
+export function parseEventStart(row: CalendarEventRow): ParsedEventStart | null {
   const meta = row.metadata ?? {};
   const data = typeof meta.data === "string" ? meta.data.trim() : "";
 
   // 1. Full ISO timestamp in metadata (iCal timed events).
   if (/^\d{4}-\d{2}-\d{2}T/.test(data)) {
     const d = new Date(data);
-    if (!isNaN(d.getTime())) return d;
+    if (!isNaN(d.getTime())) return { start: d, allDay: false };
   }
 
   // 2. The "Quando:" line of the event text (gcal-oauth keeps the time there).
@@ -50,29 +67,38 @@ export function parseEventStart(row: CalendarEventRow): Date | null {
     const raw = quando[1].trim();
     if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
       const d = new Date(raw);
-      if (!isNaN(d.getTime())) return d;
+      if (!isNaN(d.getTime())) return { start: d, allDay: false };
     }
   }
 
-  // 3. Date-only fallback (all-day events): treat as local midnight.
+  // 3. Date-only (all-day events): local midnight as the ordering anchor.
   if (/^\d{4}-\d{2}-\d{2}$/.test(data)) {
     const d = new Date(`${data}T00:00:00`);
-    if (!isNaN(d.getTime())) return d;
+    if (!isNaN(d.getTime())) return { start: d, allDay: true };
   }
 
   return null;
 }
 
 /**
- * Pick the earliest event strictly in the future out of the candidate rows.
- * Exported pure for unit tests (the SQL layer just narrows the candidate set).
+ * Pick the next event out of the candidate rows. Timed events must be strictly
+ * in the future; all-day events are included while their day is today or later
+ * (date >= today), so today's all-day event still shows all day instead of
+ * vanishing after local midnight. Exported pure for unit tests (the SQL layer
+ * just narrows the candidate set).
  */
 export function pickNextMeeting(rows: CalendarEventRow[], now: Date = new Date()): NextMeeting {
-  let best: { start: Date; row: CalendarEventRow } | null = null;
+  const today = localDateStr(now);
+  let best: { parsed: ParsedEventStart; row: CalendarEventRow } | null = null;
   for (const row of rows) {
-    const start = parseEventStart(row);
-    if (!start || start.getTime() <= now.getTime()) continue;
-    if (!best || start.getTime() < best.start.getTime()) best = { start, row };
+    const parsed = parseEventStart(row);
+    if (!parsed) continue;
+    if (parsed.allDay) {
+      if (localDateStr(parsed.start) < today) continue; // past day — skip
+    } else if (parsed.start.getTime() <= now.getTime()) {
+      continue; // timed events stay strictly future
+    }
+    if (!best || parsed.start.getTime() < best.parsed.start.getTime()) best = { parsed, row };
   }
   if (!best) return { found: false };
 
@@ -87,7 +113,12 @@ export function pickNextMeeting(rows: CalendarEventRow[], now: Date = new Date()
   return {
     found: true,
     title: titleFromHeaderLine(best.row.first_line),
-    starts_at: best.start.toISOString(),
+    // All-day events have no real time: return the bare date, never a
+    // fabricated midnight ISO timestamp.
+    starts_at: best.parsed.allDay
+      ? localDateStr(best.parsed.start)
+      : best.parsed.start.toISOString(),
+    all_day: best.parsed.allDay,
     calendar,
     attendees,
   };
@@ -100,9 +131,12 @@ export async function getNextMeeting(
 ): Promise<NextMeeting> {
   const p = getPool();
   // Coarse SQL narrowing: events whose metadata date-prefix is today or later
-  // (lexicographic compare works for both YYYY-MM-DD and full ISO). Precise
-  // future filtering/parsing happens in pickNextMeeting.
-  const today = now.toISOString().slice(0, 10);
+  // (lexicographic compare works for both YYYY-MM-DD and full ISO; local date so
+  // today's all-day events survive the cut). Precise future filtering/parsing
+  // happens in pickNextMeeting. Candidates are ordered chronologically (ISO and
+  // Y-M-D sort lexicographically = chronologically) BEFORE the LIMIT, so the
+  // 500 kept are the soonest — not an arbitrary slice of a big calendar.
+  const today = localDateStr(now);
   const { rows } = await p.query<{
     first_line: string | null;
     text: string;
@@ -118,6 +152,7 @@ export async function getNextMeeting(
             AND left(metadata->>'data', 10) >= $2
           ORDER BY source_id, chunk_index
        ) d
+      ORDER BY d.metadata->>'data'
       LIMIT 500`,
     [accountId, today],
   );
