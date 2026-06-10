@@ -12,6 +12,7 @@ export interface InviteRequest {
   status: string; // pending | invited
   requested_at: Date;
   invited_at: Date | null;
+  dismissed_at: Date | null;
 }
 
 /** Record (or refresh) an invite request for an email. Idempotent per email. */
@@ -31,7 +32,7 @@ export async function createInviteRequest(email: string, name?: string, note?: s
 export async function listInviteRequests(limit = 200): Promise<InviteRequest[]> {
   const p = getPool();
   const { rows } = await p.query<InviteRequest>(
-    `SELECT id, email, name, note, status, requested_at, invited_at
+    `SELECT id, email, name, note, status, requested_at, invited_at, dismissed_at
      FROM invite_requests
      ORDER BY (status = 'pending') DESC, requested_at DESC
      LIMIT $1`,
@@ -60,4 +61,19 @@ export async function countPendingRequests(): Promise<number> {
     `SELECT count(*)::text AS n FROM invite_requests WHERE status='pending'`,
   );
   return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Mark a lead as dismissed (operator chose not to invite them).
+ * Sets dismissed_at=now() without changing the status column.
+ * Idempotent: re-dismissing a lead is harmless.
+ * Does NOT delete the lead (preserves audit history).
+ */
+export async function dismissInviteRequest(email: string): Promise<void> {
+  const e = normalizeEmail(email);
+  const p = getPool();
+  await p.query(
+    `UPDATE invite_requests SET dismissed_at = now() WHERE email = $1`,
+    [e],
+  );
 }
