@@ -139,7 +139,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_get_page",
-    "Retrieve a Notion page and its block children",
+    "Retrieve a Notion page and its block children. Use notion_fetch for a richer view (Markdown + properties). Prefer this when you need the raw Notion API response (block types, property objects). Returns the page object and its top-level block children list.",
     {
       workspace: workspaceSchema,
       page_id: notionIdSchema.describe("The ID of the page to retrieve"),
@@ -349,7 +349,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_list_users",
-    "List all users in a Notion workspace",
+    "List all members of a Notion workspace. Returns user IDs, names, and emails. Use to resolve a person's name to their Notion user_id before assigning them to a page property (e.g., Assignee, Owner). Not needed for reading — only when you need to populate a people-type property.",
     {
       workspace: workspaceSchema,
     },
@@ -781,7 +781,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_get_data_source_schema",
-    "Get the schema (properties) of a specific data source within a multi-source database.",
+    "Get the schema (properties) of a specific data source within a multi-source database. Call this BEFORE notion_query_data_source to understand property names and types. Use notion_list_data_sources to get the data_source_id first. Essential for multi-source databases (e.g. Nora CRM pattern) where notion_get_database_schema returns data sources instead of properties.",
     {
       workspace: workspaceSchema,
       data_source_id: notionIdSchema.describe("The data source ID"),
@@ -993,7 +993,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "notion_complete_file_upload",
-    "Mark a multi_part file upload as complete after all parts have been sent.",
+    "Finalize a multi-part file upload after all parts have been sent via notion_send_file_upload. This is the THIRD step in the upload flow: (1) notion_create_file_upload → get file_upload_id, (2) notion_send_file_upload for each part, (3) this tool to mark the upload complete and make the file usable as block content. Only required for multi_part uploads — single-part uploads need only steps 1 and 2.",
     {
       workspace: workspaceSchema,
       file_upload_id: notionIdSchema.describe("ID of the multi-part upload"),
