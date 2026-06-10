@@ -719,6 +719,38 @@ export function createPortalRouter(): express.Router {
     await handleAsk(req, res);
   });
 
+  // POST /portal/feedback {chunk_id, value: "up"|"down", query?}
+  // Spec 004 §4: explicit user 👍/👎 on a cited source in the chat UI.
+  // Scope: account_id always from session (never from request).
+  // Idempotency: simple — server accepts and applies the delta; client controls
+  // "1 vote per chunk per chat session" (tracked in chat JS state).
+  router.post("/portal/feedback", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const chunkId = typeof req.body?.chunk_id === "string" ? req.body.chunk_id.trim() : "";
+    const value = req.body?.value;
+    const query = typeof req.body?.query === "string" ? req.body.query.slice(0, 300) : undefined;
+
+    if (!chunkId || !["up", "down"].includes(value)) {
+      res.status(400).json({ error: "chunk_id e value (up|down) são obrigatórios" });
+      return;
+    }
+
+    try {
+      const { applyFeedback } = await import("../rag/feedback.js");
+      const { UTILITY_WEIGHTS } = await import("../rag/utility.js");
+      const delta = value === "up" ? UTILITY_WEIGHTS.user_thumb_up : UTILITY_WEIGHTS.user_thumb_down;
+      const result = await applyFeedback({ accountId, chunkId, source: "user_thumb", delta, query });
+      if (result.status === "not_found") {
+        res.status(404).json({ error: "chunk_not_found" });
+        return;
+      }
+      res.json({ ok: true, new_score: result.newScore });
+    } catch (err: any) {
+      console.error(`[portal] feedback ${accountId}: ${err?.message ?? err}`);
+      res.status(500).json({ error: "server_error" });
+    }
+  });
+
   // POST /portal/ask/execute — execute a proposed action after user confirmation.
   // Same rate limit as /portal/ask (shared window). Audited in executeAction.
   router.post("/portal/ask/execute", requireSession, askLimiter, async (req, res) => {
@@ -741,6 +773,29 @@ export function createPortalRouter(): express.Router {
         resumo: proposed.resumo,
       });
       if (result.ok) {
+        // Spec 004 §4: implicit_action — chunks cited in the proposal get +1.0
+        // when the user confirms the action. The client may send cited_chunk_ids.
+        // Best-effort: never blocks the response.
+        const citedChunkIds: string[] = Array.isArray(req.body?.cited_chunk_ids)
+          ? (req.body.cited_chunk_ids as unknown[]).filter((x): x is string => typeof x === "string")
+          : [];
+        if (citedChunkIds.length > 0) {
+          (async () => {
+            try {
+              const { applyFeedback } = await import("../rag/feedback.js");
+              const { UTILITY_WEIGHTS } = await import("../rag/utility.js");
+              for (const chunkId of citedChunkIds) {
+                await applyFeedback({
+                  accountId,
+                  chunkId,
+                  source: "implicit_action",
+                  delta: UTILITY_WEIGHTS.implicit_action,
+                  query: proposed.resumo,
+                });
+              }
+            } catch { /* swallowed */ }
+          })();
+        }
         res.json({ ok: true, message: result.message, url: result.url ?? null });
       } else {
         res.status(422).json({ ok: false, error: result.error, message: result.message });

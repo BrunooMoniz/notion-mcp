@@ -21,10 +21,12 @@ import {
   summariseCostReport,
   engagementOf,
   mrrFromSubscriptions,
+  computeFeedbackPct,
   type FunnelRow,
   type EngagementRow,
   type StripeSub,
   type CostReportResponse,
+  type TopUsefulChunkRow,
 } from "./business.js";
 import { getStripe } from "../billing/stripe.js";
 import { getOrgCostReport } from "./anthropic-cost.js";
@@ -150,6 +152,25 @@ async function gather() {
 
   const { subs, source: stripeSource } = await fetchStripeSubs(p, Date.now());
 
+  // Spec 004: memory quality data (graceful: empty on missing tables/migration).
+  const [topUsefulChunks, feedbackStats, staleCount] = await Promise.all([
+    p.query<TopUsefulChunkRow>(`
+      SELECT id, account_id, utility_score, feedback_count, source_type, parent_url,
+             left(text, 120) AS text_snippet
+      FROM brain_chunks
+      WHERE utility_score > 0
+      ORDER BY utility_score DESC
+      LIMIT 10
+    `).then((r) => r.rows).catch(() => [] as TopUsefulChunkRow[]),
+    p.query<{ feedback_chunks: string; total_searches: string }>(`
+      SELECT
+        (SELECT count(DISTINCT chunk_id)::text FROM chunk_feedback) AS feedback_chunks,
+        (SELECT coalesce(sum(qty), 0)::text FROM usage_log WHERE metric = 'search') AS total_searches
+    `).then((r) => r.rows[0]).catch(() => ({ feedback_chunks: "0", total_searches: "0" })),
+    p.query<{ n: string }>(`SELECT count(*)::text AS n FROM stale_memories`)
+      .then((r) => Number(r.rows[0]?.n ?? 0)).catch(() => 0),
+  ]);
+
   // F2: Anthropic org-level cost report (cached 1h; null when ANTHROPIC_ADMIN_KEY absent).
   const orgCostReport: CostReportResponse | null = await getOrgCostReport().catch(() => null);
 
@@ -162,6 +183,11 @@ async function gather() {
     }
     return m;
   };
+  const feedbackPct = computeFeedbackPct(
+    Number(feedbackStats?.feedback_chunks ?? 0),
+    Number(feedbackStats?.total_searches ?? 0),
+  );
+
   return {
     accounts: accounts.rows,
     secrets: new Map(secrets.rows.map((r) => [r.account_id, r.kinds])),
@@ -179,6 +205,10 @@ async function gather() {
     stripeSubs: subs,
     stripeSource,
     orgCostReport,
+    // Spec 004: memory quality
+    topUsefulChunks,
+    feedbackPct,
+    staleCount,
   };
 }
 
@@ -424,6 +454,66 @@ ${rows || '<tr><td colspan="9" class="xs muted">Nenhuma conta.</td></tr>'}
 /** Format cents as BRL currency string. */
 function formatBRL(cents: number): string {
   return `R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Spec 004: Qualidade da memoria section
+// ---------------------------------------------------------------------------
+
+function renderMemoryQualitySection(data: Awaited<ReturnType<typeof gather>>): string {
+  const topRows = data.topUsefulChunks
+    .map((c) => {
+      const snippet = escapeHtml((c.text_snippet ?? "").slice(0, 100));
+      const url = c.parent_url
+        ? `<a href="${escapeHtml(c.parent_url)}" target="_blank" rel="noopener" class="xs">${escapeHtml(c.parent_url.slice(0, 60))}</a>`
+        : "—";
+      return `<tr>
+        <td class="mono xs">${escapeHtml(c.id.slice(0, 16))}&hellip;</td>
+        <td class="mono xs">${escapeHtml(c.account_id)}</td>
+        <td class="xs">${escapeHtml(c.source_type)}</td>
+        <td class="xs">${c.utility_score.toFixed(2)}</td>
+        <td class="xs">${c.feedback_count}</td>
+        <td class="xs trunc">${snippet}</td>
+        <td class="xs">${url}</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  return `<section class="section" id="qualidade-memoria">
+  <div class="section-header">
+    <h2 class="section-title">Qualidade da memoria</h2>
+    <p class="section-desc">Ranking de trechos mais uteis, cobertura de feedback e memorias obsoletas. Decay de 0.5%/dia. Stale: eff_utility &lt; -2 OU (mais de 180 dias + utilidade = 0 + nunca citado). Nenhuma exclusao automatica nesta fase.</p>
+  </div>
+  <div class="cards" style="margin-bottom:20px">
+    <div class="card" title="Percentual estimado de buscas que geraram pelo menos um evento de feedback (thumbs ou assistente)">
+      <div class="card-n">${data.feedbackPct}%</div>
+      <div class="card-l">Buscas com feedback</div>
+      <small class="card-hint">sinal explicito ou implicito</small>
+    </div>
+    <div class="card" title="Trechos na view stale_memories — candidatos a arquivamento manual (sem exclusao automatica)">
+      <div class="card-n">${data.staleCount}</div>
+      <div class="card-l">Memorias obsoletas</div>
+      <small class="card-hint">candidatos a arquivamento</small>
+    </div>
+  </div>
+  <h3 style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--ink-soft)">Top 10 trechos mais uteis</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="ID do trecho (primeiros 16 chars)">chunk ID</th>
+      <th title="Conta proprietaria">conta</th>
+      <th title="Tipo de fonte">fonte</th>
+      <th title="Pontuacao de utilidade materializada">utilidade</th>
+      <th title="Total de eventos de feedback">feedbacks</th>
+      <th title="Inicio do texto indexado">texto</th>
+      <th title="URL da pagina de origem">URL</th>
+    </tr></thead>
+    <tbody>
+${topRows || '<tr><td colspan="7" class="xs muted">Nenhum trecho com feedback positivo ainda.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
 }
 
 function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
@@ -761,6 +851,7 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
     <a href="#funil">Funil</a>
     <a href="#engajamento">Engajamento</a>
     <a href="#custo">Custo</a>
+    <a href="#qualidade-memoria">Memoria</a>
     <a href="#leads">Leads</a>
     <a href="#contas">Contas</a>
   </nav>
@@ -820,6 +911,9 @@ ${renderEngagementSection(data)}
 
 <!-- ============================== CUSTO ============================== -->
 ${renderCostSection(data)}
+
+<!-- ============================== QUALIDADE MEMORIA ============================== -->
+${renderMemoryQualitySection(data)}
 
 <!-- ============================== LEADS ============================== -->
 <section class="section" id="leads">

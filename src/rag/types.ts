@@ -15,6 +15,10 @@ export interface Chunk {
   metadata: Record<string, unknown>;
   source_updated: Date | null;
   account_id?: string;         // F3.0 tenant; defaults to 'bruno' at write time
+  // Spec 004: utility ranking fields (aditivo, defaults provided by DB)
+  utility_score?: number;      // materialized utility score
+  feedback_count?: number;     // total feedback events
+  last_useful_at?: Date | null; // timestamp of last positive signal
 }
 
 export interface ChunkWithEmbedding extends Chunk {
