@@ -10,6 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Request, Response } from "express";
 import { brainSearch } from "../rag/search.js";
 import { toBrainResult, type BrainResult } from "../rag/brain-format.js";
+import { isUntrustedSourceType } from "../rag/brain-tool.js";
 import { QuotaExceededError } from "../billing/usage.js";
 import { requestContext } from "../context.js";
 import { recordLlmUsage } from "../llm-usage.js";
@@ -252,7 +253,9 @@ Regras OBRIGATÓRIAS:
 
 /**
  * Build the numbered context string passed to the LLM.
- * Web results are wrapped in fence <<<untrusted>>> to guard against prompt injection.
+ * Third-party source results (web, notion, granola, calendar) are wrapped in
+ * fence <<<untrusted>>> to guard against prompt injection.
+ * "conversation" (user's own remembered notes) is trusted and not fenced.
  */
 export function buildAskContext(hits: BrainResult[]): string {
   if (hits.length === 0) return "";
@@ -264,7 +267,7 @@ export function buildAskContext(hits: BrainResult[]): string {
         typeof hit.metadata?.data === "string" ? ` · ${hit.metadata.data}` : "";
       const header = `[${n}] (${hit.title} · ${hit.source_type}${date})`;
 
-      if (hit.source_type === "web") {
+      if (isUntrustedSourceType(hit.source_type)) {
         return `${header}\n<<<untrusted>>>\n${hit.text}\n<<</untrusted>>>`;
       }
       return `${header}\n${hit.text}`;
