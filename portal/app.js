@@ -329,6 +329,8 @@ function renderFontes(me) {
 var docState = { filter: 'all', q: '', offset: 0 };
 var PAGE = 50;
 var statusPollTimer = null;
+/* E2.3: last counts from /portal/status for filter button rendering */
+var _lastStatusCounts = null;
 
 function stopStatusPolling() {
   if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
@@ -344,6 +346,9 @@ async function loadStatus() {
 
   var busy = !!st.running;
   renderBrainMini(busy, st);
+
+  /* E2.3: cache counts for filter button rendering */
+  _lastStatusCounts = st.counts || null;
 
   /* indexing-tag */
   var itag = document.getElementById('indexing-tag');
@@ -366,39 +371,57 @@ async function loadStatus() {
       '<div class="stat"><div class="v" style="font-size:15px;padding-top:5px">' + escapeHtml(lastStr) + '</div><div class="k">ultima indexacao</div></div>';
   }
 
-  /* por fonte */
+  /* por fonte — E2.1: enriched ActivitySource list from backend */
   var srcStatus = document.getElementById('src-status');
   if (srcStatus) {
-    /* 1.2: build a workspace_id -> name map from /portal/me (already loaded) */
-    var wsNameMap = {};
-    var meNotion = window._lastMe && window._lastMe.sources && window._lastMe.sources.notion;
-    if (meNotion && Array.isArray(meNotion.workspaces)) {
-      meNotion.workspaces.forEach(function (w) {
-        if (w.workspace) wsNameMap[w.workspace] = w.name || null;
-      });
+    var ESTADO_LABEL = {
+      aguardando_primeira_indexacao: 'aguardando',
+      indexando: 'indexando',
+      ok: 'ok',
+      erro: 'erro',
+      indisponivel_no_plano: 'plano',
+      pulado_sem_credencial: 'sem credencial'
+    };
+    var ESTADO_TAG = {
+      aguardando_primeira_indexacao: 'warn',
+      indexando: 'warn',
+      ok: 'ok',
+      erro: 'off',
+      indisponivel_no_plano: 'off',
+      pulado_sem_credencial: 'warn'
+    };
+    var sources = st.sources || [];
+    if (sources.length === 0) {
+      srcStatus.innerHTML = '<p class="muted" style="padding:12px 0">Nenhuma fonte conectada ainda. Configure em Fontes.</p>';
+    } else {
+      srcStatus.innerHTML = sources.map(function (s) {
+        var t = s.source_type || (s.source && s.source.startsWith('notion') ? 'notion'
+          : s.source && s.source.startsWith('granola') ? 'granola'
+          : s.source && s.source.startsWith('calendar') ? 'calendar' : 'web');
+        /* counts: prefer ActivitySource shape (counts blob); fall back to bySource totals */
+        var bySrc = (st.counts && st.counts.bySource || []).find(function (b) { return b.source_type === t; }) || {};
+        var cts = s.counts && typeof s.counts === 'object' ? s.counts : null;
+        var docsN = (cts && cts.documents != null) ? cts.documents : (bySrc.documents || 0);
+        var chunksN = (cts && cts.chunks != null) ? cts.chunks : (bySrc.chunks || 0);
+        var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
+        var tagCls = ESTADO_TAG[estado] || 'warn';
+        var tagLbl = ESTADO_LABEL[estado] || estado;
+        var displayName = s.display_name || s.source || t;
+        /* error: expandable when present */
+        var errHtml = '';
+        if (estado === 'erro' && s.error) {
+          errHtml = '<details style="margin-top:4px"><summary class="meta" style="color:var(--bad);cursor:pointer">⚠ ver erro</summary>' +
+            '<span class="meta" style="color:var(--bad);display:block;margin-top:4px;word-break:break-word">' + escapeHtml(s.error) + '</span></details>';
+        }
+        var when = (estado === 'ok' && s.last_run) ? '<span class="meta">sincronizado ' + new Date(s.last_run).toLocaleString('pt-BR') + '</span>' : '';
+        return '<div class="row">' + srcIcon(t) +
+          '<span class="grow"><span class="ttl">' + escapeHtml(displayName) + '</span>' +
+          (errHtml || when) + '</span>' +
+          '<span class="nums">' + fmt(docsN) + ' docs<br>' + fmt(chunksN) + ' trechos</span>' +
+          '<span class="tag ' + tagCls + '">' + escapeHtml(tagLbl) + '</span>' +
+          '</div>';
+      }).join('');
     }
-    srcStatus.innerHTML = (st.sources || []).map(function (s) {
-      var t = s.source && s.source.startsWith('notion') ? 'notion'
-        : s.source && s.source.startsWith('granola') ? 'granola'
-        : s.source && s.source.startsWith('calendar') ? 'calendar' : 'web';
-      var bySrc = (st.counts && st.counts.bySource || []).find(function (b) { return b.source_type === t; }) || {};
-      var err = s.ok === false ? '<span class="meta" style="color:var(--bad)">⚠ ' + escapeHtml(s.error || 'erro') + '</span>' : '';
-      var when = s.run_at ? 'sincronizado ' + new Date(s.run_at).toLocaleString('pt-BR') : '';
-      /* 1.2: for Notion sources, resolve workspace name from source id (format: "notion-<ws_id>") */
-      var displayName;
-      if (t === 'notion' && s.source) {
-        var wsId = s.source.replace(/^notion-/, '');
-        displayName = wsNameMap[wsId] || s.source;
-      } else {
-        displayName = s.source || t;
-      }
-      return '<div class="row">' + srcIcon(t) +
-        '<span class="grow"><span class="ttl">' + escapeHtml(displayName) + '</span>' +
-        (err || (when ? '<span class="meta">' + when + '</span>' : '')) + '</span>' +
-        '<span class="nums">' + fmt(bySrc.documents || 0) + ' docs<br>' + fmt(bySrc.chunks || 0) + ' trechos</span>' +
-        (s.ok === false ? '<span class="tag off">erro</span>' : '<span class="tag ok">ok</span>') +
-        '</div>';
-    }).join('');
   }
 
   /* poll */
@@ -427,7 +450,15 @@ function renderDocFilters(countsByType, total) {
 }
 
 async function loadBrain(reset) {
-  if (reset) docState.offset = 0;
+  if (reset) {
+    docState.offset = 0;
+    /* E2.3: restore filter buttons above search using cached counts from /portal/status */
+    var bySrc = (_lastStatusCounts && _lastStatusCounts.bySource) || [];
+    var countsByType = {};
+    var total = 0;
+    bySrc.forEach(function (b) { countsByType[b.source_type] = b.documents || 0; total += b.documents || 0; });
+    renderDocFilters(countsByType, total);
+  }
   var params = new URLSearchParams();
   if (docState.q) params.set('q', docState.q);
   if (docState.filter !== 'all') params.set('source_type', docState.filter);
