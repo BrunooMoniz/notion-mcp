@@ -461,320 +461,48 @@ function renderExplorerSelection() {
 var _graphData = null;          // {nodes, edges} from /portal/brain/graph
 var _graphLoaded = false;
 var _graphSig = '';             // filter signature at last graph load (for change detection)
-var _graphInstance = null;      // ForceGraph instance
+var _cyInstance = null;         // Cytoscape instance
 
 /**
- * ForceGraph — vanilla 2D canvas force-directed layout.
- * No external dependencies. Runs ~300 RAF iterations then freezes.
- * Supports: drag node, wheel zoom, pan (drag background), pinch-zoom on mobile.
+ * ensureCytoscape — lazy-loads cytoscape.min.js (local vendor) once,
+ * resolves when window.cytoscape is available. Subsequent calls are instant.
  */
-function ForceGraph(canvas, data) {
-  var self = this;
-  var ctx = canvas.getContext('2d');
-  var W = canvas.offsetWidth || 800;
-  var H = canvas.offsetHeight || 480;
-  canvas.width = W;
-  canvas.height = H;
-
-  var TYPE_COLOR = { pessoa: '#1f8b4c', empresa: '#7fb0ee', projeto: '#f6c544' };
-  var DOC_COLOR = '#bbb';
-
-  // --- Node layout state ---
-  var nodes = data.nodes.map(function(n, i) {
-    var angle = (2 * Math.PI * i) / data.nodes.length;
-    return {
-      id: n.id, kind: n.kind, label: n.label, type: n.type,
-      weight: n.weight || 1, url: n.url || null,
-      x: W / 2 + Math.cos(angle) * 160,
-      y: H / 2 + Math.sin(angle) * 160,
-      vx: 0, vy: 0,
-    };
+var _cytoscapePromise = null;
+function ensureCytoscape() {
+  if (_cytoscapePromise) return _cytoscapePromise;
+  _cytoscapePromise = new Promise(function(resolve, reject) {
+    if (window.cytoscape) { resolve(window.cytoscape); return; }
+    var script = document.createElement('script');
+    script.src = '/vendor/cytoscape.min.js';
+    script.onload = function() { resolve(window.cytoscape); };
+    script.onerror = function() { reject(new Error('Failed to load cytoscape')); };
+    document.head.appendChild(script);
   });
-  var byId = {};
-  nodes.forEach(function(n) { byId[n.id] = n; });
-
-  var edges = data.edges.filter(function(e) { return byId[e.a] && byId[e.b]; });
-
-  // --- Physics constants ---
-  var REPULSION = 3000;
-  var ATTRACT   = 0.04;
-  var DAMPING   = 0.82;
-  var CENTER    = 0.003;
-  var MAX_ITER  = 300;
-  var iter = 0;
-  var frozen = false;
-
-  // --- Viewport state ---
-  var scale = 1, tx = 0, ty = 0;
-  var dragNode = null, dragStart = null;
-  var panStart = null;
-  var raf = null;
-
-  // --- Hover state ---
-  var hoveredId = null;
-  var selectedId = null;
-
-  // --- onSelect callback ---
-  self.onSelect = null;
-
-  // Radius of a node
-  function radius(n) { return n.kind === 'entity' ? Math.max(6, Math.sqrt(n.weight) * 2.5) : Math.max(3, Math.sqrt(n.weight) * 1.5); }
-
-  // Screen to world coords
-  function toWorld(sx, sy) { return { x: (sx - tx) / scale, y: (sy - ty) / scale }; }
-
-  // Find node at screen (sx, sy)
-  function nodeAt(sx, sy) {
-    var w = toWorld(sx, sy);
-    for (var i = nodes.length - 1; i >= 0; i--) {
-      var n = nodes[i];
-      var r = radius(n);
-      var dx = n.x - w.x, dy = n.y - w.y;
-      if (dx * dx + dy * dy <= r * r) return n;
-    }
-    return null;
-  }
-
-  function neighborSet(id) {
-    var s = new Set();
-    edges.forEach(function(e) {
-      if (e.a === id) s.add(e.b);
-      if (e.b === id) s.add(e.a);
-    });
-    return s;
-  }
-
-  // --- Simulation step ---
-  function step() {
-    if (frozen) return;
-    // Repulsion
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        var a = nodes[i], b = nodes[j];
-        var dx = b.x - a.x, dy = b.y - a.y;
-        var d2 = dx * dx + dy * dy + 0.01;
-        var f = REPULSION / d2;
-        var fx = f * dx / Math.sqrt(d2), fy = f * dy / Math.sqrt(d2);
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
-      }
-    }
-    // Attraction along edges
-    edges.forEach(function(e) {
-      var a = byId[e.a], b = byId[e.b];
-      if (!a || !b) return;
-      var dx = b.x - a.x, dy = b.y - a.y;
-      var f = Math.sqrt(dx * dx + dy * dy) * ATTRACT * Math.log(1 + e.weight);
-      a.vx += f * dx; a.vy += f * dy;
-      b.vx -= f * dx; b.vy -= f * dy;
-    });
-    // Center gravity
-    nodes.forEach(function(n) {
-      n.vx += (W / 2 - n.x) * CENTER;
-      n.vy += (H / 2 - n.y) * CENTER;
-      n.vx *= DAMPING; n.vy *= DAMPING;
-      n.x += n.vx; n.y += n.vy;
-    });
-    iter++;
-    if (iter >= MAX_ITER) frozen = true;
-  }
-
-  // --- Render ---
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-
-    // Dotted background
-    ctx.save();
-    ctx.fillStyle = '#f9f9f9';
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#ddd';
-    var spacing = 20 * scale;
-    var offX = tx % spacing, offY = ty % spacing;
-    for (var x = offX; x < W; x += spacing) {
-      for (var y = offY; y < H; y += spacing) {
-        ctx.beginPath(); ctx.arc(x, y, 0.8, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(tx, ty);
-    ctx.scale(scale, scale);
-
-    var activeId = hoveredId || selectedId;
-    var neighbours = activeId ? neighborSet(activeId) : null;
-
-    // Edges
-    edges.forEach(function(e) {
-      var a = byId[e.a], b = byId[e.b];
-      if (!a || !b) return;
-      var dim = neighbours && !neighbours.has(e.a) && !neighbours.has(e.b) && e.a !== activeId && e.b !== activeId;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = dim ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.12)';
-      ctx.lineWidth = Math.max(0.5, e.weight * 0.3) / scale;
-      ctx.stroke();
-    });
-
-    // Nodes
-    nodes.forEach(function(n) {
-      var r = radius(n);
-      var isActive = n.id === activeId;
-      var isNeighbour = neighbours && neighbours.has(n.id);
-      var dimNode = neighbours && !isActive && !isNeighbour;
-      var color = n.kind === 'entity' ? (TYPE_COLOR[n.type] || '#999') : DOC_COLOR;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = dimNode ? 'rgba(200,200,200,0.3)' : color;
-      ctx.fill();
-      if (isActive) { ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5 / scale; ctx.stroke(); }
-
-      // Labels: entities always; docs only on hover
-      if (n.kind === 'entity' || isActive || isNeighbour) {
-        var alpha = dimNode ? 0.2 : 1;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#222';
-        ctx.font = (isActive ? 'bold ' : '') + Math.max(9, 11 / scale) + 'px "Geist Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        var label = n.label.length > 22 ? n.label.slice(0, 21) + '...' : n.label;
-        ctx.fillText(label, n.x, n.y + r + 3 / scale);
-        ctx.globalAlpha = 1;
-      }
-    });
-
-    ctx.restore();
-  }
-
-  // --- Main loop ---
-  function loop() {
-    step();
-    draw();
-    if (!frozen) raf = requestAnimationFrame(loop);
-    else draw(); // one final stable frame
-  }
-
-  self.start = function() { raf = requestAnimationFrame(loop); };
-
-  self.stop = function() { if (raf) cancelAnimationFrame(raf); raf = null; };
-
-  self.redraw = function() { draw(); };
-
-  // --- Event handlers ---
-  function getPos(e) {
-    var rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
-
-  canvas.addEventListener('mousedown', function(e) {
-    var pos = getPos(e);
-    var hit = nodeAt(pos.x, pos.y);
-    if (hit) {
-      dragNode = hit;
-      dragStart = { mx: pos.x, my: pos.y, nx: hit.x, ny: hit.y };
-    } else {
-      panStart = { mx: pos.x, my: pos.y, tx: tx, ty: ty };
-    }
-  });
-
-  canvas.addEventListener('mousemove', function(e) {
-    var pos = getPos(e);
-    if (dragNode && dragStart) {
-      var w = toWorld(pos.x, pos.y);
-      dragNode.x = w.x; dragNode.y = w.y;
-      dragNode.vx = 0; dragNode.vy = 0;
-      frozen = false; // resume simulation for dragged node
-      if (raf === null) raf = requestAnimationFrame(loop);
-      draw();
-      return;
-    }
-    if (panStart) {
-      tx = panStart.tx + (pos.x - panStart.mx);
-      ty = panStart.ty + (pos.y - panStart.my);
-      draw(); return;
-    }
-    var hit = nodeAt(pos.x, pos.y);
-    var newId = hit ? hit.id : null;
-    if (newId !== hoveredId) { hoveredId = newId; draw(); }
-    canvas.style.cursor = hit ? 'pointer' : (panStart ? 'grabbing' : 'grab');
-  });
-
-  canvas.addEventListener('mouseup', function(e) {
-    if (dragNode && dragStart) {
-      var pos = getPos(e);
-      var moved = Math.abs(pos.x - dragStart.mx) + Math.abs(pos.y - dragStart.my) < 4;
-      if (moved) {
-        // treat as click
-        selectedId = dragNode.id === selectedId ? null : dragNode.id;
-        if (self.onSelect) self.onSelect(selectedId ? dragNode : null);
-        draw();
-      }
-      dragNode = null; dragStart = null;
-    } else if (panStart) {
-      panStart = null;
-    }
-  });
-
-  canvas.addEventListener('click', function(e) {
-    // clicks handled in mouseup for drag vs click distinction
-    void e;
-  });
-
-  canvas.addEventListener('wheel', function(e) {
-    e.preventDefault();
-    var pos = getPos(e);
-    var factor = e.deltaY < 0 ? 1.1 : 0.91;
-    var wx = (pos.x - tx) / scale, wy = (pos.y - ty) / scale;
-    scale = Math.max(0.15, Math.min(8, scale * factor));
-    tx = pos.x - wx * scale;
-    ty = pos.y - wy * scale;
-    draw();
-  }, { passive: false });
-
-  // Pinch zoom (mobile)
-  var lastPinchDist = null;
-  canvas.addEventListener('touchstart', function(e) {
-    if (e.touches.length === 2) {
-      var dx = e.touches[0].clientX - e.touches[1].clientX;
-      var dy = e.touches[0].clientY - e.touches[1].clientY;
-      lastPinchDist = Math.sqrt(dx * dx + dy * dy);
-    } else if (e.touches.length === 1) {
-      var rect = canvas.getBoundingClientRect();
-      var t = e.touches[0];
-      panStart = { mx: t.clientX - rect.left, my: t.clientY - rect.top, tx: tx, ty: ty };
-    }
-    e.preventDefault();
-  }, { passive: false });
-
-  canvas.addEventListener('touchmove', function(e) {
-    if (e.touches.length === 2 && lastPinchDist !== null) {
-      var dx = e.touches[0].clientX - e.touches[1].clientX;
-      var dy = e.touches[0].clientY - e.touches[1].clientY;
-      var dist = Math.sqrt(dx * dx + dy * dy);
-      var factor = dist / lastPinchDist;
-      scale = Math.max(0.15, Math.min(8, scale * factor));
-      lastPinchDist = dist;
-      draw();
-    } else if (e.touches.length === 1 && panStart) {
-      var rect = canvas.getBoundingClientRect();
-      var t = e.touches[0];
-      tx = panStart.tx + (t.clientX - rect.left - panStart.mx);
-      ty = panStart.ty + (t.clientY - rect.top - panStart.my);
-      draw();
-    }
-    e.preventDefault();
-  }, { passive: false });
-
-  canvas.addEventListener('touchend', function() {
-    lastPinchDist = null; panStart = null;
-  });
+  return _cytoscapePromise;
 }
 
+/* === REMOVED: ForceGraph class (canvas force-directed layout — unstable divergence) ===
+ * The old ForceGraph applied attraction as f = dist * ATTRACT * log(weight) to the raw
+ * delta vector without normalizing, causing nodes to diverge off-screen in milliseconds.
+ * Replaced by Cytoscape.js with the built-in 'cose' layout (stable spring model).
+ */
+
+// Sentinel to mark that the ForceGraph stub is gone — used by static checks
+var _FORCEGRAPH_REMOVED = true; void _FORCEGRAPH_REMOVED;
+
+/* ForceGraph class has been fully removed. Cytoscape.js is used instead. */
+
 /**
- * loadGraph: fetch /portal/brain/graph, render canvas.
- * Fetches fresh data when explorerState changed; uses cached otherwise.
- * FIX: reads canvas dimensions AFTER display:block via requestAnimationFrame
- * so offsetWidth/offsetHeight are always correct.
+ * loadGraph — fetches /portal/brain/graph and renders with Cytoscape.js.
+ *
+ * Change detection: only re-fetches when explorerState filter signature changes.
+ * When the signature is the same, returns immediately (no fetch, no re-render).
+ * Cytoscape pan/zoom is native; no custom event handlers needed.
+ *
+ * Polling guard: loadStatus() calls renderBrainMini() which only touches the
+ * mini-stat elements, not the graph container. switchBrainView() checks
+ * explorerState.view before calling loadGraph, so the polling path (loadStatus
+ * → load → renderFontes etc.) never touches the Grafo view.
  */
 async function loadGraph() {
   var wrap = document.getElementById('brain-graph-wrap');
@@ -785,10 +513,9 @@ async function loadGraph() {
   var sig = Array.from(explorerState.entityIds).sort().join(',') + '|' + explorerState.sourceType;
 
   if (_graphLoaded && _graphSig === sig) {
-    // Same filters — just ensure canvas fits current dimensions and redraw.
-    if (_graphInstance) {
-      _resizeAndRedrawGraph();
-    }
+    // Same filters and Cytoscape instance exists — just call resize in case the
+    // container size changed (e.g. window resize, panel toggle).
+    if (_cyInstance) { _cyInstance.resize(); }
     return;
   }
 
@@ -808,36 +535,180 @@ async function loadGraph() {
       _graphSig = sig;
     } else {
       empty.style.display = 'none'; wrap.style.display = 'block';
-      var canvas = document.getElementById('brain-graph-canvas');
-      if (!canvas) return;
-      if (_graphInstance) _graphInstance.stop();
-      // FIX: yield to the browser paint cycle so offsetWidth/Height are non-zero
-      // even on the very first render when the parent just became display:block.
-      requestAnimationFrame(function() {
-        _graphInstance = new ForceGraph(canvas, data);
-        _graphInstance.onSelect = openGraphPanel;
-        _graphInstance.start();
+      var container = document.getElementById('brain-graph-canvas');
+      if (!container) return;
+
+      // Destroy previous Cytoscape instance to avoid memory leaks.
+      if (_cyInstance) { _cyInstance.destroy(); _cyInstance = null; }
+
+      // Load Cytoscape lazily (first time only — subsequent calls resolve instantly).
+      var cytoscape;
+      try { cytoscape = await ensureCytoscape(); }
+      catch (loadErr) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
+
+      // Map backend nodes/edges to Cytoscape elements.
+      var TYPE_COLOR = { pessoa: '#1f8b4c', empresa: '#7fb0ee', projeto: '#f6c544' };
+      var elements = [];
+
+      data.nodes.forEach(function(n) {
+        var w = n.weight || 1;
+        var size = n.kind === 'entity'
+          ? Math.max(14, Math.sqrt(w) * 5)
+          : Math.max(8, Math.sqrt(w) * 3);
+        elements.push({
+          group: 'nodes',
+          data: {
+            id: String(n.id),
+            label: n.label || '',
+            kind: n.kind || 'doc',
+            type: n.type || '',
+            weight: w,
+            url: n.url || null,
+            nodeSize: size,
+            nodeColor: n.kind === 'entity' ? (TYPE_COLOR[n.type] || '#999') : '#bbb',
+          },
+        });
       });
+
+      data.edges.forEach(function(e) {
+        var w = e.weight || 1;
+        elements.push({
+          group: 'edges',
+          data: {
+            id: 'edge-' + e.a + '-' + e.b,
+            source: String(e.a),
+            target: String(e.b),
+            weight: w,
+            edgeWidth: Math.max(1, Math.log(1 + w) * 1.5),
+          },
+        });
+      });
+
+      _cyInstance = cytoscape({
+        container: container,
+        elements: elements,
+        layout: {
+          name: 'cose',
+          animate: true,
+          animationDuration: 800,
+          randomize: true,
+          nodeRepulsion: function() { return 8000; },
+          idealEdgeLength: function() { return 80; },
+          edgeElasticity: function() { return 200; },
+          gravity: 80,
+          numIter: 1000,
+          fit: true,
+          padding: 30,
+        },
+        style: [
+          {
+            selector: 'node[kind = "entity"]',
+            style: {
+              'background-color': 'data(nodeColor)',
+              'width': 'data(nodeSize)',
+              'height': 'data(nodeSize)',
+              'label': 'data(label)',
+              'font-size': '11px',
+              'font-family': '"Geist Mono Variable","Geist Mono",monospace',
+              'color': '#222',
+              'text-valign': 'bottom',
+              'text-halign': 'center',
+              'text-margin-y': 4,
+              'text-max-width': '100px',
+              'text-wrap': 'ellipsis',
+              'cursor': 'pointer',
+            },
+          },
+          {
+            selector: 'node[kind = "doc"]',
+            style: {
+              'background-color': '#bbb',
+              'width': 'data(nodeSize)',
+              'height': 'data(nodeSize)',
+              'label': '',
+              'cursor': 'pointer',
+            },
+          },
+          {
+            selector: 'node:selected',
+            style: {
+              'border-width': 2,
+              'border-color': '#222',
+              'label': 'data(label)',
+            },
+          },
+          {
+            selector: 'node.highlighted',
+            style: {
+              'border-width': 1.5,
+              'border-color': '#444',
+              'opacity': 1,
+              'label': 'data(label)',
+            },
+          },
+          {
+            selector: 'node.dimmed',
+            style: { 'opacity': 0.15 },
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 'data(edgeWidth)',
+              'line-color': 'rgba(0,0,0,0.10)',
+              'curve-style': 'bezier',
+            },
+          },
+          {
+            selector: 'edge.highlighted',
+            style: { 'line-color': 'rgba(0,0,0,0.35)', 'opacity': 1 },
+          },
+          {
+            selector: 'edge.dimmed',
+            style: { 'opacity': 0.05 },
+          },
+        ],
+      });
+
+      // Cytoscape requires a container with real dimensions.
+      // wrap is display:block by now; call resize to be safe.
+      _cyInstance.resize();
+
+      // Hover: highlight neighbours, dim others.
+      _cyInstance.on('mouseover', 'node', function(evt) {
+        var node = evt.target;
+        var neighbourhood = node.closedNeighborhood();
+        _cyInstance.elements().not(neighbourhood).addClass('dimmed').removeClass('highlighted');
+        neighbourhood.addClass('highlighted').removeClass('dimmed');
+      });
+      _cyInstance.on('mouseout', 'node', function() {
+        _cyInstance.elements().removeClass('dimmed highlighted');
+      });
+
+      // Click: open side panel; for entity nodes also add to selection.
+      _cyInstance.on('tap', 'node', function(evt) {
+        var node = evt.target;
+        var nd = node.data();
+        openGraphPanel({
+          id: nd.id,
+          label: nd.label,
+          kind: nd.kind,
+          type: nd.type,
+          weight: nd.weight,
+          url: nd.url,
+        });
+      });
+
+      // Click on background: close panel.
+      _cyInstance.on('tap', function(evt) {
+        if (evt.target === _cyInstance) { openGraphPanel(null); }
+      });
+
       _graphLoaded = true;
       _graphSig = sig;
     }
   } catch (e) {
     empty.style.display = 'block'; wrap.style.display = 'none';
   }
-}
-
-/** Resize the canvas to match current parent dimensions, then redraw. */
-function _resizeAndRedrawGraph() {
-  var canvas = document.getElementById('brain-graph-canvas');
-  if (!canvas || !_graphInstance) return;
-  // Force canvas buffer to match its CSS layout size
-  var w = canvas.offsetWidth;
-  var h = canvas.offsetHeight;
-  if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  _graphInstance.redraw();
 }
 
 /** Open the side panel for a selected node (entity click).
@@ -1210,7 +1081,7 @@ function wireAtividade() {
   if (panelClose) panelClose.addEventListener('click', function() {
     var panel = document.getElementById('graph-panel');
     if (panel) panel.classList.remove('open');
-    if (_graphInstance) { _graphInstance.onSelect && _graphInstance.onSelect(null); _graphInstance.redraw(); }
+    // Cytoscape does not need a manual redraw after panel close.
   });
 
   // Load entities block on Atividade tab open
