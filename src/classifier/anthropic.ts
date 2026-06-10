@@ -3,7 +3,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ClassificationResult, Frente, ReuniaoTipo, InsightCategoria, PageToClassify } from "./types.js";
 import { validateClassification } from "./validate.js";
-import { recordLlmUsage } from "../llm-usage.js";
+import { recordLlmUsage, type LlmUsage } from "../llm-usage.js";
+
+/** Injectable metering function for callHaiku (tests replace with a no-op or spy). */
+export type HaikuMeterFn = (accountId: string, usage: LlmUsage, label: string) => Promise<void>;
+
+let _haikuMeter: HaikuMeterFn = recordLlmUsage;
+
+/** Test-only seam: replace the meter used internally by callHaiku. Pass null to restore. */
+export function __setHaikuMeterForTest(fn: HaikuMeterFn | null): void {
+  _haikuMeter = fn ?? recordLlmUsage;
+}
 
 const MODEL = process.env.CLASSIFIER_MODEL ?? "claude-haiku-4-5-20251001";
 
@@ -33,8 +43,20 @@ export interface HaikuResult {
  * Generic "ask Haiku" helper: one system prompt + one user message, returns the
  * concatenated text AND usage (input/output tokens) for metering.
  * Reusable beyond classification (e.g. an eval LLM-judge).
+ *
+ * When `accountId` is provided, meters token usage against that account
+ * best-effort INTERNALLY (fire-and-forget) using `label` as the tag.
+ * This ensures call sites that were not metering before cannot forget to meter.
+ *
+ * NOTE: `classifyPage` accumulates usage across retries and meters AFTER the
+ * retry loop, so it calls callHaiku WITHOUT an accountId to avoid double-counting.
  */
-export async function callHaiku(system: string, user: string): Promise<HaikuResult> {
+export async function callHaiku(
+  system: string,
+  user: string,
+  accountId?: string,
+  label = "haiku",
+): Promise<HaikuResult> {
   const c = getClient();
   const resp = await c.messages.create({
     model: MODEL,
@@ -46,13 +68,16 @@ export async function callHaiku(system: string, user: string): Promise<HaikuResu
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
-  return {
-    text,
-    usage: {
-      input_tokens: resp.usage.input_tokens,
-      output_tokens: resp.usage.output_tokens,
-    },
+  const usage: HaikuUsage = {
+    input_tokens: resp.usage.input_tokens,
+    output_tokens: resp.usage.output_tokens,
   };
+  // Meter best-effort when accountId is provided. classifyPage intentionally
+  // does NOT pass accountId here (it meters the total after retry aggregation).
+  if (accountId) {
+    _haikuMeter(accountId, usage, label).catch(() => {/* swallowed — best-effort */});
+  }
+  return { text, usage };
 }
 
 const SYSTEM_PROMPT = `Você é um classificador de notas do "segundo cérebro" do Bruno Moniz.
