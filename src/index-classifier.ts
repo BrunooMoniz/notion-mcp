@@ -108,6 +108,37 @@ cron.schedule(BRIEFING_CRON, () => {
   void tickBriefing("cron");
 });
 
+// E4 entities extraction — runs on the same schedule as the classifier, gated
+// by ENTITIES_ENABLED. Errors are caught inside the tick, never crash the process.
+async function tickEntities(label: string): Promise<void> {
+  if (process.env.ENTITIES_ENABLED !== "true") return;
+  const start = Date.now();
+  try {
+    const { extractEntitiesForAccount } = await import("./rag/entity-extractor.js");
+    const { getPool } = await import("./rag/storage.js");
+    const p = getPool();
+    const { rows } = await p.query<{ id: string }>(`SELECT id FROM account ORDER BY id`);
+    let totalChunks = 0;
+    let totalErrors = 0;
+    for (const row of rows) {
+      const stats = await extractEntitiesForAccount(row.id);
+      totalChunks += stats.chunksProcessed;
+      totalErrors += stats.errors;
+    }
+    console.log(
+      `[${new Date().toISOString()}] [entities:${label}] chunks=${totalChunks} errors=${totalErrors} took=${Date.now() - start}ms`,
+    );
+  } catch (err) {
+    console.error(
+      `[${new Date().toISOString()}] [entities:${label}] FAILED: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+cron.schedule(CLASSIFIER_CRON, () => {
+  void tickEntities("cron");
+});
+
 // Fase 3 billing — per-account auto re-sync. Hourly tick; each account is
 // re-indexed only when its plan's syncIntervalHours has elapsed (free skipped).
 const RESYNC_CRON = process.env.RESYNC_CRON ?? "15 * * * *";
