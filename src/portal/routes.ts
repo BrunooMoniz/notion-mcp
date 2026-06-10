@@ -655,6 +655,78 @@ export function createPortalRouter(): express.Router {
     }
   });
 
+  // POST /portal/brain/entities/merge — merge two entities (irreversible).
+  // Body: { keep_id: number, merge_id: number }
+  // 404 if either entity is not in this account (cross-account guard).
+  router.post("/portal/brain/entities/merge", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (process.env.ENTITIES_ENABLED !== "true") {
+      res.status(404).json({ error: "entidade não encontrada" });
+      return;
+    }
+    const keepId = parseInt(req.body?.keep_id, 10);
+    const mergeId = parseInt(req.body?.merge_id, 10);
+    if (isNaN(keepId) || isNaN(mergeId)) {
+      res.status(400).json({ error: "keep_id e merge_id são obrigatórios" });
+      return;
+    }
+    if (keepId === mergeId) {
+      res.status(400).json({ error: "keep_id e merge_id devem ser diferentes" });
+      return;
+    }
+    try {
+      const { mergeEntities } = await import("../rag/entity-management.js");
+      const result = await mergeEntities(accountId, keepId, mergeId);
+      if ("error" in result) {
+        res.status(404).json({ error: "entidade não encontrada" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.warn(`[portal] brain/entities/merge failed: ${err?.message ?? err}`);
+      res.status(503).json({ error: "operação indisponível" });
+    }
+  });
+
+  // PATCH /portal/brain/entities/:id — rename and/or retype entity.
+  // Body: { name?: string, type?: string }
+  // 404 if entity is not in this account (cross-account guard).
+  router.patch("/portal/brain/entities/:id", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (process.env.ENTITIES_ENABLED !== "true") {
+      res.status(404).json({ error: "entidade não encontrada" });
+      return;
+    }
+    const entityId = parseInt(req.params.id, 10);
+    if (isNaN(entityId)) {
+      res.status(400).json({ error: "id inválido" });
+      return;
+    }
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : undefined;
+    const type = typeof req.body?.type === "string" ? req.body.type.trim() : undefined;
+    if (!name && !type) {
+      res.status(400).json({ error: "name ou type é obrigatório" });
+      return;
+    }
+    const VALID_TYPES = ["pessoa", "empresa", "projeto"];
+    if (type && !VALID_TYPES.includes(type)) {
+      res.status(400).json({ error: "type inválido; válidos: pessoa, empresa, projeto" });
+      return;
+    }
+    try {
+      const { renameEntity } = await import("../rag/entity-management.js");
+      const result = await renameEntity(accountId, entityId, { name, type });
+      if ("error" in result) {
+        res.status(404).json({ error: "entidade não encontrada" });
+        return;
+      }
+      res.json(result);
+    } catch (err: any) {
+      console.warn(`[portal] brain/entities/:id PATCH failed: ${err?.message ?? err}`);
+      res.status(503).json({ error: "operação indisponível" });
+    }
+  });
+
   // --- Ativação (checklist one-time) ----------------------------------------
   router.get("/portal/activation", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
@@ -853,40 +925,57 @@ export function createPortalRouter(): express.Router {
 
   // GET /portal/brain/graph — entity+document co-occurrence graph for the account.
   // Gated by ENTITIES_ENABLED (same as /portal/brain/entities).
-  // Params: ?type=, ?entity_ids=1,2,3 (multi, preferred), ?entity_id=N (legacy),
-  //         ?max_nodes= (default 120, cap 300).
-  // When entity_ids is set, returns the subgraph of those entities + co-occurring docs.
+  // Params:
+  //   ?mode=overview|focus  (default: overview)
+  //   ?type=                entity type filter
+  //   ?entity_ids=1,2,3     focus mode: comma-separated entity IDs
+  //   ?entity_id=N          legacy single entity_id (still supported)
+  //   ?include_docs=true    include doc nodes in focus mode (default false)
+  //   ?max_nodes=N          cap (overview default 40, focus default 60, max 150)
   router.get("/portal/brain/graph", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     if (process.env.ENTITIES_ENABLED !== "true") {
-      res.json({ nodes: [], edges: [] });
+      res.json({ nodes: [], edges: [], mode: "overview" });
       return;
     }
     try {
       const { buildBrainGraph } = await import("../rag/graph-storage.js");
       const type = typeof req.query.type === "string" ? req.query.type : undefined;
+      const modeRaw = typeof req.query.mode === "string" ? req.query.mode : undefined;
+      const mode: "overview" | "focus" | undefined =
+        modeRaw === "focus" ? "focus" : modeRaw === "overview" ? "overview" : undefined;
+
+      // entity_ids: comma-separated list e.g. ?entity_ids=1,2,3
+      const entity_ids =
+        typeof req.query.entity_ids === "string"
+          ? req.query.entity_ids.split(",").map(Number).filter(Boolean)
+          : undefined;
+
+      // legacy single entity_id
       const entity_id =
         typeof req.query.entity_id === "string"
           ? parseInt(req.query.entity_id, 10) || undefined
           : undefined;
-      // Multi-entity subgraph: ?entity_ids=1,2,3
-      const entityIds = typeof req.query.entity_ids === "string"
-        ? req.query.entity_ids.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
-        : undefined;
+
+      const include_docs = req.query.include_docs === "true";
+
       const max_nodes =
         typeof req.query.max_nodes === "string"
           ? parseInt(req.query.max_nodes, 10) || undefined
           : undefined;
+
       const graph = await buildBrainGraph(accountId, {
+        mode,
         type,
+        entity_ids,
         entity_id,
-        entityIds: entityIds && entityIds.length > 0 ? entityIds : undefined,
+        include_docs,
         max_nodes,
       });
       res.json(graph);
     } catch (err: any) {
       console.warn(`[portal] brain/graph unavailable: ${err?.message ?? err}`);
-      res.status(503).json({ error: "grafo indisponível", nodes: [], edges: [] });
+      res.status(503).json({ error: "grafo indisponível", nodes: [], edges: [], mode: "overview" });
     }
   });
 
