@@ -25,6 +25,13 @@ function memPool() {
   return {
     query: async (sql: string, params: any[]) => {
       if (/SELECT plan FROM account/i.test(sql)) return { rows: [{ plan }] };
+      // monthlyCreditsUsed: GROUP BY metric aggregation
+      if (/GROUP BY metric/i.test(sql)) {
+        const rows = [];
+        if (searchSum > 0) rows.push({ metric: "search", total: String(searchSum) });
+        if (indexPagesSum > 0) rows.push({ metric: "index_pages", total: String(indexPagesSum) });
+        return { rows };
+      }
       if (/sum\(qty\)/i.test(sql)) {
         const metric = params[1];
         const total = metric === "search" ? searchSum : metric === "index_pages" ? indexPagesSum : 0;
@@ -95,11 +102,14 @@ test("essencial: on-demand daily cap (50)", async () => {
   await assert.rejects(() => assertOnDemandWithinLimit("friend:1", 10), QuotaExceededError);
 });
 
-test("getUsageSnapshot reports used+limit per metric", async () => {
+test("getUsageSnapshot reports used+limit per metric including F7 credits", async () => {
   plan = "pro"; chunkCount = 100; searchSum = 5; indexPagesSum = 2;
   const snap = await getUsageSnapshot("friend:1");
   assert.equal(snap.plan, "pro");
   assert.deepEqual(snap.chunks, { used: 100, limit: 40000 });
   assert.deepEqual(snap.searches, { used: 5, limit: 5000 });
   assert.deepEqual(snap.onDemand, { used: 2, limit: 200 });
+  // F7: credits — search=5*1=5 credits + index_pages=2*0.2=0.4 -> 5 rounded
+  assert.equal(snap.credits.limit, 8000); // pro plan
+  assert.equal(snap.credits.used, 5); // Math.round(5 + 0.4) = 5
 });

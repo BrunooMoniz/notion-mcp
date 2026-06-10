@@ -24,6 +24,11 @@ function meter(label, used, limit) {
 
 function planFeatures(p) {
   const items = [];
+  // F7: show credits as the primary feature
+  if (p.monthly_credits != null) {
+    const credLabel = isInf(p.monthly_credits) ? "Créditos ilimitados / mês" : `${nf(p.monthly_credits)} créditos / mês`;
+    items.push(credLabel);
+  }
   items.push(`${p.maxWorkspaces} workspace${p.maxWorkspaces > 1 ? "s" : ""} do Notion`);
   items.push(`${nf(p.maxChunks)} trechos indexados`);
   items.push(`${nf(p.searchesPerMonth)} consultas / mês`);
@@ -84,7 +89,20 @@ function renderPlan(b) {
 
 function renderUsage(b) {
   const u = b.usage;
+  // F7: show credits meter first (the primary user-facing limit).
+  const creditsHtml = u.credits
+    ? meter("Créditos de IA no mês", u.credits.used, u.credits.limit)
+    : "";
+  // Friendly over-limit warning in soft mode (plan is not blocked but user should upgrade).
+  let overWarning = "";
+  if (u.credits && isFinite(u.credits.limit) && u.credits.used > u.credits.limit) {
+    overWarning = `<p style="color:#b3261e;font-size:13.5px;margin-top:8px">Você passou do limite do seu plano — considere fazer upgrade para continuar sem interrupções.</p>`;
+  } else if (u.credits && isFinite(u.credits.limit) && u.credits.used >= u.credits.limit * 0.8) {
+    overWarning = `<p style="color:#8a6d12;font-size:13.5px;margin-top:8px">Você está próximo do limite do seu plano este mês. Considere um upgrade.</p>`;
+  }
   document.getElementById("meters").innerHTML =
+    creditsHtml +
+    overWarning +
     meter("Consultas no mês", u.searches.used, u.searches.limit) +
     meter("Trechos indexados", u.chunks.used, u.chunks.limit) +
     meter("Páginas sob demanda (hoje)", u.onDemand.used, u.onDemand.limit);

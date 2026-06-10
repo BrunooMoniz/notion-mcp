@@ -4,10 +4,19 @@
 // DEFAULT_ACCOUNT_ID is Bruno, and every cron/eval/test context resolves to it,
 // so existing behavior and tests are unchanged. Quota breaches THROW a typed
 // error (never swallowed) — the caller surfaces a clear PT-BR message.
+//
+// F7 — Credit enforcement with three modes (env PLAN_ENFORCEMENT):
+//   off  — no credit check (legacy behaviour, no DB query).
+//   soft — allows the request but logs the excess (DEFAULT). No account blocked.
+//   hard — blocks with QuotaExceededError when credits are exhausted.
+//
+// The "ilimitado" plan is NEVER hard-blocked by credits (only soft-alert).
+// The owner/default account is NEVER blocked regardless of mode.
 import { getPool, hasInjectedPool } from "../rag/storage.js";
 import { DEFAULT_ACCOUNT_ID } from "../context.js";
 import { getAccountPlan } from "./account-plan.js";
-import { getPlanLimits, isUnlimited, type PlanFeatures } from "./plans.js";
+import { getPlanLimits, isUnlimited, UNLIMITED, type PlanFeatures } from "./plans.js";
+import { monthlyCreditsUsed } from "./credits.js";
 
 export class QuotaExceededError extends Error {
   constructor(
@@ -33,6 +42,79 @@ export function monthStartUTC(now: Date = new Date()): Date {
 export function dayStartUTC(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
+
+// ---------------------------------------------------------------------------
+// F7 — Enforcement mode
+// ---------------------------------------------------------------------------
+
+export type EnforcementMode = "off" | "soft" | "hard";
+
+/** Read PLAN_ENFORCEMENT env var. Defaults to "soft" (never blocks real accounts). */
+export function getEnforcementMode(): EnforcementMode {
+  const v = (process.env.PLAN_ENFORCEMENT ?? "soft").toLowerCase();
+  if (v === "off" || v === "hard") return v;
+  return "soft";
+}
+
+// ---------------------------------------------------------------------------
+// F7 — Credit enforcement gate (called from search, ask, action paths)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check credit quota for an account. Behaviour by mode:
+ *   off  → no-op (no DB query, no log).
+ *   soft → logs excess to console; does NOT throw.
+ *   hard → throws QuotaExceededError when credits exhausted.
+ *          Exception: "ilimitado" plan is never hard-blocked (only soft-alert).
+ *
+ * Owner/default account is never checked regardless of mode.
+ *
+ * @param accountId  The account to check.
+ * @param metric     A label for logging (e.g. "search", "ask", "action").
+ * @param creditCost How many credits this operation costs (used for pre-check in hard mode).
+ */
+export async function assertCreditsWithinLimit(
+  accountId: string,
+  metric: string,
+  creditCost: number,
+): Promise<void> {
+  // Owner/default is always exempt.
+  if (accountId === DEFAULT_ACCOUNT_ID) return;
+
+  const mode = getEnforcementMode();
+  if (mode === "off") return;
+
+  const plan = await getAccountPlan(accountId);
+
+  // Owner plan: always exempt.
+  if (isUnlimited(plan)) return;
+
+  const limits = getPlanLimits(plan);
+  const creditLimit = limits.monthly_credits;
+
+  // Ilimitado plan: soft-only (never hard block per spec §2).
+  const isIlimitado = plan === "ilimitado";
+
+  const used = await monthlyCreditsUsed(accountId);
+
+  if (used + creditCost > creditLimit) {
+    if (mode === "hard" && !isIlimitado) {
+      throw new QuotaExceededError(
+        `créditos/mês (${metric})`,
+        creditLimit === UNLIMITED ? Number.POSITIVE_INFINITY : creditLimit,
+        Math.round(used),
+      );
+    }
+    // soft mode or ilimitado: log but allow.
+    console.warn(
+      `[billing:soft] account=${accountId} plan=${plan} metric=${metric} used=${used.toFixed(1)} limit=${creditLimit} cost=${creditCost} — over limit (allowed in ${mode} mode)`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Existing enforcement functions (unchanged; backward compat)
+// ---------------------------------------------------------------------------
 
 /** Sum of usage_log.qty for (account, metric) since `since`. 0 when no DB. */
 export async function queryUsage(accountId: string, metric: string, since: Date): Promise<number> {
@@ -136,25 +218,66 @@ export async function accountHasFeature(accountId: string, feature: keyof PlanFe
   return getPlanLimits(plan).features[feature];
 }
 
+// ---------------------------------------------------------------------------
+// F7 — Cost alert guard-rail
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if an account's estimated LLM cost this month exceeds COST_ALERT_USD
+ * (default $2). If so, log a warning and — when NTFY_URL is set — fire a
+ * best-effort notify. Never throws, never blocks.
+ *
+ * @param accountId  Account to check.
+ * @param llmCostUsd Estimated LLM cost for the account this month (USD).
+ */
+export async function checkCostAlert(accountId: string, llmCostUsd: number): Promise<void> {
+  const threshold = parseFloat(process.env.COST_ALERT_USD ?? "2");
+  if (!Number.isFinite(threshold) || llmCostUsd < threshold) return;
+
+  const msg = `[billing:cost-alert] account=${accountId} llm_cost_usd=${llmCostUsd.toFixed(4)} threshold=${threshold}`;
+  console.warn(msg);
+
+  const ntfyUrl = process.env.NTFY_URL;
+  if (ntfyUrl) {
+    try {
+      await fetch(ntfyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: `Zinom cost alert: ${accountId} spent $${llmCostUsd.toFixed(2)} this month (threshold $${threshold})`,
+      });
+    } catch (err: any) {
+      console.warn(`[billing:cost-alert] ntfy failed: ${err?.message ?? err}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Usage snapshot (extended with credits in F7)
+// ---------------------------------------------------------------------------
+
 export interface UsageSnapshot {
   plan: string;
   chunks: { used: number; limit: number };
   searches: { used: number; limit: number };
   onDemand: { used: number; limit: number };
+  // F7: unified credit meter
+  credits: { used: number; limit: number };
 }
 
 export async function getUsageSnapshot(accountId: string): Promise<UsageSnapshot> {
   const plan = await getAccountPlan(accountId);
   const limits = getPlanLimits(plan);
-  const [chunks, searches, onDemand] = await Promise.all([
+  const [chunks, searches, onDemand, creditsUsed] = await Promise.all([
     countChunks(accountId),
     queryUsage(accountId, "search", monthStartUTC()),
     queryUsage(accountId, "index_pages", dayStartUTC()),
+    monthlyCreditsUsed(accountId),
   ]);
   return {
     plan,
     chunks: { used: chunks, limit: limits.maxChunks },
     searches: { used: searches, limit: limits.searchesPerMonth },
     onDemand: { used: onDemand, limit: limits.onDemandPagesPerDay },
+    credits: { used: Math.round(creditsUsed), limit: limits.monthly_credits },
   };
 }
