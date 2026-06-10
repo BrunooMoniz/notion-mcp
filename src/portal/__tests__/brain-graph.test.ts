@@ -82,3 +82,31 @@ test("buildBrainGraph: edge references existing node ids", async () => {
     assert.ok(nodeIds.has(e.b), `edge.b="${e.b}" not in nodes`);
   }
 });
+
+test("buildBrainGraph: returns non-empty graph when entities and docs exist", async () => {
+  // Root-cause regression: verify that when the DB has entities+docs, the graph
+  // is non-empty (guards against the ENTITIES_ENABLED=false empty-return path
+  // being reached by callers that bypass the flag check).
+  __setPoolForTest(makePool([
+    {
+      rows: [
+        { id: 1, type: "pessoa", name: "Tatiana", mention_count: "10" },
+        { id: 2, type: "empresa", name: "Nora Finance", mention_count: "7" },
+      ],
+    },
+    { rows: [
+      { source_id: "g-001", source_type: "granola", title: "Sprint Planning", parent_url: "https://granola.so/g-001", doc_mention_count: "3" },
+    ] },
+    { rows: [
+      { entity_id: 1, source_id: "g-001", weight: "2" },
+      { entity_id: 2, source_id: "g-001", weight: "1" },
+    ] },
+    { rows: [{ entity_a: 1, entity_b: 2, weight: "1" }] },
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-real", {});
+  assert.ok(g.nodes.length > 0, "must have nodes when entities exist");
+  assert.ok(g.edges.length > 0, "must have edges when entity-doc relations exist");
+  assert.ok(g.nodes.some((n) => n.kind === "entity"), "must have entity nodes");
+  assert.ok(g.nodes.some((n) => n.kind === "doc"), "must have doc nodes");
+});
