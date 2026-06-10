@@ -208,6 +208,27 @@ export function diversifyHits(
   return kept;
 }
 
+/**
+ * Dedup RRF pool by source_id, keeping the highest-scored chunk per document.
+ * Preserves the original score order so the top-ranked chunk of each document
+ * surfaces first. This gives the reranker a more diverse candidate set (one
+ * representative chunk per document instead of several chunks from the same
+ * source competing for top-N slots).
+ *
+ * Exported pure for unit testing.
+ */
+export function dedupBySourceId(pool: SearchHit[]): SearchHit[] {
+  const seen = new Map<string, SearchHit>();
+  for (const hit of pool) {
+    const sid = hit.chunk.source_id;
+    if (!sid) continue;
+    const prev = seen.get(sid);
+    if (!prev || hit.score > prev.score) seen.set(sid, hit);
+  }
+  // Preserve descending-score order.
+  return [...seen.values()].sort((a, b) => b.score - a.score);
+}
+
 /** Min-max normalize RRF scores into [0,1], cosine as the tie-break. */
 function normalizeFallback(
   pool: SearchHit[],
@@ -297,16 +318,20 @@ export async function brainSearch(
     for (const h of semHits) cosineById.set(h.chunk.id, h.score);
 
     const pool = reciprocalRankFusion([semHits, kwHits], poolSize);
+    // Dedup by source_id before reranking: keep only the best-scored chunk per
+    // document. This gives the cross-encoder a more diverse candidate set so a
+    // single long document cannot crowd out other relevant documents in the pool.
+    const dedupedPool = dedupBySourceId(pool);
     const poolByChunkId = new Map(pool.map((h) => [h.chunk.id, h]));
 
     let reranked = false;
     if (rerankEnabled(opts.rerank)) {
-      // Rank MORE than topK (topK*3, capped to the pool) so diversifyHits has
-      // material to swap in once duplicates/over-represented urls are dropped.
-      const rerankN = Math.min(pool.length, topK * 3);
+      // Rank MORE than topK (topK*3, capped to the deduped pool) so diversifyHits
+      // has material to swap in once duplicates/over-represented urls are dropped.
+      const rerankN = Math.min(dedupedPool.length, topK * 3);
       const results = await deps.rerankDocuments(
         query,
-        pool.map((p) => ({ id: p.chunk.id, text: p.chunk.text })),
+        dedupedPool.map((p) => ({ id: p.chunk.id, text: p.chunk.text })),
         rerankN,
       );
       const anyScored = results.some((r) => r.relevance_score !== null);
