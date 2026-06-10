@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — Zinom</title>
+<style>
+@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');
+:root{--bg:#fff;--paper:#f7f6f3;--ink:#26241f;--ink-soft:#4a4740;--muted:#827d73;--line:#eae7df;--accent:#1f8b4c;--accent-strong:#15633a;--accent-soft:#ecf5ef;--sans:"Geist Variable","Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.65}
+.top{border-bottom:1px solid var(--line);background:var(--paper)}
+.top .wrap{display:flex;align-items:center;gap:10px;padding:14px 24px;max-width:760px;margin:0 auto}
+.top a{display:inline-flex;align-items:center;gap:9px;color:var(--ink);text-decoration:none;font-weight:600;letter-spacing:-.02em}
+main{max-width:760px;margin:0 auto;padding:40px 24px 72px}
+h1{font-size:clamp(26px,4vw,34px);font-weight:600;letter-spacing:-.03em;margin:0 0 4px}
+.upd{color:var(--muted);font-size:13.5px;margin:0 0 28px}
+h2{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:34px 0 10px}
+p,li{font-size:15px;color:var(--ink-soft)}
+ul{padding-left:22px}
+strong{color:var(--ink)}
+.box{background:var(--accent-soft);border:1px solid #d7e9de;border-radius:12px;padding:16px 18px;margin:18px 0}
+.box p{margin:0;color:var(--ink)}
+a{color:var(--accent-strong)}
+footer{border-top:1px solid var(--line);padding:18px 24px;text-align:center;color:var(--muted);font-size:13px}
+footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap"><a href="/">
+<svg width="22" height="22" viewBox="0 0 26 26" fill="none"><rect x="1" y="1" width="24" height="24" rx="7.5" fill="#1f8b4c"/><circle cx="8.5" cy="8.5" r="2.1" fill="#fff"/><circle cx="17.5" cy="8.5" r="2.1" fill="#fff" opacity=".75"/><circle cx="13" cy="17" r="2.1" fill="#fff"/><path d="M8.5 8.5 L13 17 L17.5 8.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/></svg>
+Zinom</a></div></div>
+<main>
+<h1>Política de Privacidade</h1>
+<p class="upd">Última atualização: 9 de junho de 2026</p>
+
+<p>Esta Política descreve como o <strong>Zinom.ai</strong> ("Zinom", "nós") coleta, usa e protege os seus dados quando você usa o nosso serviço de "segundo cérebro": um assistente que indexa as fontes de conhecimento que <strong>você</strong> conecta e as torna pesquisáveis por você e pelos assistentes de IA que você autorizar. Contato do controlador dos dados: <a href="mailto:ola@zinom.ai">ola@zinom.ai</a>.</p>
+
+<h2>1. Dados que coletamos</h2>
+<ul>
+<li><strong>Dados de conta:</strong> seu e-mail (para login por link mágico) e código de convite utilizado.</li>
+<li><strong>Conteúdo das fontes que você conecta:</strong> páginas e bases do Notion, resumos e transcrições de reuniões do Granola, eventos das agendas Google Calendar ou iCal, e páginas web que você mandar indexar. Esse conteúdo é processado e armazenado para servir exclusivamente às suas buscas.</li>
+<li><strong>Credenciais de integração:</strong> tokens de acesso (Notion, Google, Granola) e URLs secretas de iCal, armazenados cifrados (AES-256-GCM) e nunca exibidos em texto claro depois de salvos.</li>
+<li><strong>Dados de uso:</strong> contagem de buscas e de itens indexados (para operação do serviço e limites do plano), registros técnicos de acesso e cookies de sessão.</li>
+<li><strong>Dados de pagamento:</strong> processados pela Stripe. Não armazenamos número de cartão; guardamos apenas identificadores da assinatura e o status do plano.</li>
+</ul>
+
+<h2>2. Dados do Google</h2>
+<p>Se você conectar uma conta Google, o Zinom acessa, com a sua autorização: o seu endereço de e-mail (para identificar a conta conectada) e os dados do Google Calendar nos escopos <em>calendar.readonly</em> e <em>calendar.events</em>, usados para: (a) listar e exibir suas agendas e eventos; (b) criar, editar ou excluir eventos somente quando você (ou um assistente autorizado por você) solicitar; e (c) indexar seus eventos para que apareçam nas suas buscas pessoais.</p>
+<div class="box">
+<p>O uso que o Zinom faz de informações recebidas das APIs do Google obedece à <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Política de Dados do Usuário dos Serviços de API do Google</a>, incluindo os requisitos de <strong>Uso Limitado (Limited Use)</strong>. Em particular: não vendemos dados do Google; não os usamos para publicidade; não os usamos para treinar modelos de IA de uso geral; não os transferimos a terceiros exceto para operar as funcionalidades descritas acima, por exigência legal ou em razão de segurança; e nenhuma pessoa lê esses dados, salvo com o seu consentimento explícito, por razões de segurança, para cumprir a lei ou quando agregados e anonimizados.</p>
+</div>
+<p>Você pode revogar o acesso do Zinom à sua conta Google a qualquer momento em <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a> ou removendo a conta na tela "Fontes" do app.</p>
+
+<h2>3. Como usamos os dados</h2>
+<ul>
+<li><strong>Indexação:</strong> o conteúdo das suas fontes é dividido em trechos e convertido em representações vetoriais (embeddings) pela Voyage AI, para permitir busca semântica.</li>
+<li><strong>Respostas com IA:</strong> ao usar o chat ou um assistente conectado, trechos relevantes do seu conteúdo são enviados à Anthropic (Claude) para gerar a resposta, sempre com citação da fonte original.</li>
+<li><strong>Operação do serviço:</strong> autenticação, e-mails transacionais (Resend), cobrança (Stripe), métricas de uso e prevenção de abuso.</li>
+</ul>
+<p>Seus dados servem apenas a você: cada conta é isolada e as buscas de uma conta nunca enxergam o conteúdo de outra. Não vendemos dados pessoais e não exibimos publicidade.</p>
+
+<h2>4. Suboperadores</h2>
+<p>Para operar o serviço, compartilhamos o mínimo necessário com: Anthropic (geração de respostas e classificação), Voyage AI (embeddings e reordenação de resultados), Google, Notion e Granola (as integrações que você conecta), Stripe (pagamentos), Resend (e-mails) e Cloudflare (rede e segurança). A hospedagem é feita em infraestrutura própria.</p>
+
+<h2>5. Retenção e exclusão</h2>
+<p>Mantemos seus dados enquanto sua conta estiver ativa. Ao remover uma fonte, os dados dela deixam de ser atualizados; ao excluir sua conta (pelo app ou solicitando a <a href="mailto:ola@zinom.ai">ola@zinom.ai</a>), removemos o conteúdo indexado, as credenciais cifradas e os dados de conta, exceto registros que a lei exija manter (por exemplo, fiscais).</p>
+
+<h2>6. Segurança</h2>
+<p>Usamos TLS em todo o tráfego, criptografia em repouso para credenciais, tokens armazenados apenas como hash, controle de acesso por conta e registro de auditoria das operações de escrita. Nenhum sistema é infalível; em caso de incidente relevante, notificaremos os afetados conforme a lei.</p>
+
+<h2>7. Seus direitos (LGPD)</h2>
+<p>Nos termos da Lei Geral de Proteção de Dados (Lei 13.709/2018), você pode solicitar acesso, correção, portabilidade, anonimização ou exclusão dos seus dados, além de revogar consentimentos. Basta escrever para <a href="mailto:ola@zinom.ai">ola@zinom.ai</a>.</p>
+
+<h2>8. Crianças e adolescentes</h2>
+<p>O Zinom não é destinado a menores de 18 anos.</p>
+
+<h2>9. Alterações</h2>
+<p>Podemos atualizar esta Política; mudanças relevantes serão comunicadas no site ou por e-mail. A data no topo indica a versão vigente.</p>
+
+<h2>10. Contato</h2>
+<p>Dúvidas sobre privacidade: <a href="mailto:ola@zinom.ai">ola@zinom.ai</a>.</p>
+</main>
+<footer>© 2026 Zinom.ai · <a href="/termos.html">Termos de Serviço</a> · <a href="/">zinom.ai</a></footer>
+</body>
+</html>
