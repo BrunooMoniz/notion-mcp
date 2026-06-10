@@ -5,12 +5,16 @@ import { handleStripeEvent } from "../webhook.js";
 import { __clearPlanCache } from "../account-plan.js";
 import { __setPoolForTest } from "../../rag/storage.js";
 
-interface Acct { id: string; plan: string; plan_status: string | null; stripe_customer_id: string | null; stripe_subscription_id: string | null; current_period_end: Date | null }
+interface Acct { id: string; plan: string; plan_status: string | null; plan_comp: boolean; stripe_customer_id: string | null; stripe_subscription_id: string | null; current_period_end: Date | null }
 let accounts: Map<string, Acct>;
 
 function memPool() {
   return {
     query: async (sql: string, params: any[]) => {
+      if (/SELECT id, plan_comp FROM account WHERE stripe_customer_id=\$1/i.test(sql)) {
+        for (const a of accounts.values()) if (a.stripe_customer_id === params[0]) return { rows: [{ id: a.id, plan_comp: a.plan_comp }] };
+        return { rows: [] };
+      }
       if (/UPDATE account SET plan=\$2, plan_status=\$3/i.test(sql)) {
         for (const a of accounts.values()) if (a.stripe_customer_id === params[0]) {
           a.plan = params[1]; a.plan_status = params[2]; a.stripe_subscription_id = params[3]; a.current_period_end = params[4];
@@ -34,7 +38,7 @@ function memPool() {
 }
 
 beforeEach(() => {
-  accounts = new Map([["friend:1", { id: "friend:1", plan: "free", plan_status: null, stripe_customer_id: "cus_1", stripe_subscription_id: null, current_period_end: null }]]);
+  accounts = new Map([["friend:1", { id: "friend:1", plan: "free", plan_status: null, plan_comp: false, stripe_customer_id: "cus_1", stripe_subscription_id: null, current_period_end: null }]]);
   process.env.STRIPE_PRICE_PRO = "price_pro";
   __setPoolForTest(memPool() as never);
   __clearPlanCache();

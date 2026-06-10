@@ -15,6 +15,7 @@ import { __setPoolForTest } from "../../rag/storage.js";
 
 interface Acct {
   id: string; plan: string; plan_status: string | null;
+  plan_comp: boolean;
   current_period_end: Date | null; stripe_customer_id: string | null;
   stripe_subscription_id: string | null; email: string | null;
 }
@@ -36,6 +37,10 @@ function memPool() {
       if (/UPDATE account SET stripe_customer_id=\$2 WHERE id=\$1/i.test(sql)) {
         const a = accounts.get(params[0]); if (a) a.stripe_customer_id = params[1];
         return { rows: [], rowCount: a ? 1 : 0 };
+      }
+      if (/SELECT id, plan_comp FROM account WHERE stripe_customer_id=\$1/i.test(sql)) {
+        for (const a of accounts.values()) if (a.stripe_customer_id === params[0]) return { rows: [{ id: a.id, plan_comp: a.plan_comp }] };
+        return { rows: [] };
       }
       if (/SELECT id FROM account WHERE stripe_customer_id=\$1/i.test(sql)) {
         for (const a of accounts.values()) if (a.stripe_customer_id === params[0]) return { rows: [{ id: a.id }] };
@@ -65,7 +70,7 @@ function memPool() {
 
 beforeEach(() => {
   accounts = new Map([
-    ["friend:1", { id: "friend:1", plan: "free", plan_status: null, current_period_end: null, stripe_customer_id: null, stripe_subscription_id: null, email: "a@b.com" }],
+    ["friend:1", { id: "friend:1", plan: "free", plan_status: null, plan_comp: false, current_period_end: null, stripe_customer_id: null, stripe_subscription_id: null, email: "a@b.com" }],
   ]);
   events = new Set();
   __setPoolForTest(memPool() as never);
