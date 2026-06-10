@@ -773,6 +773,34 @@ export function createPortalRouter(): express.Router {
     res.sendStatus(ok ? 204 : 404);
   });
 
+  // GET /portal/brain/graph — entity+document co-occurrence graph for the account.
+  // Gated by ENTITIES_ENABLED (same as /portal/brain/entities).
+  // Params: ?type=, ?entity_id=, ?max_nodes= (default 120, cap 300).
+  router.get("/portal/brain/graph", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (process.env.ENTITIES_ENABLED !== "true") {
+      res.json({ nodes: [], edges: [] });
+      return;
+    }
+    try {
+      const { buildBrainGraph } = await import("../rag/graph-storage.js");
+      const type = typeof req.query.type === "string" ? req.query.type : undefined;
+      const entity_id =
+        typeof req.query.entity_id === "string"
+          ? parseInt(req.query.entity_id, 10) || undefined
+          : undefined;
+      const max_nodes =
+        typeof req.query.max_nodes === "string"
+          ? parseInt(req.query.max_nodes, 10) || undefined
+          : undefined;
+      const graph = await buildBrainGraph(accountId, { type, entity_id, max_nodes });
+      res.json(graph);
+    } catch (err: any) {
+      console.warn(`[portal] brain/graph unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "grafo indisponível", nodes: [], edges: [] });
+    }
+  });
+
   return router;
 }
 
