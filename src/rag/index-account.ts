@@ -12,30 +12,122 @@
 // requestContext.run({accountId}) so getClient/getSearchClient/notionFetch in
 // notion-source resolve THIS account's vault token.
 import { requestContext } from "../context.js";
-import { warmAccount } from "../account-tokens.js";
-import { getAccountSecret } from "../secrets.js";
-import { fetchWorkspaceDocuments } from "./notion-source.js";
-import { fetchGranolaDocuments } from "./granola-source.js";
-import { fetchIcsCalendarDocuments } from "./calendar-ics-source.js";
-import { indexDocument } from "./index-document.js";
-import {
-  replaceDocumentChunks,
-  deleteBySource,
-  setSyncState,
-  recordRun,
-  pruneOrphans,
-} from "./storage.js";
 import { prefixChunkIds } from "./account-chunks.js";
-import { FRIEND_WORKSPACE, accountIcalConfigs, ensureAccountWorkspace } from "./account-sources.js";
-import { indexGcalOAuthForAccount } from "./gcal-oauth-source.js";
-import type { Workspace } from "./types.js";
-import { accountHasFeature } from "../billing/usage.js";
+import { FRIEND_WORKSPACE, accountIcalConfigs } from "./account-sources.js";
+import type { Workspace, IndexableDocument, ChunkWithEmbedding } from "./types.js";
+import type { IcsCalendarConfig } from "./calendar-ics-source.js";
+
+// ─── Dep-injection seam (test-only) ─────────────────────────────────────────
+
+export interface IndexAccountDeps {
+  warmAccount(accountId: string): Promise<string[]>;
+  accountHasFeature(accountId: string, feature: string): Promise<boolean>;
+  getAccountSecret(accountId: string, kind: string): Promise<string | null>;
+  fetchWorkspaceDocuments(opts: {
+    workspace: Workspace;
+    onArchived: (id: string) => void;
+  }): AsyncIterable<IndexableDocument>;
+  fetchGranolaDocuments(opts: {
+    token: string;
+    workspace: Workspace;
+  }): AsyncIterable<IndexableDocument>;
+  fetchIcsCalendarDocuments(opts: {
+    configs: IcsCalendarConfig[];
+  }): AsyncIterable<IndexableDocument>;
+  indexDocument(doc: IndexableDocument): Promise<ChunkWithEmbedding[]>;
+  replaceDocumentChunks(
+    sourceType: string,
+    sourceId: string,
+    accountId: string,
+    chunks: ChunkWithEmbedding[],
+  ): Promise<void>;
+  deleteBySource(sourceType: string, sourceId: string, accountId: string): Promise<void>;
+  setSyncState(key: string, ts: Date, accountId: string): Promise<void>;
+  recordRun(run: {
+    worker: string;
+    source: string;
+    ok: boolean;
+    counts?: unknown;
+    error?: string | null;
+    startedAt: Date;
+    endedAt: Date;
+    accountId?: string;
+  }): Promise<void>;
+  pruneOrphans(
+    sourceType: string,
+    workspace: string,
+    liveIds: string[],
+    accountId: string,
+  ): Promise<number>;
+  ensureAccountWorkspace(accountId: string, workspace: string): Promise<void>;
+  indexGcalOAuthForAccount(
+    accountId: string,
+    workspace: string,
+  ): Promise<{ documents: number; chunks: number }>;
+}
+
+// Lazy real deps — loaded on demand so tests that inject don't boot clients.ts.
+async function buildRealDeps(): Promise<IndexAccountDeps> {
+  const [
+    { warmAccount: wa },
+    { accountHasFeature: ahf },
+    { getAccountSecret: gas },
+    { fetchWorkspaceDocuments: fwd },
+    { fetchGranolaDocuments: fgd },
+    { fetchIcsCalendarDocuments: ficd },
+    { indexDocument: idoc },
+    { replaceDocumentChunks: rdc, deleteBySource: dbs, setSyncState: sss, recordRun: rr, pruneOrphans: po },
+    { ensureAccountWorkspace: eaw },
+    { indexGcalOAuthForAccount: igoa },
+  ] = await Promise.all([
+    import("../account-tokens.js"),
+    import("../billing/usage.js"),
+    import("../secrets.js"),
+    import("./notion-source.js"),
+    import("./granola-source.js"),
+    import("./calendar-ics-source.js"),
+    import("./index-document.js"),
+    import("./storage.js"),
+    import("./account-sources.js"),
+    import("./gcal-oauth-source.js"),
+  ]);
+  return {
+    warmAccount: wa,
+    accountHasFeature: ahf,
+    getAccountSecret: gas,
+    fetchWorkspaceDocuments: fwd,
+    fetchGranolaDocuments: fgd,
+    fetchIcsCalendarDocuments: ficd,
+    indexDocument: idoc,
+    replaceDocumentChunks: rdc,
+    deleteBySource: dbs,
+    setSyncState: sss,
+    recordRun: rr,
+    pruneOrphans: po,
+    ensureAccountWorkspace: eaw,
+    indexGcalOAuthForAccount: igoa,
+  };
+}
+
+let _testDeps: IndexAccountDeps | null = null;
+
+/** Test-only: inject deps or clear (null) after the test. */
+export function __setIndexAccountDepsForTest(deps: IndexAccountDeps | null): void {
+  _testDeps = deps;
+}
+
+async function getDeps(): Promise<IndexAccountDeps> {
+  return _testDeps ?? buildRealDeps();
+}
+
+// ─── indexAccount ────────────────────────────────────────────────────────────
 
 export async function indexAccount(accountId: string): Promise<{ documents: number; chunks: number }> {
-  const workspaces = await warmAccount(accountId);
+  const deps = await getDeps();
+  const workspaces = await deps.warmAccount(accountId);
   // Fase 3 billing — Granola + Calendar are paid features (Free indexes Notion
   // only). Owner/default account has all features.
-  const canGranolaCalendar = await accountHasFeature(accountId, "granolaCalendar");
+  const canGranolaCalendar = await deps.accountHasFeature(accountId, "granolaCalendar");
   let documents = 0;
   let chunks = 0;
 
@@ -48,24 +140,24 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
       let wsDocs = 0;
       let wsChunks = 0;
       try {
-        for await (const doc of fetchWorkspaceDocuments({
+        for await (const doc of deps.fetchWorkspaceDocuments({
           workspace: ws as Workspace,
           onArchived: (id) => archivedIds.push(id),
         })) {
           doc.account_id = accountId;
-          const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
+          const docChunks = prefixChunkIds(await deps.indexDocument(doc), accountId);
           // Atomic per-document replace: an interruption mid-pass leaves every
           // already-processed document intact instead of emptying the brain.
-          await replaceDocumentChunks("notion", doc.source_id, accountId, docChunks);
+          await deps.replaceDocumentChunks("notion", doc.source_id, accountId, docChunks);
           liveIds.push(doc.source_id);
           wsDocs++;
           wsChunks += docChunks.length;
         }
-        for (const id of archivedIds) await deleteBySource("notion", id, accountId);
-        const pruned = await pruneOrphans("notion", ws, liveIds, accountId);
+        for (const id of archivedIds) await deps.deleteBySource("notion", id, accountId);
+        const pruned = await deps.pruneOrphans("notion", ws, liveIds, accountId);
         if (pruned > 0) console.log(`[index-account] ${accountId} ws=${ws} pruned ${pruned} orphans`);
-        await setSyncState(`notion-${ws}`, startedAt, accountId);
-        await recordRun({
+        await deps.setSyncState(`notion-${ws}`, startedAt, accountId);
+        await deps.recordRun({
           worker: "indexer",
           source: `notion-${ws}`,
           ok: true,
@@ -79,7 +171,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         console.log(`[index-account] ${accountId} ws=${ws} documents=${wsDocs} chunks=${wsChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} ws=${ws} FAILED: ${err?.message ?? err}`);
-        await recordRun({
+        await deps.recordRun({
           worker: "indexer",
           source: `notion-${ws}`,
           ok: false,
@@ -94,26 +186,26 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- Granola pass (one key per account, from the vault) ----
-  const granolaKey = canGranolaCalendar ? await getAccountSecret(accountId, "granola") : null;
+  const granolaKey = canGranolaCalendar ? await deps.getAccountSecret(accountId, "granola") : null;
   if (granolaKey) {
-    await ensureAccountWorkspace(accountId, FRIEND_WORKSPACE);
+    await deps.ensureAccountWorkspace(accountId, FRIEND_WORKSPACE);
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
       const liveIds: string[] = [];
       let gDocs = 0;
       let gChunks = 0;
       try {
-        for await (const doc of fetchGranolaDocuments({ token: granolaKey, workspace: FRIEND_WORKSPACE })) {
+        for await (const doc of deps.fetchGranolaDocuments({ token: granolaKey, workspace: FRIEND_WORKSPACE })) {
           doc.account_id = accountId;
-          const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
-          await replaceDocumentChunks("granola", doc.source_id, accountId, docChunks);
+          const docChunks = prefixChunkIds(await deps.indexDocument(doc), accountId);
+          await deps.replaceDocumentChunks("granola", doc.source_id, accountId, docChunks);
           liveIds.push(doc.source_id);
           gDocs++;
           gChunks += docChunks.length;
         }
-        await pruneOrphans("granola", FRIEND_WORKSPACE, liveIds, accountId);
-        await setSyncState(`granola-${FRIEND_WORKSPACE}`, startedAt, accountId);
-        await recordRun({
+        await deps.pruneOrphans("granola", FRIEND_WORKSPACE, liveIds, accountId);
+        await deps.setSyncState(`granola-${FRIEND_WORKSPACE}`, startedAt, accountId);
+        await deps.recordRun({
           worker: "indexer",
           source: `granola-${FRIEND_WORKSPACE}`,
           ok: true,
@@ -127,7 +219,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         console.log(`[index-account] ${accountId} granola documents=${gDocs} chunks=${gChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} granola FAILED: ${err?.message ?? err}`);
-        await recordRun({
+        await deps.recordRun({
           worker: "indexer",
           source: `granola-${FRIEND_WORKSPACE}`,
           ok: false,
@@ -139,13 +231,24 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         });
       }
     });
+  } else if (canGranolaCalendar) {
+    // granola secret absent — record a skipped run so status_runs is never silent.
+    await deps.recordRun({
+      worker: "indexer",
+      source: `granola-${FRIEND_WORKSPACE}`,
+      ok: true,
+      counts: { skipped: "no_credentials" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
   }
 
   // ---- iCal pass (many links per account, from the vault) ----
-  const icalConfigs = canGranolaCalendar ? accountIcalConfigs(await getAccountSecret(accountId, "ical")) : [];
+  const icalConfigs = canGranolaCalendar ? accountIcalConfigs(await deps.getAccountSecret(accountId, "ical")) : [];
   if (icalConfigs.length > 0) {
     for (const ws of new Set(icalConfigs.map((c) => c.workspace))) {
-      await ensureAccountWorkspace(accountId, ws);
+      await deps.ensureAccountWorkspace(accountId, ws);
     }
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
@@ -153,10 +256,10 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
       let cDocs = 0;
       let cChunks = 0;
       try {
-        for await (const doc of fetchIcsCalendarDocuments({ configs: icalConfigs })) {
+        for await (const doc of deps.fetchIcsCalendarDocuments({ configs: icalConfigs })) {
           doc.account_id = accountId;
-          const docChunks = prefixChunkIds(await indexDocument(doc), accountId);
-          await replaceDocumentChunks("calendar", doc.source_id, accountId, docChunks);
+          const docChunks = prefixChunkIds(await deps.indexDocument(doc), accountId);
+          await deps.replaceDocumentChunks("calendar", doc.source_id, accountId, docChunks);
           if (doc.workspace) {
             const arr = liveByWs.get(doc.workspace) ?? [];
             arr.push(doc.source_id);
@@ -165,9 +268,9 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
           cDocs++;
           cChunks += docChunks.length;
         }
-        for (const [ws, liveIds] of liveByWs) await pruneOrphans("calendar", ws, liveIds, accountId);
-        await setSyncState("calendar-ics", startedAt, accountId);
-        await recordRun({
+        for (const [ws, liveIds] of liveByWs) await deps.pruneOrphans("calendar", ws, liveIds, accountId);
+        await deps.setSyncState("calendar-ics", startedAt, accountId);
+        await deps.recordRun({
           worker: "indexer",
           source: "calendar",
           ok: true,
@@ -181,7 +284,7 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         console.log(`[index-account] ${accountId} calendar documents=${cDocs} chunks=${cChunks}`);
       } catch (err: any) {
         console.error(`[index-account] ${accountId} calendar FAILED: ${err?.message ?? err}`);
-        await recordRun({
+        await deps.recordRun({
           worker: "indexer",
           source: "calendar",
           ok: false,
@@ -193,11 +296,22 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         });
       }
     });
+  } else if (canGranolaCalendar) {
+    // ical secret absent — record a skipped run so status_runs is never silent.
+    await deps.recordRun({
+      worker: "indexer",
+      source: "calendar",
+      ok: true,
+      counts: { skipped: "no_credentials" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
   }
 
   // ---- Google OAuth calendar pass (many accounts per tenant, from vault) ----
   if (canGranolaCalendar) {
-    const gcalResult = await indexGcalOAuthForAccount(accountId, FRIEND_WORKSPACE);
+    const gcalResult = await deps.indexGcalOAuthForAccount(accountId, FRIEND_WORKSPACE);
     documents += gcalResult.documents;
     chunks += gcalResult.chunks;
     if (gcalResult.documents > 0 || gcalResult.chunks > 0) {
@@ -205,6 +319,35 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         `[index-account] ${accountId} gcal documents=${gcalResult.documents} chunks=${gcalResult.chunks}`,
       );
     }
+  } else {
+    // plan gate closed — record a skipped run for each paid source so status_runs is never silent.
+    await deps.recordRun({
+      worker: "indexer",
+      source: `granola-${FRIEND_WORKSPACE}`,
+      ok: true,
+      counts: { skipped: "plan_gate" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
+    await deps.recordRun({
+      worker: "indexer",
+      source: "calendar",
+      ok: true,
+      counts: { skipped: "plan_gate" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
+    await deps.recordRun({
+      worker: "indexer",
+      source: "gcal",
+      ok: true,
+      counts: { skipped: "plan_gate" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
   }
 
   return { documents, chunks };
