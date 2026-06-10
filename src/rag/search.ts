@@ -170,6 +170,47 @@ function maxPerUrlConfig(): number {
 }
 
 /**
+ * Optional recency boost applied AFTER reranking (or after RRF fallback).
+ * Controlled by RECENCY_BOOST env var (default "off" / 0).
+ *
+ * Formula: final_score = score * (1 + beta * exp(-age_days / halflife))
+ *   beta     = RECENCY_BOOST  (e.g. 0.15 → max +15% for today's docs)
+ *   halflife = RECENCY_HALFLIFE_DAYS (default 30)
+ *   age_days derived from chunk.metadata.data (ISO date string) or source_updated.
+ *
+ * With RECENCY_BOOST=0 (or unset) returns hits unchanged — zero cost.
+ * Positive beta boosts recent content; negative beta penalizes it (unusual).
+ */
+export function recencyBoostEnabled(): boolean {
+  const v = Number(process.env.RECENCY_BOOST);
+  return Number.isFinite(v) && v !== 0;
+}
+
+export function applyRecencyBoost(hits: SearchHit[], now: Date = new Date()): SearchHit[] {
+  const beta = Number(process.env.RECENCY_BOOST);
+  if (!Number.isFinite(beta) || beta === 0) return hits;
+  const halflife = Number(process.env.RECENCY_HALFLIFE_DAYS ?? 30);
+  const hl = Number.isFinite(halflife) && halflife > 0 ? halflife : 30;
+  // ln(2)/halflife is the decay constant for exp(-age * lambda)
+  const lambda = Math.LN2 / hl;
+
+  const boosted = hits.map((h) => {
+    const dateStr =
+      (typeof h.chunk.metadata?.data === "string" ? h.chunk.metadata.data : undefined) ??
+      (h.chunk.source_updated instanceof Date ? h.chunk.source_updated.toISOString() : undefined);
+    if (!dateStr) return h;
+    const docDate = new Date(dateStr);
+    if (isNaN(docDate.getTime())) return h;
+    const ageDays = Math.max(0, (now.getTime() - docDate.getTime()) / 86_400_000);
+    const boost = 1 + beta * Math.exp(-ageDays * lambda);
+    return { ...h, score: h.score * boost };
+  });
+
+  // Re-sort by boosted score (recency may reorder).
+  return boosted.sort((a, b) => b.score - a.score);
+}
+
+/**
  * Query-time result diversification. Iterates `hits` in their given (already
  * ranked) order and KEEPS a hit unless:
  *   - its trimmed `chunk.text` is identical to one already kept (exact-duplicate
@@ -371,6 +412,11 @@ export async function brainSearch(
       hits = diversifyHits(normalized, { topK, maxPerUrl });
     }
   }
+
+  // Optional recency boost (RECENCY_BOOST env, default off). Applied after all
+  // ranking/diversification so it can only reorder within the already-diversified
+  // topK set, not expand it. Zero cost when RECENCY_BOOST=0 or unset.
+  hits = applyRecencyBoost(hits);
 
   if (opts.includeNeighbors) {
     for (const hit of hits) {
