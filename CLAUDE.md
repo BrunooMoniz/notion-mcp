@@ -121,6 +121,13 @@ Two paths:
 - `assertWorkspaceScope()` in context.ts enforces OAuth scope per request
 - Error handling is wrapped at the `server.tool` level in tools.ts -- individual handlers don't need try/catch
 
+## Retrieval eval (F8)
+
+If you alter `src/rag/search.ts`, `src/rag/chunker.ts`, `src/rag/granola-source.ts`, or any embeddings/reranking path:
+1. Run `npm run eval` on the VPS (`ssh zinom-vps "cd /home/moniz/notion-mcp && ./node_modules/.bin/tsx scripts/eval/run-eval.mts"`).
+2. Compare Recall@5 and MRR against `scripts/eval/BASELINE.md` (F8 baseline: Recall@5=0.875, MRR=0.604; post-3a: R@5=0.917, MRR=0.616).
+3. Only commit changes that maintain or improve both metrics. Document results in `scripts/eval/RESULTS.md`.
+
 ## Friend Account Portal (001-account-portal)
 
 Self-service portal so a non-technical friend onboards their own second brain
