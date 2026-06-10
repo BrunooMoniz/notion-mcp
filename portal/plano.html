@@ -3,43 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Acompanhe seu plano e consumo do Zinom. Faça upgrade ou cancele quando quiser.">
 <title>Plano — Zinom</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<style>@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');</style>
+<style>@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');
+@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.2.6/index.css');</style>
 <style>
 :root{
-  --bg:#ffffff;--paper:#f7f6f3;--ink:#26241f;--ink-soft:#4a4740;--muted:#827d73;
+  --bg:#ffffff;--paper:#f7f6f3;--paper-2:#f1efe9;--ink:#26241f;--ink-soft:#4a4740;--muted:#827d73;
   --line:#eae7df;--line-2:#e0ddd3;--accent:#1f8b4c;--accent-strong:#15633a;
   --accent-soft:#ecf5ef;--accent-ring:rgba(31,139,76,.18);
+  --bad:#c43030;--bad-soft:#fdf0ef;--bad-line:#f4c9c5;
+  --warn:#8a6510;--warn-soft:#fdf6e3;--warn-line:#ecdcae;
   --r:16px;--r-sm:11px;--r-xs:8px;
   --shadow-sm:0 1px 2px rgba(38,36,31,.05),0 1px 1px rgba(38,36,31,.04);
   --shadow:0 12px 32px -12px rgba(38,36,31,.18),0 4px 10px -6px rgba(38,36,31,.10);
   --sans:"Geist Variable","Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --mono:"Geist Mono Variable","Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--paper);line-height:1.5;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 h1,h2,h3,p{margin:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .wrap{max-width:980px;margin:0 auto;padding:0 24px}
 .topbar{background:rgba(255,255,255,.85);backdrop-filter:saturate(150%) blur(12px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
 .topbar-inner{display:flex;align-items:center;justify-content:space-between;height:62px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.02em;font-size:17px}
 .back{font-size:14px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px}
 .back:hover{color:var(--ink)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--sans);font-size:14px;font-weight:540;border-radius:var(--r-sm);padding:9px 16px;cursor:pointer;border:1px solid transparent;transition:transform .12s,background .15s,box-shadow .15s,border-color .15s;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--sans);font-size:14.5px;font-weight:540;letter-spacing:-.01em;border-radius:var(--r-sm);padding:9px 17px;cursor:pointer;border:1px solid transparent;transition:transform .12s,background .15s,box-shadow .15s,border-color .15s;white-space:nowrap}
 .btn:active{transform:translateY(1px)}
 .btn[disabled]{opacity:.55;cursor:default}
 .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(21,99,55,.25)}
-.btn-primary:hover:not([disabled]){background:var(--accent-strong)}
-.btn-ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
-.btn-ghost:hover:not([disabled]){background:var(--paper)}
+.btn-primary:hover:not([disabled]){background:var(--accent-strong);box-shadow:0 6px 16px -6px rgba(21,99,55,.5)}
+.btn-ghost{background:var(--bg);color:var(--ink);border-color:var(--line-2)}
+.btn-ghost:hover:not([disabled]){background:var(--paper);border-color:var(--line-2)}
 .btn-block{width:100%}
 .head{padding:34px 0 8px}
 .head h1{font-size:clamp(24px,3vw,30px);font-weight:600;letter-spacing:-.025em}
 .head p{font-size:15px;color:var(--muted);margin-top:6px}
 .card{background:var(--bg);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);padding:22px;margin-top:18px}
-.card h2{font-size:13px;font-weight:560;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.card h2{font-size:12.5px;font-weight:560;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
 .planrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .planpill{font-size:15px;font-weight:580;color:#fff;background:var(--accent);border-radius:999px;padding:6px 16px}
 .planpill.free{background:#6b675e}
@@ -51,7 +57,7 @@ h1,h2,h3,p{margin:0}
 .meter:first-child{margin-top:0}
 .meter-head{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;margin-bottom:6px}
 .meter-head .ml{font-weight:520;color:var(--ink)}
-.meter-head .mv{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.meter-head .mv{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;font-family:var(--mono)}
 .meter-track{height:9px;background:var(--paper);border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .meter-bar{height:100%;background:var(--accent);border-radius:999px;transition:width .35s ease}
 .meter-bar.warn{background:#d9a521}
@@ -60,7 +66,7 @@ h1,h2,h3,p{margin:0}
 .pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:stretch;margin-top:4px}
 .plan{display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:22px 20px;position:relative;transition:transform .2s,box-shadow .2s}
 .plan:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-.plan.current{border-color:#cfe6d8;background:var(--accent-soft)}
+.plan.current{border-color:#cfe6d8;box-shadow:var(--shadow)}
 .plan.featured{border-color:#cfe6d8;box-shadow:var(--shadow)}
 .plan .badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;color:#fff;background:var(--accent);border-radius:999px;padding:4px 12px;white-space:nowrap}
 .plan .pname{font-size:16px;font-weight:580;letter-spacing:-.02em}
@@ -69,20 +75,21 @@ h1,h2,h3,p{margin:0}
 .plan .price .amt{font-size:30px;font-weight:600;letter-spacing:-.03em}
 .plan .price .per{font-size:13px;color:var(--muted)}
 .plan .pfeats{list-style:none;padding:0;margin:14px 0 20px;display:flex;flex-direction:column;gap:9px;flex:1}
-.plan .pfeats li{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--ink-soft);line-height:1.4}
+.plan .pfeats li{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--ink-soft);line-height:1.4}
 .plan .pfeats li svg{flex:0 0 auto;color:var(--accent);margin-top:2px}
 .msg{font-size:13.5px;color:var(--muted);margin-top:14px;min-height:18px}
-.msg.err{color:#b3261e}
+.msg.err{color:var(--bad)}
 @media(max-width:760px){.pricing-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.wrap{padding:0 16px}.head{padding:24px 0 6px}}
 </style>
 </head>
 <body>
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <span class="brand">
-      <svg width="24" height="24" viewBox="0 0 26 26" fill="none"><rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/><path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <a href="/app.html" class="brand" aria-label="Zinom — Minhas fontes">
+      <svg width="24" height="24" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/><path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.7" fill="#fff"/><circle cx="18" cy="8" r="1.7" fill="#fff"/><circle cx="8" cy="18" r="1.7" fill="#fff"/><circle cx="18" cy="18" r="1.7" fill="#fff"/></svg>
       Zinom
-    </span>
+    </a>
     <div style="display:flex;align-items:center;gap:18px">
       <a class="back" href="/app.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Minhas fontes</a>
       <button class="btn btn-ghost" id="logout">Sair</button>
