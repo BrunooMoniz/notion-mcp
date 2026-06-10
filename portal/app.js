@@ -879,6 +879,11 @@ async function loadStatus() {
   /* E2.3: cache counts for filter button rendering */
   _lastStatusCounts = st.counts || null;
 
+  /* Fix "Tudo 0": /portal/status resolves AFTER the first loadBrain(true), so the
+   * filter chips were rendered with empty counts. Now that fresh counts are in,
+   * re-render the source filter chips (cheap, idempotent, preserves active state). */
+  if (explorerState.view === 'lista') refreshDocFilters();
+
   /* indexing-tag */
   var itag = document.getElementById('indexing-tag');
   if (itag) itag.classList.toggle('hidden', !busy);
@@ -964,6 +969,24 @@ async function loadStatus() {
 }
 
 /* ---- navegador de documentos ---- */
+/**
+ * Derive {countsByType, total} from the cached /portal/status counts.
+ * Normalizes the gcal source_type into calendar and folds any other
+ * source_type into the total so "Tudo" reflects every indexed document.
+ */
+function deriveFilterCounts() {
+  var bySrc = (_lastStatusCounts && _lastStatusCounts.bySource) || [];
+  var countsByType = {};
+  var total = 0;
+  bySrc.forEach(function (b) {
+    var t = b.source_type === 'gcal' ? 'calendar' : b.source_type;
+    var n = b.documents || 0;
+    countsByType[t] = (countsByType[t] || 0) + n;
+    total += n;
+  });
+  return { countsByType: countsByType, total: total };
+}
+
 function renderDocFilters(countsByType, total) {
   var el = document.getElementById('doc-filters');
   if (!el) return;
@@ -976,6 +999,15 @@ function renderDocFilters(countsByType, total) {
     return '<button class="fchip' + (explorerState.sourceType === t ? ' active' : '') + '" type="button" data-filter="' + t + '">' +
       lbl + ' <span class="cnt">' + cnt + '</span></button>';
   }).join('');
+}
+
+/** Re-render the source filter chips from the latest cached status counts.
+ *  Called both on explorer reset and whenever /portal/status resolves, so the
+ *  "Tudo N" total is never stuck at 0 due to init ordering (status resolves
+ *  after the first loadBrain). */
+function refreshDocFilters() {
+  var c = deriveFilterCounts();
+  renderDocFilters(c.countsByType, c.total);
 }
 
 /**
@@ -995,11 +1027,7 @@ async function loadBrain(reset) {
   if (reset) {
     explorerState.offset = 0;
     /* E2.3: restore filter buttons above search using cached counts from /portal/status */
-    var bySrc = (_lastStatusCounts && _lastStatusCounts.bySource) || [];
-    var countsByType = {};
-    var total = 0;
-    bySrc.forEach(function (b) { countsByType[b.source_type] = b.documents || 0; total += b.documents || 0; });
-    renderDocFilters(countsByType, total);
+    refreshDocFilters();
   }
   var params = new URLSearchParams();
   if (explorerState.q) params.set('q', explorerState.q);
