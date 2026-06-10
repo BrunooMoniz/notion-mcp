@@ -12,6 +12,7 @@ import { generateInviteCode, issueInvite, hashInvite } from "../portal/invites.j
 import { sendInviteEmail } from "../portal/email.js";
 import { listInviteRequests, markRequestInvited, dismissInviteRequest, type InviteRequest } from "../portal/leads.js";
 import { blockAccount, unblockAccount } from "./block.js";
+import { grantCompPlan, revokeCompPlan, CompGrantError } from "../billing/comp-plan.js";
 import { monthStartUTC, checkCostAlert } from "../billing/usage.js";
 import { getPlanLimits } from "../billing/plans.js";
 import { creditsFor } from "../billing/credits.js";
@@ -46,6 +47,7 @@ interface AccountRow {
   created_at: Date;
   plan: string | null;
   plan_status: string | null;
+  plan_comp: boolean;
   current_period_end: Date | null;
 }
 
@@ -114,7 +116,7 @@ async function gather() {
   const p = getPool();
   const monthStart = monthStartUTC();
   const [accounts, secrets, workspaces, tokens, usage, runs, errors, invites, sessions, funnelRows, allSearchRows] = await Promise.all([
-    p.query<AccountRow>(`SELECT id, kind, email, status, created_at, plan, plan_status, current_period_end FROM account ORDER BY created_at`),
+    p.query<AccountRow>(`SELECT id, kind, email, status, created_at, plan, plan_status, plan_comp, current_period_end FROM account ORDER BY created_at`),
     p.query<{ account_id: string; kinds: string[] }>(
       `SELECT account_id, array_agg(kind ORDER BY kind) AS kinds FROM account_secrets GROUP BY account_id`),
     p.query<{ account_id: string; ws: string[] }>(
@@ -699,6 +701,8 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
   const blockAction = `/admin/block?token=${encodeURIComponent(token)}`;
   const unblockAction = `/admin/unblock?token=${encodeURIComponent(token)}`;
   const dismissAction = `/admin/lead/dismiss?token=${encodeURIComponent(token)}`;
+  const grantAction = `/admin/grant-unlimited?token=${encodeURIComponent(token)}`;
+  const revokeCompAction = `/admin/revoke-unlimited?token=${encodeURIComponent(token)}`;
 
   const rows = data.accounts
     .map((a) => {
@@ -751,6 +755,25 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         : "—";
       const tokenCount = data.tokens.get(a.id);
       const dispA = accountDisplay(a, data.wsNames);
+
+      // Comp plan display and control cell
+      const planLabel = a.plan_comp
+        ? `${escapeHtml(a.plan ?? "ilimitado")} <span class="tag ok" title="Cortesia: plano liberado manualmente pelo operador (sem Stripe)">cortesia</span>`
+        : escapeHtml(a.plan ?? "free") + (a.plan_status && a.plan_status !== "active" && a.plan_status !== "comp" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : "");
+      const compCtrl = isOwner
+        ? '<span class="muted xs" title="Owner já tem acesso ilimitado">—</span>'
+        : a.plan_comp
+          ? `<form method="POST" action="${escapeHtml(revokeCompAction)}" style="margin:0;margin-top:4px"
+                 onsubmit="return confirm('Remover cortesia de ${escapeHtml(a.id)}? O plano volta para free.')">
+               <input type="hidden" name="account" value="${escapeHtml(a.id)}">
+               <button type="submit" class="danger" style="font-size:11.5px;padding:4px 10px">Remover cortesia</button>
+             </form>`
+          : `<form method="POST" action="${escapeHtml(grantAction)}" style="margin:0;margin-top:4px"
+                 onsubmit="return confirm('Liberar ilimitado para ${escapeHtml(a.id)}?')">
+               <input type="hidden" name="account" value="${escapeHtml(a.id)}">
+               <button type="submit" style="font-size:11.5px;padding:4px 10px">Liberar ilimitado</button>
+             </form>`;
+
       return `<tr>
         <td>
           <span class="acct-primary">${escapeHtml(dispA.primary)}</span>
@@ -758,7 +781,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         </td>
         <td class="xs">${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
-        <td class="xs">${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
+        <td class="xs">${planLabel}${compCtrl}</td>
         <td class="xs">${escapeHtml(periodEnd)}</td>
         <td class="xs">${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
         <td class="xs">${tokenCount ? `${tokenCount} token(s)` : "—"}</td>
@@ -1413,6 +1436,50 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     } catch (err: any) {
       console.error(`[admin] dismiss failed: ${err?.message ?? err}`);
       res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao dispensar: ${err?.message ?? "erro"}`)}`);
+    }
+  });
+
+  // Grant courtesy "ilimitado" plan to a friend account.
+  // account param is operator-supplied, gated by bearer — safe.
+  router.post("/admin/grant-unlimited", async (req, res) => {
+    const token = gate(req, res);
+    if (!token) return;
+    const back = `/admin?token=${encodeURIComponent(token)}`;
+    const account = typeof req.body?.account === "string" ? req.body.account.trim() : "";
+    if (!account) {
+      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}`);
+      return;
+    }
+    try {
+      await grantCompPlan(account, "ilimitado");
+      res.redirect(`${back}&msg=${encodeURIComponent(`Plano ilimitado (cortesia) liberado para ${account}.`)}`);
+    } catch (err: any) {
+      const label = err instanceof CompGrantError ? err.message : `Falha ao liberar: ${err?.message ?? "erro"}`;
+      console.error(`[admin] grant-unlimited failed: ${err?.message ?? err}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(label)}`);
+    }
+  });
+
+  // Revoke courtesy plan from a friend account (returns to free).
+  // Only acts when plan_comp=true; Stripe-paying accounts are left untouched.
+  router.post("/admin/revoke-unlimited", async (req, res) => {
+    const token = gate(req, res);
+    if (!token) return;
+    const back = `/admin?token=${encodeURIComponent(token)}`;
+    const account = typeof req.body?.account === "string" ? req.body.account.trim() : "";
+    if (!account) {
+      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}`);
+      return;
+    }
+    try {
+      const revoked = await revokeCompPlan(account);
+      const msg = revoked
+        ? `Cortesia removida de ${account}. Plano voltou para free.`
+        : `Conta ${account} não está em cortesia — nenhuma ação.`;
+      res.redirect(`${back}&msg=${encodeURIComponent(msg)}`);
+    } catch (err: any) {
+      console.error(`[admin] revoke-unlimited failed: ${err?.message ?? err}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao remover cortesia: ${err?.message ?? "erro"}`)}`);
     }
   });
 
