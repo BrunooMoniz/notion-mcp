@@ -788,3 +788,52 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 }
 @media (min-width: 900px) { .toast { bottom: 28px; } }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* =====================================================================
+   Guia view — seções de boas práticas
+   ===================================================================== */
+.guia-section {
+  margin-bottom: 0;
+}
+.guia-section + .guia-section {
+  margin-top: 16px;
+}
+.guia-diagram {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin: 18px 0 4px;
+  overflow: visible;
+}
+.guia-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.guia-chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 6px 13px;
+  cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s;
+  text-align: left;
+}
+.guia-chip:hover {
+  background: var(--accent-soft);
+  border-color: #cfe6d8;
+  color: var(--accent-strong);
+}
+.guia-chip.copied {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+.guia-cta {
+  margin: 16px 0 0;
+}

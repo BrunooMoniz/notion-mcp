@@ -17,13 +17,17 @@ import { ACTIVE_STATUS } from "../account-status.js";
 import {
   buildFunnel,
   estimateCost,
+  estimateLlmCost,
+  summariseCostReport,
   engagementOf,
   mrrFromSubscriptions,
   type FunnelRow,
   type EngagementRow,
   type StripeSub,
+  type CostReportResponse,
 } from "./business.js";
 import { getStripe } from "../billing/stripe.js";
+import { getOrgCostReport } from "./anthropic-cost.js";
 
 interface AccountRow {
   id: string;
@@ -146,6 +150,9 @@ async function gather() {
 
   const { subs, source: stripeSource } = await fetchStripeSubs(p, Date.now());
 
+  // F2: Anthropic org-level cost report (cached 1h; null when ANTHROPIC_ADMIN_KEY absent).
+  const orgCostReport: CostReportResponse | null = await getOrgCostReport().catch(() => null);
+
   const byAcct = <T extends { account_id: string }>(rows: T[]) => {
     const m = new Map<string, T[]>();
     for (const r of rows) {
@@ -171,6 +178,7 @@ async function gather() {
     engagement: engagementOf(allSearchRows.rows, new Date()),
     stripeSubs: subs,
     stripeSource,
+    orgCostReport,
   };
 }
 
@@ -336,24 +344,50 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
     COST_EMBED_PER_MTOK: process.env.COST_EMBED_PER_MTOK,
     COST_PER_SEARCH: process.env.COST_PER_SEARCH,
   };
+  const llmCostEnv: import("./business.js").LlmCostEnv = {
+    COST_LLM_IN_PER_MTOK: process.env.COST_LLM_IN_PER_MTOK,
+    COST_LLM_OUT_PER_MTOK: process.env.COST_LLM_OUT_PER_MTOK,
+  };
   const hasCostConfig = costEnv.COST_EMBED_PER_MTOK !== undefined && costEnv.COST_PER_SEARCH !== undefined;
   const warning = hasCostConfig ? "" : `<div class="alert">Configure <code>COST_EMBED_PER_MTOK</code> e <code>COST_PER_SEARCH</code> no <code>.env</code> para habilitar estimativas de custo.</div>`;
+
+  // F2: org-level Anthropic cost card (hidden when key absent).
+  const orgCostCard = (() => {
+    if (!data.orgCostReport) return "";
+    const summary = summariseCostReport(data.orgCostReport);
+    // amount is in cents (lowest currency units), divide by 100 for dollars.
+    const totalUsd = (summary.totalUsdCents / 100).toFixed(2);
+    return `<div class="card" title="Custo real total da organização na Anthropic no mês corrente (dados ao vivo, cache 1h)">
+      <div class="card-n">$${escapeHtml(totalUsd)}</div>
+      <div class="card-l">Custo real Anthropic (org, mês)</div>
+      <small class="card-hint">custo real da organização inteira na Anthropic; o rateio por conta é estimado</small>
+    </div>`;
+  })();
 
   const rows = data.accounts
     .map((a) => {
       const usageRows = data.usage.get(a.id) ?? [];
       const embedTokens = Number(usageRows.find((u) => u.metric === "embed_tokens")?.total ?? 0);
       const searches = Number(usageRows.find((u) => u.metric === "search")?.total ?? 0);
+      const llmInputTokens = Number(usageRows.find((u) => u.metric === "llm_input_tokens")?.total ?? 0);
+      const llmOutputTokens = Number(usageRows.find((u) => u.metric === "llm_output_tokens")?.total ?? 0);
       const cost = estimateCost({ embed_tokens: embedTokens, searches }, costEnv);
+      const llmCost = estimateLlmCost({ llm_input_tokens: llmInputTokens, llm_output_tokens: llmOutputTokens }, llmCostEnv);
       const planPrice = getPlanLimits(a.plan).priceBRLCents / 100;
       const margin = hasCostConfig ? planPrice - cost.totalCost : null;
       const fmtCost = hasCostConfig ? `$${cost.totalCost.toFixed(4)}` : "—";
       const fmtMargin = margin !== null ? `R$${margin.toFixed(2)}` : "—";
+      const fmtLlmIn = llmInputTokens > 0 ? llmInputTokens.toLocaleString("pt-BR") : "—";
+      const fmtLlmOut = llmOutputTokens > 0 ? llmOutputTokens.toLocaleString("pt-BR") : "—";
+      const fmtLlmCost = llmCost.totalCost > 0 ? `$${llmCost.totalCost.toFixed(4)}` : "—";
       return `<tr>
         <td class="mono xs">${escapeHtml(a.id)}</td>
         <td class="xs">${escapeHtml(a.plan ?? "free")}</td>
         <td class="xs">${embedTokens.toLocaleString("pt-BR")}</td>
         <td class="xs">${searches}</td>
+        <td class="xs">${fmtLlmIn}</td>
+        <td class="xs">${fmtLlmOut}</td>
+        <td class="xs">${fmtLlmCost}</td>
         <td class="xs">${fmtCost}</td>
         <td class="xs">${fmtMargin}</td>
       </tr>`;
@@ -362,8 +396,9 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
   return `<section class="section" id="custo">
   <div class="section-header">
     <h2 class="section-title">Custo estimado por conta <span class="tag" style="margin-left:6px;vertical-align:middle">estimativa</span></h2>
-    <p class="section-desc">Estimativa de custo de infraestrutura de IA por conta no mês (embeddings + buscas). Margem = preço do plano &minus; custo estimado. Configure <code>COST_EMBED_PER_MTOK</code> e <code>COST_PER_SEARCH</code> no <code>.env</code> para habilitar os valores.</p>
+    <p class="section-desc">Estimativa de custo de infraestrutura de IA por conta no mês (embeddings + buscas + LLM). Tokens LLM 30d = soma de llm_input_tokens e llm_output_tokens no mês corrente. Custo LLM estimado usa preços Claude Haiku 4.5 por padrão (configurável via <code>COST_LLM_IN_PER_MTOK</code> / <code>COST_LLM_OUT_PER_MTOK</code>). Margem = preço do plano &minus; custo embed+busca estimado.</p>
   </div>
+  ${orgCostCard ? `<div class="cards" style="margin-bottom:20px">${orgCostCard}</div>` : ""}
   ${warning}
   <div class="table-wrap">
   <table>
@@ -372,11 +407,14 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
       <th title="Plano de assinatura atual da conta">plano</th>
       <th title="Total de tokens usados em embeddings no mês corrente">embed_tokens</th>
       <th title="Total de buscas realizadas no mês corrente">buscas</th>
-      <th title="Estimativa de custo total em USD com base nos tokens e buscas">custo est.</th>
+      <th title="Tokens LLM de entrada (ask + classifier) no mês corrente">LLM in 30d</th>
+      <th title="Tokens LLM de saída (ask + classifier) no mês corrente">LLM out 30d</th>
+      <th title="Custo LLM estimado com base nos tokens (Claude Haiku 4.5: $1/MTok in, $5/MTok out)">custo LLM est.</th>
+      <th title="Estimativa de custo total em USD com base nos tokens e buscas (embed+busca)">custo infra est.</th>
       <th title="Receita do plano menos custo estimado — positivo é saudável">margem</th>
     </tr></thead>
     <tbody>
-${rows || '<tr><td colspan="6" class="xs muted">Nenhuma conta.</td></tr>'}
+${rows || '<tr><td colspan="9" class="xs muted">Nenhuma conta.</td></tr>'}
     </tbody>
   </table>
   </div>
