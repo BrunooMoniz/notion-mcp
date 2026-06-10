@@ -8,6 +8,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { authUrl, exchangeCode, exchangeCodeRaw, loadCreds, redirectUri, SCOPES } from "./oauth.js";
 import { takePortalGoogleState } from "../portal/google-link.js";
 import { addGoogleAccount } from "./google-accounts.js";
+import { buildSuccessPage, buildErrorPage } from "../portal/callback-page.js";
 
 const pendingStates = new Map<string, number>(); // state → expires_at
 const STATE_TTL_MS = 10 * 60_000;
@@ -88,7 +89,7 @@ ${existingNote}
     const state = req.query.state as string | undefined;
     const error = req.query.error as string | undefined;
     if (error) {
-      res.status(400).type("html").send(`<h2 style='font-family:sans-serif;padding:40px'>Google error: ${escape(error)}</h2>`);
+      res.status(400).type("html").send(buildErrorPage("google", error, "/portal/google/connect"));
       return;
     }
     // Portal multi-conta: state foi emitido por um usuário logado no portal.
@@ -105,17 +106,13 @@ ${existingNote}
             scopes: SCOPES,
           });
           console.log(`[google-oauth] portal account ${portalAccount} connected ${creds.granted_email}`);
-          res
-            .type("html")
-            .send(
-              `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Conectado</title></head><body style="font-family:sans-serif;padding:40px;background:#1a1a2e;color:#e0e0e0"><h1 style="color:#4caf50">✅ Google conectado</h1><p>Conta: <code>${escape(creds.granted_email)}</code>. Pode fechar esta aba e voltar ao portal.</p></body></html>`,
-            );
+          res.type("html").send(buildSuccessPage("google", creds.granted_email));
         } catch (err: any) {
           console.error("[google-oauth] portal callback failed:", err);
           res
             .status(500)
             .type("html")
-            .send(`<h2 style='font-family:sans-serif;padding:40px'>Falha: ${escape(err.message ?? String(err))}</h2>`);
+            .send(buildErrorPage("google", err.message ?? String(err), "/portal/google/connect"));
         }
         return;
       }

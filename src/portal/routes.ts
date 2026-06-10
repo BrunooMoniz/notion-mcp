@@ -486,10 +486,13 @@ export function createPortalRouter(): express.Router {
     const { putPortalNotionState } = await import("./notion-link.js");
     const state = randomUUID();
     putPortalNotionState(state, res.locals.accountId);
+    const redirectUri = `${notionBase}/notion/callback`;
+    // 1.5: log redirect_uri for diagnostics (no secret exposed — URI is public)
+    console.log(`[notion-authorize] portal redirect_uri="${redirectUri}"`);
     res.redirect(
       buildAuthorizeUrl({
         clientId: notionClientId,
-        redirectUri: `${notionBase}/notion/callback`,
+        redirectUri,
         state,
       }),
     );

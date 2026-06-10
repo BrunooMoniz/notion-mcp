@@ -8,11 +8,13 @@
 // chunks). Account scope ALWAYS comes from the caller's session, NEVER input.
 import { deleteAccountSecret } from "../secrets.js";
 import { getPool, deleteByAccountWorkspaceSource } from "../rag/storage.js";
+import { connectionTypeFromKind, type NotionConnectionType } from "./connection-type.js";
 
 export interface NotionWorkspaceEntry {
   workspace: string; // the Notion workspace id (opaque UUID)
   name: string | null; // human-readable display name, persisted at connect time
   connected_at: string | null; // ISO
+  connection_type: NotionConnectionType | null; // "pat" | "oauth" | null
 }
 
 /** The per-workspace vault secret kinds a Notion connection owns. Removing a
@@ -25,7 +27,8 @@ export const NOTION_SECRET_KINDS = (workspace: string): string[] => [
 ];
 
 /** List the Notion workspaces connected to an account, newest first, with the
- *  display name (0010) and connect date for the portal. */
+ *  display name (0010), connect date, and connection_type chip ("pat"|"oauth"|null)
+ *  derived from the vault secret kinds present for each workspace. */
 export async function listNotionWorkspaces(accountId: string): Promise<NotionWorkspaceEntry[]> {
   const p = getPool();
   const { rows } = await p.query<{ workspace: string; name: string | null; created_at: Date | string | null }>(
@@ -33,11 +36,39 @@ export async function listNotionWorkspaces(accountId: string): Promise<NotionWor
      WHERE account_id=$1 ORDER BY created_at DESC NULLS LAST, workspace`,
     [accountId],
   );
-  return rows.map((r) => ({
-    workspace: r.workspace,
-    name: r.name ?? null,
-    connected_at: r.created_at == null ? null : new Date(r.created_at).toISOString(),
-  }));
+
+  // Derive connection_type for each workspace by checking which secret kinds exist.
+  // The secret kinds are notion_pat:<ws>, notion_access:<ws>, notion_refresh:<ws>.
+  // We check PAT first (most specific), then OAuth.
+  const results: NotionWorkspaceEntry[] = [];
+  for (const r of rows) {
+    let connection_type: NotionConnectionType | null = null;
+    // Check PAT secret
+    const patCheck = await p.query(
+      `SELECT kind FROM account_secrets WHERE account_id=$1 AND kind=$2 LIMIT 1`,
+      [accountId, `notion_pat:${r.workspace}`],
+    );
+    if (patCheck.rows.length > 0) {
+      connection_type = connectionTypeFromKind(`notion_pat:${r.workspace}`);
+    } else {
+      // Check OAuth access secret
+      const oauthCheck = await p.query(
+        `SELECT kind FROM account_secrets WHERE account_id=$1 AND kind=$2 LIMIT 1`,
+        [accountId, `notion_access:${r.workspace}`],
+      );
+      if (oauthCheck.rows.length > 0) {
+        connection_type = connectionTypeFromKind(`notion_access:${r.workspace}`);
+      }
+    }
+
+    results.push({
+      workspace: r.workspace,
+      name: r.name ?? null,
+      connected_at: r.created_at == null ? null : new Date(r.created_at).toISOString(),
+      connection_type,
+    });
+  }
+  return results;
 }
 
 /** True iff (accountId, workspace) is a registered workspace of THIS account.

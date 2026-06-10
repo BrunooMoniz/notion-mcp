@@ -15,6 +15,7 @@ import {
   disconnectNotionWorkspace,
   accountOwnsWorkspace,
   NOTION_SECRET_KINDS,
+  type NotionWorkspaceEntry,
 } from "../notion-workspaces.js";
 import { __setPoolForTest } from "../../rag/storage.js";
 
@@ -29,6 +30,10 @@ interface Row {
 let workspaces: Row[]; // account_workspaces
 let secrets: Set<string>; // `${account}|${kind}`
 let chunks: Array<{ account_id: string; workspace: string; source_type: string }>; // brain_chunks
+
+// account_secrets also stores kind so we can test connection_type derivation.
+// Key format: `${account}|${kind}`, value is the encrypted secret.
+let secretKinds: Map<string, string>; // `${account}|${kind}` -> dummy enc value
 
 function memPool() {
   return {
@@ -49,8 +54,15 @@ function memPool() {
         workspaces = workspaces.filter((w) => !(w.account_id === params[0] && w.workspace === params[1]));
         return { rows: [], rowCount: before - workspaces.length };
       }
+      // --- account_secrets: SELECT ... WHERE account_id=$1 AND kind=$2 ---
+      // Covers both SELECT enc_value and SELECT kind patterns used for connection-type probing.
+      if (/SELECT .* FROM account_secrets.*WHERE/i.test(sql)) {
+        const v = secretKinds.get(`${params[0]}|${params[1]}`);
+        return { rows: v ? [{ enc_value: v, kind: params[1] }] : [] };
+      }
       // --- account_secrets (deleteAccountSecret) ---
       if (/DELETE FROM account_secrets/i.test(sql)) {
+        secretKinds.delete(`${params[0]}|${params[1]}`);
         secrets.delete(`${params[0]}|${params[1]}`);
         return { rows: [], rowCount: 1 };
       }
@@ -70,6 +82,7 @@ function memPool() {
 beforeEach(() => {
   workspaces = [];
   secrets = new Set();
+  secretKinds = new Map();
   chunks = [];
   __setPoolForTest(memPool() as never);
 });
@@ -77,7 +90,10 @@ afterEach(() => __setPoolForTest(null));
 
 function seedConnected(account: string, ws: string, name: string | null, when: Date, kinds: string[]) {
   workspaces.push({ account_id: account, workspace: ws, name, created_at: when });
-  for (const k of kinds) secrets.add(`${account}|${k}`);
+  for (const k of kinds) {
+    secrets.add(`${account}|${k}`);
+    secretKinds.set(`${account}|${k}`, "enc_dummy");
+  }
 }
 
 test("list returns connected workspaces with human names + ISO dates, newest first", async () => {
@@ -152,4 +168,24 @@ test("isolation: cannot disconnect a workspace another account owns", async () =
 test("disconnect returns false for an unknown workspace (no-op)", async () => {
   const ok = await disconnectNotionWorkspace("friend:a", "does-not-exist");
   assert.equal(ok, false);
+});
+
+// 1.3: connection_type derived from secret kinds
+test("listNotionWorkspaces includes connection_type=pat when notion_pat secret exists", async () => {
+  seedConnected("friend:a", "ws-pat", "My WS", new Date(), ["notion_pat:ws-pat"]);
+  const list = await listNotionWorkspaces("friend:a");
+  assert.equal(list[0].connection_type, "pat");
+});
+
+test("listNotionWorkspaces includes connection_type=oauth when notion_access secret exists", async () => {
+  seedConnected("friend:a", "ws-oauth", "My WS", new Date(), ["notion_access:ws-oauth", "notion_refresh:ws-oauth"]);
+  const list = await listNotionWorkspaces("friend:a");
+  assert.equal(list[0].connection_type, "oauth");
+});
+
+test("listNotionWorkspaces connection_type is null when no relevant secret exists", async () => {
+  // Workspace row present but no notion secrets (edge case)
+  workspaces.push({ account_id: "friend:a", workspace: "ws-bare", name: null, created_at: new Date() });
+  const list = await listNotionWorkspaces("friend:a");
+  assert.equal(list[0].connection_type, null);
 });
