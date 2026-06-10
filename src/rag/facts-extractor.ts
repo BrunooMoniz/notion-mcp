@@ -31,13 +31,18 @@ const SYSTEM_PROMPT =
  * + normalize. Provenance (workspace/source_id/source_type) is filled from ctx
  * via normalizeFact, so it is authoritative regardless of what the model echoes.
  * Returns [] on an empty passage or when the model finds no durable facts.
+ *
+ * `accountId` is used to meter LLM token usage against the owner account.
+ * Defaults to "bruno" (the cron owner) so existing callers need not change,
+ * but friend-account callers should pass the correct accountId.
  */
-export async function extractFactsFromText(text: string, ctx: FactContext): Promise<Fact[]> {
+export async function extractFactsFromText(text: string, ctx: FactContext, accountId = "bruno"): Promise<Fact[]> {
   const trimmed = (text ?? "").trim();
   if (!trimmed) return [];
 
   const prompt = buildFactExtractionPrompt(trimmed, ctx);
-  const { text: raw } = await callHaiku(SYSTEM_PROMPT, prompt);
+  // Pass accountId so callHaiku meters usage against the account being processed.
+  const { text: raw } = await callHaiku(SYSTEM_PROMPT, prompt, accountId, "facts-extractor");
 
   // parseFactsResponse already drops items missing s/p/o; normalizeFact then
   // fills provenance from ctx, clamps confidence, and validates dates.
