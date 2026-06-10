@@ -343,13 +343,17 @@ export function buildBriefingPrompt(
 /**
  * Build the final PT-BR briefing markdown. `synth` defaults to callHaiku and
  * is injectable so tests need no Anthropic call.
+ *
+ * `accountId` is used to meter LLM token usage. Defaults to "bruno" (the cron
+ * owner). Tests inject `synth` and never reach the default, so accountId is
+ * irrelevant for them.
  */
 export async function buildBriefingMarkdown(
   events: BriefingEvent[],
   contexts: EventContext[],
   tasks: BriefingTask[],
   now: Date,
-  synth: SynthFn = async (system, user) => (await callHaiku(system, user)).text,
+  synth: SynthFn = async (system, user) => (await callHaiku(system, user, "bruno", "briefing")).text,
 ): Promise<string> {
   const user = buildBriefingPrompt(events, contexts, tasks, now);
   const md = await synth(BRIEFING_SYSTEM, user);

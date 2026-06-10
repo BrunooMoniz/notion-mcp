@@ -104,7 +104,9 @@ async function extractFromChunk(
   const trimmed = (chunkText ?? "").trim();
   if (trimmed) {
     const { callHaiku } = await import("../classifier/anthropic.js");
-    const result = await callHaiku(EXTRACTION_SYSTEM, trimmed.slice(0, 4000));
+    // Pass accountId so callHaiku meters the LLM usage against the account
+    // that owns the chunk being processed.
+    const result = await callHaiku(EXTRACTION_SYSTEM, trimmed.slice(0, 4000), accountId, "entity-extractor");
     llmEntities = parseEntityResponse(result.text);
   }
 
