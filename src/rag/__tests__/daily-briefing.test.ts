@@ -7,12 +7,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   getTodayEvents,
+  gatherContext,
   buildBriefingMarkdown,
   buildBriefingPrompt,
   type BriefingEvent,
   type EventContext,
   type BriefingTask,
 } from "../../briefing/daily-briefing.js";
+import type { brainSearch } from "../search.js";
 
 // A minimal pool stub: captures the SQL + params and returns canned rows.
 function fakePool(rows: unknown[]) {
@@ -84,6 +86,28 @@ test("getTodayEvents handles empty/missing attendees gracefully", async () => {
   assert.equal(events.length, 1);
   assert.deepEqual(events[0].attendees, []);
   assert.equal(events[0].calendar, "");
+});
+
+// --- gatherContext ----------------------------------------------------------
+
+test("gatherContext searches per event with logEvent:false (internal — stays out of ai_search_log)", async () => {
+  const calls: { query: string; opts: any }[] = [];
+  const fakeSearch = (async (query: string, opts: any) => {
+    calls.push({ query, opts });
+    return [];
+  }) as unknown as typeof brainSearch;
+
+  const events: BriefingEvent[] = [
+    { title: "Sync com Parfin", time: "10:00", calendar: "Global Cripto", attendees: ["Jorge"] },
+  ];
+  const out = await gatherContext(events, [], fakeSearch);
+
+  assert.equal(out.length, 1);
+  assert.equal(calls.length, 1);
+  // Query carries title + attendees (the PII reason these must not be logged).
+  assert.equal(calls[0].query, "Sync com Parfin Jorge");
+  assert.equal(calls[0].opts.logEvent, false);
+  assert.equal(calls[0].opts.filters.exclude_source_type, "calendar");
 });
 
 // --- prompt assembly -------------------------------------------------------

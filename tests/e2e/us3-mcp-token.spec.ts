@@ -6,10 +6,14 @@ import { registerAndSignIn } from "./helpers.js";
 test("friend generates an MCP token and a ready-to-paste connect command", async ({ page, request }) => {
   await registerAndSignIn(page, request);
 
-  // After design handoff: #mcp-url was replaced by #endpoint-block (static URL shown in a code block).
-  await expect(page.locator("#endpoint-block")).toContainText("/mcp");
+  // v2: connecting an AI lives in the Guia view, in per-assistant tabs.
+  await page.click('.sidebar-nav [data-nav="guia"]');
 
-  // After design handoff: #mcp-gen was replaced by #token-gen-btn.
+  // The Claude.ai panel shows the real MCP URL (filled from /portal/me).
+  await expect(page.locator("#endpoint-claudeai")).toContainText("/mcp");
+
+  // Token generation lives in the Claude Code tab.
+  await page.click('.ai-tab[data-ai="claudecode"]');
   await page.click("#token-gen-btn");
 
   // After design handoff: #mcp-result was replaced by #token-area which renders

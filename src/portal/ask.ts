@@ -57,8 +57,9 @@ const defaultDeps: AskDeps = {
   search: async (query: string, accountId: string): Promise<BrainResult[]> => {
     // brainSearch reads getAccountId() from AsyncLocalStorage — we must run it in
     // a request context that carries the portal session's account_id.
+    // tokenLabel "Consultar": ai_search_log shows portal-chat searches as such.
     return requestContext.run(
-      { authType: "bearer", scopes: "all", accountId },
+      { authType: "bearer", scopes: "all", accountId, tokenLabel: "Consultar" },
       async () => {
         const hits = await brainSearch(query, { topK: 8 });
         return hits.map(toBrainResult);

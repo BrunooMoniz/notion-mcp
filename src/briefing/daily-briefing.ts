@@ -150,19 +150,25 @@ function titleFromText(text: string | undefined): string {
  * chunks (we want history, not the agenda echoing itself). Compact: title +
  * url + a short snippet. `tasks` is accepted for signature symmetry but not
  * used to drive context queries (events drive the per-meeting prep).
+ * `search` is injectable for tests (defaults to brainSearch).
  */
 export async function gatherContext(
   events: BriefingEvent[],
   _tasks: BriefingTask[],
+  search: typeof brainSearch = brainSearch,
 ): Promise<EventContext[]> {
   const out: EventContext[] = [];
   for (const ev of events) {
     const query = [ev.title, ...ev.attendees].filter(Boolean).join(" ");
     let items: ContextItem[] = [];
     try {
-      const hits = await brainSearch(query, {
+      const hits = await search(query, {
         topK: 5,
         filters: { exclude_source_type: "calendar" },
+        // Internal, auto-generated per-event searches (the query carries
+        // attendee names/PII) — keep them out of the user-facing
+        // "O que sua IA buscou" feed. recall/remember/brain_search stay logged.
+        logEvent: false,
       });
       items = hits.map((h) => ({
         title: titleFromText(h.chunk.text) || h.chunk.db_name || "(item)",

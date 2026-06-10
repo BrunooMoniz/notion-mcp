@@ -1,9 +1,12 @@
 // tests/e2e/us4-activation.spec.ts
 import { test, expect } from "@playwright/test";
-import { registerAndSignIn } from "./helpers.js";
+import { makeActivated, registerAndSignIn } from "./helpers.js";
 
 test("checklist de ativação aparece e o passo Tarefas pede o Notion", async ({ page, request }) => {
   await registerAndSignIn(page, request);
+  // v2: the checklist renders on the "ativado" home (new users see the
+  // 4-step onboarding instead) — flip the account state first.
+  await makeActivated(page);
   await expect(page.locator("#activation")).toBeVisible();
   // After design handoff: #activation-items was renamed to #activation-steps.
   await expect(page.locator("#activation-steps")).toContainText("Tarefas no Notion");
@@ -15,6 +18,7 @@ test("checklist de ativação aparece e o passo Tarefas pede o Notion", async ({
 
 test("'Já testei' e 'Pular' persistem após reload", async ({ page, request }) => {
   await registerAndSignIn(page, request);
+  await makeActivated(page);
 
   // After design handoff: #act-ask-done and #act-dismiss buttons were removed from
   // the rendered HTML; the underlying API endpoints remain (/portal/activation/ask

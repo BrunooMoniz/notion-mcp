@@ -45,16 +45,16 @@ test("issueBearer stores the HASH (never the token) and returns the plaintext", 
   assert.equal(params[1], "notion:ws-1");
 });
 
-test("resolveBearer maps a token to its account + workspaces", async () => {
+test("resolveBearer maps a token to its account + workspaces + label", async () => {
   __setPoolForTest({
     query: async (sql: string) => {
-      if (/FROM account_api_tokens/i.test(sql)) return { rows: [{ account_id: "notion:ws-1" }] };
+      if (/FROM account_api_tokens/i.test(sql)) return { rows: [{ account_id: "notion:ws-1", label: "claude-code" }] };
       if (/FROM account_workspaces/i.test(sql)) return { rows: [{ workspace: "ws-1" }] };
       return { rows: [] };
     },
   } as never);
   const r = await resolveBearer("acct_deadbeef");
-  assert.deepEqual(r, { accountId: "notion:ws-1", workspaces: ["ws-1"] });
+  assert.deepEqual(r, { accountId: "notion:ws-1", workspaces: ["ws-1"], label: "claude-code" });
 });
 
 test("resolveBearer fast-rejects non-account tokens without a DB hit", async () => {
@@ -92,4 +92,37 @@ test("revokeBearersForAccount deletes the account's tokens and returns the count
   assert.match(sql, /DELETE FROM account_api_tokens WHERE account_id=\$1/i);
   assert.deepEqual(params, ["notion:ws-1"]);
   assert.equal(n, 2);
+});
+
+import { accountWorkspaces } from "../../account-bearer.js";
+
+test("accountWorkspaces orders by created_at ASC (deterministic ws[0] fallback)", async () => {
+  let sql = "";
+  __setPoolForTest({
+    query: async (q: string) => {
+      sql = q;
+      return { rows: [{ workspace: "first-connected" }, { workspace: "later" }] };
+    },
+  } as never);
+  const ws = await accountWorkspaces("notion:ws-1");
+  assert.deepEqual(ws, ["first-connected", "later"]);
+  // Multi-workspace accounts must get a stable order: first workspace connected
+  // first (callers use ws[0] as the default workspace tag, e.g. index-web).
+  assert.match(sql, /ORDER BY created_at ASC/i);
+});
+
+test("resolveBearer resolves workspaces with the same deterministic ordering", async () => {
+  let wsSql = "";
+  __setPoolForTest({
+    query: async (q: string) => {
+      if (/FROM account_api_tokens/i.test(q)) return { rows: [{ account_id: "notion:ws-1", label: null }] };
+      if (/FROM account_workspaces/i.test(q)) {
+        wsSql = q;
+        return { rows: [{ workspace: "ws-1" }] };
+      }
+      return { rows: [] };
+    },
+  } as never);
+  await resolveBearer("acct_orderedfetch");
+  assert.match(wsSql, /ORDER BY created_at ASC/i);
 });

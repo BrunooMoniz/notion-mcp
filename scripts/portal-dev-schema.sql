@@ -15,8 +15,11 @@ CREATE TABLE IF NOT EXISTS account (
   stripe_customer_id     text,
   stripe_subscription_id text,
   plan_status            text,
-  current_period_end     timestamptz
+  current_period_end     timestamptz,
+  plan_comp              boolean NOT NULL DEFAULT false
 );
+-- Mirror of migration 0014 for dev DBs created before the column existed.
+ALTER TABLE account ADD COLUMN IF NOT EXISTS plan_comp boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS account_email_uniq ON account (email) WHERE email IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS account_stripe_customer_uniq ON account (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 
@@ -104,9 +107,23 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   account_id   text NOT NULL,
   created_at   timestamptz NOT NULL DEFAULT now(),
   expires_at   timestamptz NOT NULL,
-  last_seen_at timestamptz
+  last_seen_at timestamptz,
+  user_agent   text
 );
 CREATE INDEX IF NOT EXISTS portal_sessions_acct_idx ON portal_sessions (account_id);
+-- Mirror of migration 0015 for dev DBs created before user_agent existed.
+ALTER TABLE portal_sessions ADD COLUMN IF NOT EXISTS user_agent text;
+
+-- AI search transparency log (mirror of migration 0015).
+CREATE TABLE IF NOT EXISTS ai_search_log (
+  id          bigserial PRIMARY KEY,
+  account_id  text NOT NULL,
+  query       text NOT NULL,
+  results     int NOT NULL,
+  client      text,
+  ts          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_search_log_acct_ts_idx ON ai_search_log (account_id, ts DESC);
 
 -- Leads / invite requests (mirror of migration 0008).
 CREATE TABLE IF NOT EXISTS invite_requests (
@@ -142,3 +159,29 @@ CREATE TABLE IF NOT EXISTS entity_mentions (
   extracted_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (entity_id, chunk_id)
 );
+
+-- Brain chunks (minimal mirror of 0001 + 0005, WITHOUT pgvector/tsv — plain
+-- Postgres is enough for counts (/portal/status), week, next-meeting and
+-- document listing in dev/e2e; search/embedding paths stay out of the dev server).
+CREATE TABLE IF NOT EXISTS brain_chunks (
+  id              text PRIMARY KEY,
+  account_id      text NOT NULL DEFAULT 'bruno',
+  source_type     text NOT NULL,
+  source_id       text NOT NULL,
+  workspace       text,
+  db_name         text,
+  parent_url      text,
+  chunk_index     int NOT NULL DEFAULT 0,
+  text            text NOT NULL,
+  metadata        jsonb,
+  indexed_at      timestamptz DEFAULT now(),
+  source_updated  timestamptz
+);
+CREATE INDEX IF NOT EXISTS brain_chunks_source_idx ON brain_chunks (source_type, source_id);
+CREATE INDEX IF NOT EXISTS brain_chunks_account_ws_idx ON brain_chunks (account_id, workspace, db_name);
+-- Mirror of migration 0015: app-v2 card query indexes.
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_indexed_idx
+  ON brain_chunks (account_id, indexed_at DESC);
+CREATE INDEX IF NOT EXISTS brain_chunks_acct_calendar_data_idx
+  ON brain_chunks (account_id, (left(metadata->>'data', 10)))
+  WHERE source_type = 'calendar';

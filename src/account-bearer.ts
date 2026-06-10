@@ -19,7 +19,7 @@ export function hashBearer(token: string): string {
 // token_hash -> resolved account (short-TTL cache so a revoked/deleted token
 // stops working within TTL_MS without a process restart — see resolveBearer/revoke).
 const TTL_MS = 60_000;
-const cache = new Map<string, { accountId: string; workspaces: string[]; exp: number }>();
+const cache = new Map<string, { accountId: string; workspaces: string[]; label: string | null; exp: number }>();
 export function __clearBearerCache(): void {
   cache.clear();
 }
@@ -49,11 +49,13 @@ export async function issueBearer(accountId: string, label?: string): Promise<st
 
 /** The account's currently-granted workspaces (its account_workspaces). Used to
  *  scope a friend's OAuth token FRESH per request, so sources connected after the
- *  token was issued are still visible without re-authorizing. */
+ *  token was issued are still visible without re-authorizing. Ordered by
+ *  created_at ASC (first workspace connected) so callers that fall back to
+ *  ws[0] (e.g. the index-web default workspace tag) are deterministic. */
 export async function accountWorkspaces(accountId: string): Promise<string[]> {
   const p = getPool();
   const { rows } = await p.query<{ workspace: string }>(
-    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1 ORDER BY created_at ASC`,
     [accountId],
   );
   return rows.map((r) => r.workspace);
@@ -70,28 +72,34 @@ export async function accountHasBearer(accountId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** Resolve a presented bearer to its account + workspaces, or null. Fast-rejects
- *  anything without the account prefix (so BEARER_TOKEN/OAuth never hit the DB). */
+/** Resolve a presented bearer to its account + workspaces + label, or null.
+ *  Fast-rejects anything without the account prefix (so BEARER_TOKEN/OAuth never
+ *  hit the DB). The label feeds RequestContext.tokenLabel (ai_search_log). */
 export async function resolveBearer(
   token: string | null | undefined,
-): Promise<{ accountId: string; workspaces: string[] } | null> {
+): Promise<{ accountId: string; workspaces: string[]; label: string | null } | null> {
   if (!token || !token.startsWith(PREFIX)) return null;
   const hash = hashBearer(token);
   const cached = cache.get(hash);
-  if (cached && cached.exp > Date.now()) return { accountId: cached.accountId, workspaces: cached.workspaces };
+  if (cached && cached.exp > Date.now()) {
+    return { accountId: cached.accountId, workspaces: cached.workspaces, label: cached.label };
+  }
   if (cached) cache.delete(hash); // expired
   const p = getPool();
-  const { rows } = await p.query<{ account_id: string }>(
-    `SELECT account_id FROM account_api_tokens WHERE token_hash=$1`,
+  const { rows } = await p.query<{ account_id: string; label: string | null }>(
+    `SELECT account_id, label FROM account_api_tokens WHERE token_hash=$1`,
     [hash],
   );
   if (!rows[0]) return null;
   const accountId = rows[0].account_id;
+  // Same deterministic ordering as accountWorkspaces: the tool-side fallback
+  // (getAllowedWorkspaces()[0], e.g. brain_index_web) must always pick the
+  // first-connected workspace, not whatever the planner returned first.
   const ws = await p.query<{ workspace: string }>(
-    `SELECT workspace FROM account_workspaces WHERE account_id=$1`,
+    `SELECT workspace FROM account_workspaces WHERE account_id=$1 ORDER BY created_at ASC`,
     [accountId],
   );
-  const resolved = { accountId, workspaces: ws.rows.map((r) => r.workspace) };
+  const resolved = { accountId, workspaces: ws.rows.map((r) => r.workspace), label: rows[0].label ?? null };
   cache.set(hash, { ...resolved, exp: Date.now() + TTL_MS });
   return resolved;
 }

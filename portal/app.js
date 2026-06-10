@@ -34,6 +34,33 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR');
 }
 
+/* ---- tempo relativo (pt-BR) ---- */
+function relTime(ts) {
+  if (!ts) return '';
+  var t = new Date(ts).getTime();
+  if (!isFinite(t)) return '';
+  var diff = Date.now() - t;
+  if (diff < 0) diff = 0;
+  var min = Math.round(diff / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return 'há ' + min + ' min';
+  var h = Math.round(min / 60);
+  if (h < 24) return 'há ' + h + 'h';
+  var d = Math.round(h / 24);
+  if (d === 1) return 'ontem';
+  if (d < 30) return 'há ' + d + ' dias';
+  var mo = Math.round(d / 30);
+  return 'há ' + mo + (mo > 1 ? ' meses' : ' mês');
+}
+
+/* idade em horas de um timestamp (Infinity quando ausente/inválido) */
+function ageHours(ts) {
+  if (!ts) return Infinity;
+  var t = new Date(ts).getTime();
+  if (!isFinite(t)) return Infinity;
+  return (Date.now() - t) / 3600000;
+}
+
 /* ---- toast ---- */
 var toastTimer = null;
 function toast(msg) {
@@ -72,11 +99,12 @@ function logoSvg(size) {
 }
 
 /* ---- navegação por hash ---- */
-var VIEWS = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
+var VIEWS = ['inicio', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
 
 function go(view) {
   // plano vai para /plano.html (link externo)
   if (view === 'plano') { location.href = '/plano.html'; return; }
+  if (view === 'chat') view = 'consultar'; // rota legada
   if (!VIEWS.includes(view)) view = 'inicio';
   document.querySelectorAll('.view').forEach(function (v) {
     v.classList.toggle('active', v.id === 'view-' + view);
@@ -90,101 +118,433 @@ function go(view) {
   try { history.replaceState(null, '', '#' + view); } catch (e) { /* sandbox */ }
 }
 
-/* ==================== INÍCIO ====================
-   Pipeline + assistentes (tokens MCP reais via /portal/mcp-tokens e /portal/me)
+/* deep-link/ação: ir ao Guia e rolar até "Conectar sua IA" */
+function goGuiaConectar() {
+  go('guia');
+  var anchor = document.getElementById('guia-conectar');
+  if (anchor) setTimeout(function () {
+    var top = anchor.getBoundingClientRect().top + document.scrollingElement.scrollTop - 20;
+    document.scrollingElement.scrollTo({ top: top, behavior: 'smooth' });
+  }, 60);
+}
+
+/* ==================== INÍCIO (v2: painel vivo + onboarding) ====================
+   Estado derivado de /portal/me + /portal/status:
+   ativado = tem fonte conectada E índice com chunks > 0; novo = caso contrário.
    ================================================ */
 
-/* estado local de assistentes (tokens) */
+/* estado local de assistentes (tokens MCP crus de /portal/mcp-tokens) */
 var assistants = [];
 
-function renderInicio(me, billing) {
-  /* logo no pipeline */
-  var plLogo = document.getElementById('pl-logo');
-  if (plLogo) plLogo.innerHTML = logoSvg(30);
+function hasAnySource(me) {
+  var s = (me && me.sources) || {};
+  return !!(
+    (s.notion && s.notion.connected) ||
+    (s.google && s.google.length) ||
+    (s.ical && s.ical.links && s.ical.links.length) ||
+    (s.granola && s.granola.set)
+  );
+}
 
-  /* Badge de conexão ativa */
-  renderConnectActiveBadge();
+function countSources(me) {
+  var s = (me && me.sources) || {};
+  var n = 0;
+  if (s.notion && s.notion.connected) n++;
+  if (s.google && s.google.length) n++;
+  if (s.ical && s.ical.links && s.ical.links.length) n++;
+  if (s.granola && s.granola.set) n++;
+  return n;
+}
 
-  /* pipeline: fontes */
-  var sources = (me && me.sources) || {};
-  var nActive = 0;
-  if (sources.notion && sources.notion.connected) nActive++;
-  if (sources.google && sources.google.length) nActive++;
-  if (sources.ical && sources.ical.links && sources.ical.links.length) nActive++;
-  if (sources.granola && sources.granola.set) nActive++;
-  var plSrc = document.getElementById('pl-sources');
-  if (plSrc) {
-    plSrc.innerHTML = ['notion', 'granola', 'calendar', 'web'].map(srcIcon).join('');
-  }
-  var plSrcN = document.getElementById('pl-sources-n');
-  if (plSrcN) plSrcN.textContent = nActive + ' ativas';
+function totalChunks(st) {
+  return (st && st.counts && st.counts.totals && st.counts.totals.chunks) || 0;
+}
 
-  /* pipeline: status do cérebro (do /portal/status) */
-  renderBrainMini(false, null);
+function lastIndexedAt(st) {
+  return ((st && st.counts && st.counts.bySource) || []).reduce(function (m, s) {
+    return s.last_indexed_at && s.last_indexed_at > m ? s.last_indexed_at : m;
+  }, '');
+}
 
-  /* pipeline: assistentes */
-  var plAss = document.getElementById('pl-assistants');
-  var plAssN = document.getElementById('pl-assistants-n');
-  var assTag = document.getElementById('assistants-tag');
-  if (plAss) {
-    plAss.innerHTML = assistants.length
-      ? assistants.map(function (a) { return srcIcon(a.icon || 'term'); }).join('')
-      : '<span class="si" style="color:#c6c1b6">' + ICONS.spark + '</span>';
-  }
-  if (plAssN) plAssN.textContent = assistants.length
-    ? assistants.length + (assistants.length > 1 ? ' conectados' : ' conectado')
-    : 'nenhum ainda';
-  if (assTag) assTag.textContent = assistants.length;
-
-  /* lista de assistentes conectados */
-  var alEl = document.getElementById('assistant-list');
-  if (alEl) {
-    alEl.innerHTML = assistants.length
-      ? assistants.map(function (a, i) {
-          return '<div class="row">' + srcIcon(a.icon || 'term') +
-            '<span class="grow"><span class="ttl">' + escapeHtml(a.name) + '</span>' +
-            '<span class="meta">' + escapeHtml(a.via || '') + (a.meta ? ' · ' + escapeHtml(a.meta) : '') + '</span></span>' +
-            '<span class="tag ok">ativo</span>' +
-            '<button class="btn btn-danger-ghost btn-sm" type="button" data-rm-assist="' + escapeHtml(String(a.id)) + '">Revogar</button></div>';
-        }).join('')
-      : '<p class="muted">Nenhum assistente conectado ainda — siga um dos caminhos abaixo. Leva menos de 5 minutos.</p>';
-  }
-
-  /* billing resumo */
-  if (billing) {
-    var planEl = document.getElementById('billing-plan');
-    var lineEl = document.getElementById('billing-usage-line');
-    var PLAN_LABELS = { free: 'Free', essencial: 'Essencial', pro: 'Pro', ilimitado: 'Ilimitado', owner: 'Owner' };
-    if (planEl) {
-      var status = billing.plan_status && billing.plan_status !== 'active' ? ' (' + billing.plan_status + ')' : '';
-      planEl.textContent = (PLAN_LABELS[billing.plan] || billing.plan || '—') + status;
-    }
-    if (lineEl) {
-      var lim = function (v) { return (v == null || !isFinite(v)) ? 'ilimitado' : fmt(v); };
-      var sc = billing.usage && billing.usage.searches;
-      var ch = billing.usage && billing.usage.chunks;
-      if (sc && ch) {
-        lineEl.textContent = 'Consultas: ' + sc.used + '/' + lim(sc.limit) + ' · Trechos: ' + ch.used + '/' + lim(ch.limit);
-      }
-    }
+/* ---- alternância ativado/novo ---- */
+function updateZState() {
+  var me = window._lastMe;
+  var st = window._lastStatus;
+  if (!me) return;
+  /* sem status só renderiza em modo degradado (falha de /portal/status);
+     fora isso espera os dois antes de mostrar qualquer estado */
+  if (!st && !window._statusUnavailable) return;
+  var ativado = st ? (hasAnySource(me) && totalChunks(st) > 0) : hasAnySource(me);
+  document.body.setAttribute('data-zstate', ativado ? 'ativado' : 'novo');
+  if (ativado) {
+    renderHello();
+    renderHealth();
+  } else {
+    renderOnboarding();
   }
 }
 
-/* ---- carregar tokens MCP como assistentes ---- */
+/* ---- saudação (estado ativado) ---- */
+function renderHello() {
+  var me = window._lastMe;
+  var st = window._lastStatus;
+  var titleEl = document.getElementById('hello-title');
+  var statusEl = document.getElementById('hello-status-text');
+  if (titleEl) {
+    var name = '';
+    if (me && me.email) {
+      var local = String(me.email).split('@')[0].split(/[._-]/)[0];
+      if (local) name = local.charAt(0).toUpperCase() + local.slice(1);
+    }
+    titleEl.textContent = name ? 'Seu cérebro está em dia, ' + name : 'Seu cérebro está em dia';
+  }
+  if (statusEl && st) {
+    var n = countSources(me);
+    var last = lastIndexedAt(st);
+    statusEl.textContent = n + (n === 1 ? ' fonte' : ' fontes') + ' · ' +
+      fmt(totalChunks(st)) + ' trechos · ' +
+      (last ? 'sincronizado ' + relTime(last) : 'aguardando primeira indexação');
+  }
+}
+
+/* ---- Saúde do cérebro (client-side, determinístico — regras do spec) ----
+   Base 100. Fonte em erro: −25. Fonte com last_run > 7 dias: −20; > 48h: −10.
+   Nenhum token MCP jamais usado: −15. Índice vazio: score 0 ("Configure").
+   Faixas: ≥90 Excelente · ≥70 Bom · ≥40 Atenção · <40 Crítico. */
+function computeHealth(st, tokens) {
+  var items = [];
+  var score = 100;
+
+  if (!st || totalChunks(st) === 0) {
+    return {
+      score: 0,
+      word: 'Configure',
+      sub: 'Seu cérebro ainda não tem conteúdo indexado.',
+      items: [{
+        level: 'warn',
+        html: '<strong>Índice vazio.</strong> Conecte uma fonte e rode a primeira indexação.',
+        act: { nav: 'fontes', label: 'indexar →' }
+      }]
+    };
+  }
+
+  var okNames = [];
+  (st.sources || []).forEach(function (s) {
+    var name = s.display_name || s.source || s.source_type || 'Fonte';
+    var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
+    if (estado === 'erro') {
+      score -= 25;
+      items.push({
+        level: 'warn',
+        html: '<strong>' + escapeHtml(name) + ' com erro de sincronização.</strong> As atualizações dessa fonte não estão entrando no cérebro.',
+        act: { nav: 'fontes', label: 'corrigir →' }
+      });
+      return;
+    }
+    /* conectada mas nunca rodou (e não está indexando agora): pendência, não "ok" */
+    if (!s.last_run && estado !== 'indexando') {
+      score -= 10;
+      items.push({
+        level: 'warn',
+        html: '<strong>' + escapeHtml(name) + ' nunca sincronizou</strong> — rode Indexar agora.',
+        act: { nav: 'fontes', label: 'indexar →' }
+      });
+      return;
+    }
+    var h = ageHours(s.last_run);
+    if (h > 24 * 7 && isFinite(h)) {
+      score -= 20;
+      items.push({
+        level: 'warn',
+        html: '<strong>' + escapeHtml(name) + ' sem sincronizar há ' + Math.floor(h / 24) + ' dias.</strong> O conteúdo recente dessa fonte não está no cérebro.',
+        act: { nav: 'fontes', label: 'corrigir →' }
+      });
+    } else if (h > 48 && isFinite(h)) {
+      score -= 10;
+      items.push({
+        level: 'warn',
+        html: '<strong>' + escapeHtml(name) + ' sem sincronizar há ' + Math.floor(h / 24) + ' dias.</strong> Rode "Indexar agora" para atualizar.',
+        act: { nav: 'fontes', label: 'indexar →' }
+      });
+    } else {
+      okNames.push(name);
+    }
+  });
+
+  var anyUsed = (tokens || []).some(function (t) { return !!t.last_used_at; });
+  if (!anyUsed) {
+    score -= 15;
+    items.push({
+      level: 'warn',
+      html: '<strong>Nenhuma IA usou seu cérebro ainda.</strong> Conecte um assistente para começar a aproveitar o índice.',
+      act: { guia: 'conectar', label: 'como fazer →' }
+    });
+  }
+
+  if (score < 0) score = 0;
+  var warns = items.filter(function (i) { return i.level === 'warn'; }).length;
+  if (okNames.length) {
+    items.push({ level: 'ok', html: escapeHtml(okNames.join(', ')) + ' sincronizando normalmente.' });
+  } else if (!items.length) {
+    items.push({ level: 'ok', html: 'Tudo sincronizando normalmente.' });
+  }
+
+  var faixa = score >= 90 ? 'Excelente' : score >= 70 ? 'Bom' : score >= 40 ? 'Atenção' : 'Crítico';
+  var word = warns ? faixa + ' — ' + warns + (warns > 1 ? ' pendências' : ' pendência') : faixa;
+  var sub = warns
+    ? (warns > 1 ? 'Resolver as pendências leva o recall ao máximo.' : 'Resolver a pendência leva o recall ao máximo.')
+    : 'Tudo em ordem — sua IA enxerga o cérebro completo.';
+  return { score: score, word: word, sub: sub, items: items };
+}
+
+function renderHealth() {
+  var st = window._lastStatus;
+  if (!st) return;
+  var h = computeHealth(st, assistants);
+  var ring = document.getElementById('health-ring-fg');
+  var scoreEl = document.getElementById('health-score');
+  var wordEl = document.getElementById('health-word');
+  var subEl = document.getElementById('health-sub');
+  var listEl = document.getElementById('health-list');
+  var CIRC = 169.6;
+  if (ring) {
+    ring.setAttribute('stroke-dashoffset', String(CIRC * (1 - h.score / 100)));
+    ring.setAttribute('stroke', h.score >= 70 ? 'var(--accent)' : 'var(--warn)');
+  }
+  if (scoreEl) scoreEl.textContent = String(h.score);
+  if (wordEl) wordEl.textContent = h.word;
+  if (subEl) subEl.textContent = h.sub;
+  if (listEl) {
+    listEl.innerHTML = h.items.map(function (it) {
+      var act = '';
+      if (it.act) {
+        act = it.act.guia
+          ? '<a class="act" href="#guia" data-nav="guia" data-guia="' + it.act.guia + '">' + it.act.label + '</a>'
+          : '<a class="act" href="#' + it.act.nav + '" data-nav="' + it.act.nav + '">' + it.act.label + '</a>';
+      }
+      return '<div class="health-item ' + it.level + '">' +
+        '<span class="hi">' + (it.level === 'warn' ? '!' : '✓') + '</span>' +
+        '<span class="grow">' + it.html + '</span>' + act + '</div>';
+    }).join('');
+  }
+}
+
+/* ---- onboarding (estado novo) ---- */
+function renderOnboarding() {
+  var me = window._lastMe;
+  var st = window._lastStatus;
+  var wrap = document.getElementById('onb-steps');
+  if (!wrap) return;
+  var srcDone = hasAnySource(me);
+  var idxDone = totalChunks(st) > 0;
+  var aiDone = assistants.length > 0;
+  var steps = [
+    {
+      done: true,
+      st: 'Criar sua conta',
+      sd: 'Feito — você entrou com ' + escapeHtml((me && me.email) || 'seu e-mail') + '.'
+    },
+    {
+      done: srcDone,
+      st: 'Conectar a primeira fonte',
+      sd: 'Comece pelo Notion — é de onde vem a maior parte do conhecimento. Granola e agendas podem vir depois.',
+      cta: '<button class="btn btn-primary btn-sm" type="button" data-nav="fontes">Conectar Notion →</button>'
+    },
+    {
+      done: idxDone,
+      st: 'Indexar o cérebro',
+      sd: 'Um clique. A primeira indexação leva alguns minutos — você pode acompanhar em Atividade.',
+      cta: '<button class="btn btn-primary btn-sm" type="button" data-nav="fontes">Indexar agora →</button>'
+    },
+    {
+      done: aiDone,
+      st: 'Plugar sua IA e perguntar',
+      sd: 'Claude.ai, Claude Code, ChatGPT ou qualquer cliente MCP. O Guia tem o passo a passo de cada um.',
+      cta: '<button class="btn btn-primary btn-sm" type="button" data-nav="guia" data-guia="conectar">Ver o passo a passo →</button>'
+    }
+  ];
+  var nowSet = false;
+  wrap.innerHTML = steps.map(function (s, i) {
+    var cls = 'onb-step' + (s.done ? ' done' : '');
+    var isNow = !s.done && !nowSet;
+    if (isNow) { cls += ' now'; nowSet = true; }
+    var num = s.done ? '✓' : String(i + 1);
+    var cta = (isNow && s.cta) ? '<div class="cta">' + s.cta + '</div>' : '';
+    return '<div class="' + cls + '">' +
+      '<span class="num">' + num + '</span>' +
+      '<div class="grow"><div class="st">' + s.st + '</div><div class="sd">' + s.sd + '</div>' + cta + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+/* ---- assistentes conectados (estado ativado) ---- */
+function renderAssistRows() {
+  var tagEl = document.getElementById('assistants-tag');
+  if (tagEl) tagEl.textContent = assistants.length;
+  var wrap = document.getElementById('assist-rows');
+  if (!wrap) return;
+  if (!assistants.length) {
+    wrap.innerHTML = '<p class="muted" style="font-size:13px;padding:8px 0">Nenhum assistente conectado ainda — leva menos de 5 minutos no Guia.</p>';
+    return;
+  }
+  wrap.innerHTML = assistants.map(function (t) {
+    var used = t.last_used_at;
+    var idle = !used || ageHours(used) > 24 * 7;
+    var meta = used ? 'usado ' + relTime(used)
+      : (t.created_at ? 'criado ' + relTime(t.created_at) + ' · nunca usado' : 'nunca usado');
+    return '<div class="assist-row"><span class="dot' + (idle ? ' idle' : '') + '"></span>' +
+      '<span class="nm">' + escapeHtml(t.label || 'Claude Code') + '</span>' +
+      '<span class="meta">' + escapeHtml(meta) + '</span>' +
+      '<button class="link-quiet" type="button" data-rm-assist="' + escapeHtml(String(t.id)) + '">revogar</button></div>';
+  }).join('');
+}
+
+/* renderInicio: mantém a assinatura usada pelo restante do código */
+function renderInicio(me, billing) {
+  renderConnectActiveBadge();
+  renderAssistRows();
+  renderContaTokens();
+  updateZState();
+}
+
+/* ---- Sua semana (GET /portal/week — degrada escondendo o card) ---- */
+async function loadWeek() {
+  var card = document.getElementById('card-week');
+  if (!card) return;
+  try {
+    var res = await api('/portal/week');
+    if (!res.ok) { card.classList.add('hidden'); return; }
+    var w = await res.json();
+    card.classList.remove('hidden');
+    var numsEl = document.getElementById('week-nums');
+    if (numsEl) {
+      numsEl.innerHTML =
+        '<div class="wn"><strong>' + fmt(w.documents || 0) + '</strong><span>documentos novos</span></div>' +
+        '<div class="wn"><strong>' + fmt(w.meetings || 0) + '</strong><span>' + ((w.meetings || 0) === 1 ? 'reunião' : 'reuniões') + '</span></div>' +
+        '<div class="wn"><strong>' + fmt((w.by_source || []).length) + '</strong><span>fontes com novidade</span></div>';
+    }
+    var listEl = document.getElementById('week-list');
+    if (listEl) {
+      var recent = (w.recent || []).slice(0, 6);
+      listEl.innerHTML = recent.length
+        ? recent.map(function (r) {
+            return '<div class="week-item">' + srcIcon(r.source_type || 'web') +
+              '<span class="t">' + escapeHtml(r.title || '(sem título)') + '</span>' +
+              '<span class="m">' + escapeHtml(relTime(r.indexed_at)) + '</span></div>';
+          }).join('')
+        : '<p class="muted" style="font-size:13px;padding:6px 0">Nada novo nos últimos 7 dias.</p>';
+    }
+  } catch (e) { card.classList.add('hidden'); }
+}
+
+/* ---- O que sua IA buscou (GET /portal/ai-searches — degrada p/ estado vazio) ---- */
+async function loadAiSearches() {
+  var listEl = document.getElementById('feed-list');
+  if (!listEl) return;
+  var searches = null;
+  try {
+    var res = await api('/portal/ai-searches');
+    if (res.ok) {
+      var data = await res.json();
+      searches = data.searches || [];
+    }
+  } catch (e) { /* degrada */ }
+  if (!searches || !searches.length) {
+    listEl.innerHTML = '<div class="feed-empty">Nenhuma busca ainda. Conecte sua IA e pergunte algo — cada busca aparece aqui. ' +
+      '<a href="#guia" data-nav="guia" data-guia="conectar">Conectar uma IA →</a></div>';
+    return;
+  }
+  listEl.innerHTML = searches.slice(0, 8).map(function (s) {
+    var meta = [(s.results != null ? s.results + (s.results === 1 ? ' trecho' : ' trechos') : null), relTime(s.ts)]
+      .filter(Boolean).join(' · ');
+    return '<div class="feed-row"><span class="who">' + escapeHtml(s.client || 'IA') + '</span>' +
+      '<span class="q">"' + escapeHtml(s.query || '') + '"</span>' +
+      '<span class="meta">' + escapeHtml(meta) + '</span></div>';
+  }).join('');
+}
+
+/* ---- Próxima reunião (GET /portal/next-meeting) ---- */
+window._nextMeeting = null;
+
+/* YYYY-MM-DD (date-only) → Date local, sem deslocamento de fuso; null se não for date-only */
+function parseDateOnly(s) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3]);
+}
+
+function meetingWhenParts(startsAt, allDay) {
+  var dateOnly = parseDateOnly(startsAt);
+  var isAllDay = !!allDay || !!dateOnly;
+  var d = dateOnly || new Date(startsAt);
+  if (!isFinite(d.getTime())) return { day: '', time: '' };
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var that = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var diffDays = Math.round((that - today) / 86400000);
+  var day;
+  if (diffDays === 0) day = 'hoje';
+  else if (diffDays === 1) day = 'amanhã';
+  else if (diffDays < 7) day = d.toLocaleDateString('pt-BR', { weekday: 'long' });
+  else day = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  /* all-day: só o dia, sem horário fantasma */
+  var time = isAllDay ? '' : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return { day: day, time: time };
+}
+
+function briefingPrompt(m) {
+  var w = meetingWhenParts(m.starts_at, m.all_day);
+  return 'Prepara meu briefing para a reunião "' + m.title + '" de ' + w.day + (w.time ? ' às ' + w.time : '') +
+    ': contexto, decisões anteriores e pendências.';
+}
+
+/* atualiza um .code-block mantendo o botão copiar */
+function fillPromptBlock(el, text) {
+  if (!el) return;
+  var btn = el.querySelector('.copy-btn');
+  el.textContent = text;
+  if (btn) {
+    btn.setAttribute('data-copy', text);
+    btn.textContent = 'copiar';
+    el.appendChild(btn);
+  }
+}
+
+async function loadNextMeeting() {
+  var body = document.getElementById('next-meeting-body');
+  if (!body) return;
+  var emptyHtml = '<p class="muted" style="font-size:13px;padding:6px 0">Nenhuma reunião futura nas suas agendas indexadas.</p>' +
+    '<p class="muted" style="font-size:12px">Conecte uma agenda em <a href="#fontes" data-nav="fontes">Fontes</a> para ver o briefing aqui.</p>';
+  try {
+    var res = await api('/portal/next-meeting');
+    if (!res.ok) { body.innerHTML = emptyHtml; return; }
+    var m = await res.json();
+    if (!m || !m.found) { body.innerHTML = emptyHtml; window._nextMeeting = null; return; }
+    window._nextMeeting = m;
+    var w = meetingWhenParts(m.starts_at, m.all_day);
+    var sub = [m.calendar, (m.attendees && m.attendees.length ? 'com ' + m.attendees.slice(0, 3).join(' e ') : null)]
+      .filter(Boolean).join(' · ');
+    var prompt = briefingPrompt(m);
+    body.innerHTML =
+      '<div class="next-meeting">' +
+      '<span class="nm-when">' + escapeHtml(w.day) + (w.time ? '<br>' + escapeHtml(w.time) : '') + '</span>' +
+      '<div class="grow"><div class="nm-title">' + escapeHtml(m.title || '(sem título)') + '</div>' +
+      (sub ? '<div class="nm-sub">' + escapeHtml(sub) + '</div>' : '') + '</div></div>' +
+      '<div class="code-block mt-sm" style="white-space:pre-wrap" id="meeting-prompt">' + escapeHtml(prompt) +
+      '<button class="copy-btn" type="button" data-copy="' + escapeHtml(prompt) + '">copiar</button></div>' +
+      '<div class="card-foot">Cole no Claude.ai ou em qualquer IA conectada.</div>';
+    /* parametriza a receita "Briefing da próxima reunião" no Guia */
+    fillPromptBlock(document.getElementById('recipe-briefing'), prompt);
+  } catch (e) { body.innerHTML = emptyHtml; }
+}
+
+/* ---- carregar tokens MCP (lista crua: label, last_used_at, created_at) ---- */
 async function loadMcpTokens() {
   try {
     var res = await api('/portal/mcp-tokens');
     if (!res.ok) return;
     var list = await res.json();
-    assistants = (list || []).map(function (t) {
-      return {
-        id: t.id,
-        name: t.label || 'Claude Code',
-        icon: 'term',
-        via: 'token ••••' + (t.id ? String(t.id).slice(-4) : ''),
-        meta: t.created_at ? 'criado em ' + new Date(t.created_at).toLocaleDateString('pt-BR') : ''
-      };
-    });
+    assistants = list || [];
   } catch (e) { /* ignora */ }
 }
 
@@ -199,6 +559,98 @@ async function revokeAssistant(tokenId) {
   } catch (e) { toast('Erro de rede ao revogar.'); }
 }
 
+/* ==================== CONTA ====================  */
+
+function renderConta(me) {
+  var emailEl = document.getElementById('conta-email');
+  if (emailEl) emailEl.textContent = (me && me.email) || '—';
+  var sinceEl = document.getElementById('conta-member-since');
+  if (sinceEl) {
+    if (me && me.created_at) {
+      var d = new Date(me.created_at);
+      sinceEl.textContent = isFinite(d.getTime())
+        ? d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        : '—';
+    } else {
+      sinceEl.textContent = '—';
+    }
+  }
+}
+
+/* tokens MCP na Conta (mesma fonte de dados dos assistentes) */
+function renderContaTokens() {
+  var tag = document.getElementById('conta-tokens-tag');
+  if (tag) tag.textContent = assistants.length;
+  var wrap = document.getElementById('conta-token-list');
+  if (!wrap) return;
+  if (!assistants.length) {
+    wrap.innerHTML = '<p class="muted" style="font-size:13px;padding:8px 0">Nenhum token ativo. Gere um no Guia para conectar uma IA.</p>';
+    return;
+  }
+  wrap.innerHTML = assistants.map(function (t) {
+    var meta = t.last_used_at ? 'usado ' + relTime(t.last_used_at)
+      : (t.created_at ? 'criado ' + relTime(t.created_at) : 'nunca usado');
+    return '<div class="kv-row"><span class="k">' + escapeHtml(t.label || 'Claude Code') + '</span>' +
+      '<span class="v masked">token ••••' + escapeHtml(String(t.id || '').slice(-4)) + '</span>' +
+      '<span class="muted" style="font-size:11.5px;font-family:var(--mono);white-space:nowrap">' + escapeHtml(meta) + '</span>' +
+      '<button class="link-quiet" type="button" data-rm-assist="' + escapeHtml(String(t.id)) + '">revogar</button></div>';
+  }).join('');
+}
+
+/* sessões ativas (GET /portal/sessions — degrada graciosamente) */
+function uaShort(ua) {
+  if (!ua) return 'Sessão';
+  var browser = /Edg\//.test(ua) ? 'Edge'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari' : 'Navegador';
+  var os = /iPhone|iPad/.test(ua) ? 'iOS'
+    : /Android/.test(ua) ? 'Android'
+    : /Mac OS X/.test(ua) ? 'Mac'
+    : /Windows/.test(ua) ? 'Windows'
+    : /Linux/.test(ua) ? 'Linux' : '';
+  return browser + (os ? ' · ' + os : '');
+}
+
+async function loadSessions() {
+  var wrap = document.getElementById('sessions-list');
+  var tag = document.getElementById('sessions-tag');
+  if (!wrap) return;
+  try {
+    var res = await api('/portal/sessions');
+    if (!res.ok) throw new Error('falha');
+    var data = await res.json();
+    var sessions = data.sessions || [];
+    if (tag) tag.textContent = sessions.length;
+    if (!sessions.length) {
+      wrap.innerHTML = '<p class="muted" style="font-size:13px;padding:8px 0">Nenhuma sessão ativa.</p>';
+      return;
+    }
+    wrap.innerHTML = sessions.map(function (s) {
+      var k = s.current ? 'Este navegador' : uaShort(s.user_agent);
+      var meta = [s.current ? uaShort(s.user_agent) : null, relTime(s.last_seen_at || s.created_at)].filter(Boolean).join(' · ');
+      var right = s.current
+        ? '<span class="tag ok">atual</span>'
+        : '<button class="link-quiet" type="button" data-rm-session="' + escapeHtml(String(s.id)) + '">encerrar</button>';
+      return '<div class="kv-row"><span class="k">' + escapeHtml(k) + '</span>' +
+        '<span class="v muted" style="font-size:12.5px">' + escapeHtml(meta) + '</span>' + right + '</div>';
+    }).join('');
+  } catch (e) {
+    if (tag) tag.textContent = '—';
+    wrap.innerHTML = '<p class="muted" style="font-size:13px;padding:8px 0">Não consegui carregar as sessões agora.</p>';
+  }
+}
+
+async function revokeSession(id, isCurrent) {
+  try {
+    var res = await apiJSON('/portal/sessions/revoke', 'POST', { id: id });
+    if (!res.ok && res.status !== 204) { toast('Não consegui encerrar a sessão.'); return; }
+    if (isCurrent) { location.href = '/login.html'; return; }
+    toast('Sessão encerrada');
+    loadSessions();
+  } catch (e) { toast('Erro de rede ao encerrar sessão.'); }
+}
+
 /* ==================== SIDEBAR / cérebro ====================  */
 
 function renderBrainMini(busy, st) {
@@ -209,11 +661,9 @@ function renderBrainMini(busy, st) {
   dot.classList.toggle('busy', !!busy);
   if (st && st.counts && st.counts.totals) {
     chunks.textContent = fmt(st.counts.totals.chunks || 0);
-    var lastAt = (st.counts.bySource || []).reduce(function (m, s) {
-      return s.last_indexed_at && s.last_indexed_at > m ? s.last_indexed_at : m;
-    }, '');
+    var lastAt = lastIndexedAt(st);
     sync.textContent = busy ? 'indexando agora…'
-      : (lastAt ? 'sincronizado ' + new Date(lastAt).toLocaleString('pt-BR') : 'nunca indexado');
+      : (lastAt ? 'sincronizado ' + relTime(lastAt) : 'aguardando primeira indexação');
   } else {
     chunks.textContent = '—';
     sync.textContent = busy ? 'indexando agora…' : 'sincronizado';
@@ -221,6 +671,29 @@ function renderBrainMini(busy, st) {
 }
 
 /* ==================== FONTES ====================  */
+
+/* status (de /portal/status) de uma fonte pelo source_type lógico */
+function sourceStatusFor(type) {
+  var st = window._lastStatus;
+  if (!st || !st.sources) return null;
+  return st.sources.find(function (s) {
+    var t = s.source_type || (s.source && s.source.indexOf('notion') === 0 ? 'notion'
+      : s.source && s.source.indexOf('granola') === 0 ? 'granola'
+      : s.source && (s.source.indexOf('calendar') === 0 || s.source.indexOf('gcal') === 0) ? 'calendar' : 'web');
+    return t === type;
+  }) || null;
+}
+
+/* tag de saúde de uma fonte: {cls, label} ou null quando ok/sem dados */
+function sourceHealthTag(type) {
+  var s = sourceStatusFor(type);
+  if (!s) return null;
+  var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
+  if (estado === 'erro') return { cls: 'warn', label: 'erro de sync' };
+  var h = ageHours(s.last_run);
+  if (isFinite(h) && h > 48) return { cls: 'warn', label: 'sem sync há ' + Math.floor(h / 24) + ' dias' };
+  return null;
+}
 
 function renderFontes(me) {
   var sources = (me && me.sources) || {};
@@ -239,10 +712,16 @@ function renderFontes(me) {
   var ntTag = document.getElementById('notion-tag');
   if (ntTag) {
     var workspaces = notion.workspaces || [];
-    ntTag.textContent = workspaces.length
-      ? (workspaces.length > 1 ? workspaces.length + ' workspaces' : 'conectado')
-      : 'desconectado';
-    ntTag.className = 'tag ' + (workspaces.length ? 'ok' : 'off');
+    var ntHealth = workspaces.length ? sourceHealthTag('notion') : null;
+    if (ntHealth) {
+      ntTag.textContent = ntHealth.label;
+      ntTag.className = 'tag ' + ntHealth.cls;
+    } else {
+      ntTag.textContent = workspaces.length
+        ? (workspaces.length > 1 ? workspaces.length + ' workspaces' : 'conectado')
+        : 'desconectado';
+      ntTag.className = 'tag ' + (workspaces.length ? 'ok' : 'off');
+    }
   }
   var nList = document.getElementById('notion-list');
   if (nList) {
@@ -250,21 +729,18 @@ function renderFontes(me) {
     nList.innerHTML = ws.length
       ? ws.map(function (w) {
           var name = w.name || w.workspace || '(workspace)';
-          var when = w.connected_at ? new Date(w.connected_at).toLocaleDateString('pt-BR') : '';
+          var when = w.connected_at ? 'conectado em ' + new Date(w.connected_at).toLocaleDateString('pt-BR') : '';
           var connChip = w.connection_type === 'pat' ? '<span class="tag">Token (PAT)</span>' : w.connection_type === 'oauth' ? '<span class="tag">OAuth</span>' : '';
-          return '<div class="row">' + srcIcon('notion') +
-            '<span class="grow"><span class="ttl">' + escapeHtml(name) + '</span>' +
-            '<span class="meta">' + (when ? 'conectado em ' + when : '') + '</span></span>' +
+          return '<div class="kv-row"><span class="k">' + srcIcon('notion') + escapeHtml(name) + '</span>' +
+            '<span class="v muted" style="font-size:12.5px">' + escapeHtml(when) + '</span>' +
             connChip +
-            '<button class="btn btn-danger-ghost btn-sm" type="button" data-rm-notion="' + escapeHtml(w.workspace || name) + '">Remover</button></div>';
+            '<button class="link-quiet" type="button" data-rm-notion="' + escapeHtml(w.workspace || name) + '">remover</button></div>';
         }).join('')
       : '<p class="muted">Nenhum workspace conectado ainda. O Notion costuma ser a fonte mais rica do cerebro.</p>';
   }
 
   /* fontes-count + badge */
-  var nConn = (notion.connected ? 1 : 0) + (sources.google && sources.google.length ? 1 : 0)
-    + (sources.ical && sources.ical.links && sources.ical.links.length ? 1 : 0)
-    + (sources.granola && sources.granola.set ? 1 : 0);
+  var nConn = countSources(me);
   var fcEl = document.getElementById('fontes-count');
   if (fcEl) fcEl.textContent = '· ' + nConn + ' conectadas';
   var nbEl = document.getElementById('nav-fontes-badge');
@@ -281,41 +757,64 @@ function renderFontes(me) {
   if (gList) {
     gList.innerHTML = gAccounts.length
       ? gAccounts.map(function (em) {
-          return '<div class="row">' + srcIcon('calendar') +
-            '<span class="grow"><span class="ttl">' + escapeHtml(em) + '</span>' +
-            '<span class="meta">leitura e escrita de eventos</span></span>' +
-            '<button class="btn btn-danger-ghost btn-sm" type="button" data-rm-google="' + escapeHtml(em) + '">Remover</button></div>';
+          return '<div class="kv-row"><span class="k">' + srcIcon('calendar') + escapeHtml(em) + '</span>' +
+            '<span class="v muted" style="font-size:12.5px">leitura e escrita de eventos</span>' +
+            '<button class="link-quiet" type="button" data-rm-google="' + escapeHtml(em) + '">desconectar</button></div>';
         }).join('')
       : '<p class="muted">Nenhuma conta conectada.</p>';
   }
 
   /* ical */
   var icalLinks = (sources.ical && sources.ical.links) || [];
+  var icTag = document.getElementById('ical-tag');
+  if (icTag) {
+    icTag.textContent = icalLinks.length
+      ? icalLinks.length + (icalLinks.length > 1 ? ' agendas' : ' agenda')
+      : 'nenhuma agenda';
+    icTag.className = 'tag ' + (icalLinks.length ? 'ok' : '');
+  }
   var iList = document.getElementById('ical-list');
   if (iList) {
     iList.innerHTML = icalLinks.length
       ? icalLinks.map(function (c) {
-          return '<div class="row">' + srcIcon('calendar') +
-            '<span class="grow"><span class="ttl">' + escapeHtml(c.label || 'Sem nome') + '</span>' +
-            '<span class="meta masked">' + escapeHtml(c.masked_url || c.url || '') + '</span></span>' +
-            '<button class="btn btn-danger-ghost btn-sm" type="button" data-rm-ical="' + escapeHtml(String(c.id)) + '">Remover</button></div>';
+          return '<div class="kv-row"><span class="k">' + srcIcon('calendar') + escapeHtml(c.label || 'Sem nome') + '</span>' +
+            '<span class="v masked">' + escapeHtml(c.masked_url || c.url || '') + '</span>' +
+            '<button class="link-quiet" type="button" data-rm-ical="' + escapeHtml(String(c.id)) + '">remover</button></div>';
         }).join('')
       : '<p class="muted">Nenhum calendario por link ainda.</p>';
   }
 
   /* granola */
   var granola = sources.granola || {};
+  var grHealth = granola.set ? sourceHealthTag('granola') : null;
   var grTag = document.getElementById('granola-tag');
   if (grTag) {
-    grTag.textContent = granola.set ? 'chave salva' : 'sem chave';
-    grTag.className = 'tag ' + (granola.set ? 'ok' : '');
+    if (grHealth) {
+      grTag.textContent = grHealth.label;
+      grTag.className = 'tag ' + grHealth.cls;
+    } else {
+      grTag.textContent = granola.set ? 'chave salva' : 'sem chave';
+      grTag.className = 'tag ' + (granola.set ? 'ok' : '');
+    }
+  }
+  /* notice warn acionável quando o Granola está em erro/stale */
+  var grNotice = document.getElementById('granola-notice');
+  if (grNotice) {
+    if (grHealth) {
+      grNotice.classList.remove('hidden');
+      grNotice.textContent = grHealth.label === 'erro de sync'
+        ? 'A sincronização do Granola falhou. A chave pode ter expirado — cole uma nova chave abaixo para retomar.'
+        : 'Granola ' + grHealth.label + '. A chave pode ter expirado — cole uma nova chave abaixo; suas reuniões recentes serão indexadas na próxima sincronização.';
+    } else {
+      grNotice.classList.add('hidden');
+      grNotice.textContent = '';
+    }
   }
   var grState = document.getElementById('granola-state');
   if (grState) {
     grState.innerHTML = granola.set
-      ? '<div class="row">' + srcIcon('granola') +
-        '<span class="grow"><span class="ttl">Chave da API</span>' +
-        '<span class="meta masked">' + escapeHtml(granola.masked || '••••') + '</span></span>' +
+      ? '<div class="kv-row"><span class="k">' + srcIcon('granola') + 'Chave da API</span>' +
+        '<span class="v masked">' + escapeHtml(granola.masked || '••••') + '</span>' +
         '<span class="tag ok">ativa</span></div>'
       : '<p class="muted">Cole a chave abaixo — ela fica guardada criptografada e aparece sempre mascarada.</p>';
   }
@@ -363,14 +862,14 @@ function renderFontesNudge(me) {
       '<div class="nudge-card">' +
       '<span class="nudge-icon">✦</span>' +
       '<span class="nudge-text">Fontes prontas! Agora conecte sua IA favorita para começar a perguntar.</span>' +
-      '<button class="btn btn-primary btn-sm" type="button" data-nav="inicio">Conectar minha IA →</button>' +
+      '<button class="btn btn-primary btn-sm" type="button" data-nav="guia" data-guia="conectar">Conectar minha IA →</button>' +
       '</div>';
   } else {
     nudge.innerHTML =
       '<div class="nudge-card">' +
       '<span class="nudge-icon">✓</span>' +
       '<span class="nudge-text">IA conectada e fontes prontas — faça sua primeira pergunta!</span>' +
-      '<button class="btn btn-ghost btn-sm" type="button" data-nav="chat">Testar no chat →</button>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-nav="consultar">Consultar o cérebro →</button>' +
       '</div>';
   }
 }
@@ -405,15 +904,6 @@ function getAmbiguousNames() {
 function isAmbiguousName(name) {
   return !!getAmbiguousNames()[(name || '').toLowerCase()];
 }
-
-// COMPAT: kept for any code that reads _activeEntityId (e.g. openGraphPanel)
-Object.defineProperty(window, '_activeEntityId', {
-  get: function() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : null; },
-  set: function(v) {
-    if (v === null) { explorerState.entityIds.clear(); }
-    else { explorerState.entityIds.add(v); }
-  }
-});
 
 async function loadEntities() {
   var wrap = document.getElementById('entities-block');
@@ -1123,21 +1613,6 @@ var explorerState = {
   offset: 0,
 };
 
-// COMPAT: docState alias (old code may reference docState.filter, docState.entityId)
-var docState = {
-  get filter() { return explorerState.sourceType; },
-  set filter(v) { explorerState.sourceType = v; },
-  get q() { return explorerState.q; },
-  set q(v) { explorerState.q = v; },
-  get offset() { return explorerState.offset; },
-  set offset(v) { explorerState.offset = v; },
-  get entityId() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : undefined; },
-  set entityId(v) {
-    if (v === undefined || v === null) { explorerState.entityIds.clear(); }
-    else { explorerState.entityIds.add(v); }
-  },
-};
-
 var PAGE = 50;
 var statusPollTimer = null;
 /* E2.3: last counts from /portal/status for filter button rendering */
@@ -1147,14 +1622,23 @@ function stopStatusPolling() {
   if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
 }
 
+/* /portal/status falhou: deriva o estado do Início só de /portal/me para a home
+   não ficar em branco; um loadStatus bem-sucedido depois re-deriva normalmente. */
+function markStatusUnavailable() {
+  window._statusUnavailable = true;
+  if (!window._lastStatus) updateZState();
+}
+
 async function loadStatus() {
   var st;
   try {
     var res = await api('/portal/status');
-    if (!res.ok) return;
+    if (!res.ok) { markStatusUnavailable(); return; }
     st = await res.json();
-  } catch (e) { return; }
+  } catch (e) { markStatusUnavailable(); return; }
 
+  window._statusUnavailable = false;
+  window._lastStatus = st;
   var busy = !!st.running;
   renderBrainMini(busy, st);
 
@@ -1179,7 +1663,7 @@ async function loadStatus() {
     var lastAt2 = bySource.reduce(function (m, s) {
       return s.last_indexed_at && s.last_indexed_at > m ? s.last_indexed_at : m;
     }, '');
-    var lastStr = lastAt2 ? new Date(lastAt2).toLocaleString('pt-BR') : 'nunca';
+    var lastStr = lastAt2 ? relTime(lastAt2) : 'nunca';
     ss.innerHTML =
       '<div class="stat"><div class="v">' + fmt(totals.documents || 0) + '</div><div class="k">documentos</div></div>' +
       '<div class="stat"><div class="v">' + fmt(totals.chunks || 0) + '</div><div class="k">trechos</div></div>' +
@@ -1229,7 +1713,7 @@ async function loadStatus() {
           errHtml = '<details style="margin-top:4px"><summary class="meta" style="color:var(--bad);cursor:pointer">⚠ ver erro</summary>' +
             '<span class="meta" style="color:var(--bad);display:block;margin-top:4px;word-break:break-word">' + escapeHtml(s.error) + '</span></details>';
         }
-        var when = (estado === 'ok' && s.last_run) ? '<span class="meta">sincronizado ' + new Date(s.last_run).toLocaleString('pt-BR') + '</span>' : '';
+        var when = (estado === 'ok' && s.last_run) ? '<span class="meta">sincronizado ' + relTime(s.last_run) + '</span>' : '';
         return '<div class="row">' + srcIcon(t) +
           '<span class="grow"><span class="ttl">' + escapeHtml(displayName) + '</span>' +
           (errHtml || when) + '</span>' +
@@ -1240,6 +1724,14 @@ async function loadStatus() {
     }
   }
 
+  /* v2: estado do Início + saúde + pipeline do Guia derivam do status
+     (updateZState já chama renderHello/renderHealth no estado ativado
+      e renderOnboarding no estado novo) */
+  updateZState();
+  renderGuiaPipeline();
+  /* tags de saúde por fonte na view Fontes */
+  if (window._lastMe) renderFontes(window._lastMe);
+
   /* poll */
   if (busy) {
     if (!statusPollTimer) statusPollTimer = setInterval(loadStatus, 4000);
@@ -1248,6 +1740,17 @@ async function loadStatus() {
     load();
     loadBilling();
   }
+}
+
+/* pipeline com números reais (Guia → Como o Zinom funciona) */
+function renderGuiaPipeline() {
+  var st = window._lastStatus;
+  var fEl = document.getElementById('guia-pl-fontes');
+  var cEl = document.getElementById('guia-pl-chunks');
+  var aEl = document.getElementById('guia-pl-assist');
+  if (fEl) fEl.textContent = window._lastMe ? String(countSources(window._lastMe)) : '—';
+  if (cEl) cEl.textContent = st ? fmt(totalChunks(st)) : '—';
+  if (aEl) aEl.textContent = String(assistants.length);
 }
 
 /* ---- navegador de documentos ---- */
@@ -1440,7 +1943,7 @@ var ACT_STEPS = [
   { label: 'Entrar com seu convite', go: null, goLabel: '' },
   { label: 'Conectar sua primeira fonte', go: 'fontes', goLabel: 'ir para Fontes →' },
   { label: 'Tarefas no Notion', go: null, goLabel: 'configurar →' },
-  { label: 'Conectar seu assistente (Claude, ChatGPT…)', go: 'inicio', goLabel: 'conectar →' }
+  { label: 'Conectar seu assistente (Claude, ChatGPT…)', go: 'guia-conectar', goLabel: 'conectar →' }
 ];
 
 var _actDone = [true, false, false, false];
@@ -1458,7 +1961,7 @@ async function loadActivation(sources) {
     var st = await res.json();
     var wrap = document.getElementById('activation');
     if (!wrap) return;
-    if (st.complete) { wrap.classList.add('hidden'); return; }
+    if (st.complete || st.dismissed) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
     _actNotionConnected = !!(sources && sources.notion && sources.notion.connected);
     _actTasksDone = !!(st.items && st.items.tasks);
@@ -1513,13 +2016,20 @@ function renderActivation() {
     return btn;
   }).join('');
 
-  stepsEl.innerHTML = html + '<p class="muted" style="font-size:12px;margin:10px 0 0;padding-top:8px;border-top:1px solid var(--line)">Dúvida de como usar? <button class="link-quiet" type="button" data-nav="guia" style="font-size:12px">Entenda como usar no Guia →</button></p>';
+  stepsEl.innerHTML = html + '<p class="muted" style="font-size:12px;margin:10px 0 0;padding-top:8px;border-top:1px solid var(--line);display:flex;gap:12px;flex-wrap:wrap">Dúvida de como usar? <button class="link-quiet" type="button" data-nav="guia" style="font-size:12px">Entenda como usar no Guia →</button><button class="link-quiet" type="button" id="activation-dismiss-btn" style="font-size:12px;margin-left:auto">dispensar checklist</button></p>';
 
   /* Wiring dos botoes do sub-fluxo de Tarefas (existem apenas quando step 2 incompleto e notion conectado) */
   var detectBtn = document.getElementById('act-tasks-detect-btn');
   if (detectBtn) detectBtn.addEventListener('click', function (e) { e.stopPropagation(); runDetectTasks(); });
   var createBtn = document.getElementById('act-tasks-create-btn');
   if (createBtn) createBtn.addEventListener('click', function (e) { e.stopPropagation(); runCreateTasks(); });
+  var dismissBtn = document.getElementById('activation-dismiss-btn');
+  if (dismissBtn) dismissBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var wrap = document.getElementById('activation');
+    if (wrap) wrap.classList.add('hidden');
+    dismissActivation();
+  });
 }
 
 /* ==================== PLANO ====================  */
@@ -1648,7 +2158,10 @@ async function runIndex() {
     }
     /* recarregar status e dados */
     if (statusData) {
+      window._lastStatus = statusData;
       renderBrainMini(false, statusData);
+      /* usuário novo: sai do onboarding assim que a 1ª indexação termina */
+      updateZState();
     } else {
       loadStatus();
     }
@@ -1738,9 +2251,11 @@ async function generateTokenFor(panel) {
   var btnId = panel === 'chatgpt' ? 'token-gen-btn-chatgpt' : 'token-gen-btn-outra';
   var area = document.getElementById(areaId);
   var btn = document.getElementById(btnId);
+  /* label conforme a aba; backend pode ignorar o body sem quebrar nada */
+  var label = panel === 'chatgpt' ? 'ChatGPT' : 'Outra IA';
   var res;
   try {
-    res = await apiJSON('/portal/mcp-token', 'POST');
+    res = await apiJSON('/portal/mcp-token', 'POST', { label: label });
   } catch (e) { toast('Erro de rede ao gerar token.'); return; }
   if (!res.ok) { toast('Não consegui gerar o token.'); return; }
   var data = await res.json();
@@ -1760,6 +2275,132 @@ async function generateTokenFor(panel) {
   if (btn) btn.textContent = 'Gerar novo token';
   await loadMcpTokens();
   renderInicio(window._lastMe, window._lastBilling);
+}
+
+/* ==================== DIAGNÓSTICO (Guia → Verificar agora) ====================
+   Client-side: /portal/me + /portal/status + /portal/mcp-tokens.
+   Linhas: sessão, fontes, última indexação, conexão MCP, +1 por fonte problemática. */
+
+var diagRunning = false;
+
+function buildDiagRows() {
+  var me = window._lastMe;
+  var st = window._lastStatus;
+  var rows = [];
+
+  rows.push({
+    label: 'Sessão e conta',
+    result: me && me.email ? 'ok' : 'warn',
+    meta: (me && me.email) || 'sessão não confirmada'
+  });
+
+  var nSrc = countSources(me);
+  rows.push({
+    label: 'Fontes conectadas',
+    result: nSrc > 0 ? 'ok' : 'warn',
+    meta: nSrc > 0 ? nSrc + (nSrc > 1 ? ' fontes conectadas' : ' fonte conectada') : 'nenhuma fonte ainda',
+    fix: nSrc > 0 ? null : { nav: 'fontes', text: 'Conecte sua primeira fonte em Fontes →' }
+  });
+
+  var chunks = totalChunks(st);
+  var last = lastIndexedAt(st);
+  rows.push({
+    label: 'Última indexação',
+    result: chunks > 0 ? 'ok' : 'warn',
+    meta: chunks > 0 ? (last ? relTime(last) + ' · ' : '') + fmt(chunks) + ' trechos' : 'nunca indexado',
+    fix: chunks > 0 ? null : { nav: 'fontes', text: 'Rode "Indexar agora" em Fontes →' }
+  });
+
+  var used = assistants.filter(function (t) { return !!t.last_used_at; }).length;
+  rows.push({
+    label: 'Conexão MCP',
+    result: used > 0 ? 'ok' : 'warn',
+    meta: used > 0
+      ? used + (used > 1 ? ' assistentes ativos' : ' assistente ativo')
+      : (assistants.length ? 'token gerado, nunca usado' : 'nenhuma IA conectada'),
+    fix: used > 0 ? null : { guia: 'conectar', text: 'Conecte sua IA em Conectar sua IA (acima) →' }
+  });
+
+  ((st && st.sources) || []).forEach(function (s) {
+    var name = s.display_name || s.source || s.source_type || 'Fonte';
+    var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
+    var h = ageHours(s.last_run);
+    if (estado === 'erro') {
+      rows.push({ label: name, result: 'warn', meta: 'erro de sincronização',
+        fix: { nav: 'fontes', text: 'Corrigir ' + name + ' em Fontes →' } });
+    } else if (isFinite(h) && h > 48) {
+      rows.push({ label: name, result: 'warn', meta: 'sem sync há ' + Math.floor(h / 24) + ' dias',
+        fix: { nav: 'fontes', text: 'Corrigir ' + name + ' em Fontes →' } });
+    }
+  });
+
+  return rows;
+}
+
+function wireDiag() {
+  var diagBtn = document.getElementById('diag-btn');
+  if (!diagBtn) return;
+  diagBtn.addEventListener('click', async function () {
+    if (diagRunning) return;
+    diagRunning = true;
+    diagBtn.disabled = true;
+    var list = document.getElementById('diag-list');
+    var fix = document.getElementById('diag-fix');
+    if (fix) { fix.classList.add('hidden'); fix.innerHTML = ''; }
+
+    /* dados frescos (best-effort: cai no cache em falha) */
+    try {
+      var results = await Promise.allSettled([
+        api('/portal/me').then(function (r) { return r.ok ? r.json() : null; }),
+        api('/portal/status').then(function (r) { return r.ok ? r.json() : null; }),
+        loadMcpTokens()
+      ]);
+      if (results[0].status === 'fulfilled' && results[0].value) window._lastMe = Object.assign({}, window._lastMe, results[0].value);
+      if (results[1].status === 'fulfilled' && results[1].value) window._lastStatus = results[1].value;
+    } catch (e) { /* usa cache */ }
+
+    var rows = buildDiagRows();
+    if (list) {
+      list.classList.remove('hidden');
+      list.innerHTML = rows.map(function (r) {
+        return '<div class="diag-row pend"><span class="ds">' + (r.result === 'ok' ? '✓' : '!') + '</span>' +
+          '<span class="grow">' + escapeHtml(r.label) + '</span><span class="dm">—</span></div>';
+      }).join('');
+    }
+
+    var els = list ? Array.prototype.slice.call(list.querySelectorAll('.diag-row')) : [];
+    var i = 0;
+    function step() {
+      if (i > 0 && els[i - 1]) {
+        els[i - 1].className = 'diag-row ' + rows[i - 1].result;
+        els[i - 1].querySelector('.dm').textContent = rows[i - 1].meta;
+      }
+      if (i >= els.length) {
+        diagRunning = false;
+        diagBtn.disabled = false;
+        diagBtn.textContent = 'Verificar de novo';
+        var warns = rows.filter(function (r) { return r.result === 'warn'; });
+        if (fix && warns.length) {
+          var first = warns.find(function (r) { return r.fix; }) || warns[0];
+          var link = '';
+          if (first.fix) {
+            link = first.fix.guia
+              ? ' <a href="#guia" data-nav="guia" data-guia="' + first.fix.guia + '">' + escapeHtml(first.fix.text) + '</a>'
+              : ' <a href="#' + first.fix.nav + '" data-nav="' + first.fix.nav + '">' + escapeHtml(first.fix.text) + '</a>';
+          }
+          fix.innerHTML = warns.length + (warns.length > 1 ? ' pendências encontradas.' : ' pendência encontrada.') + link;
+          fix.classList.remove('hidden');
+        } else if (fix) {
+          fix.classList.add('hidden');
+        }
+        return;
+      }
+      els[i].className = 'diag-row run';
+      i++;
+      setTimeout(step, 550);
+    }
+    step();
+  });
 }
 
 /* ==================== JANELA CLAUDE.AI ====================  */
@@ -1804,9 +2445,10 @@ function wireConnectWindow() {
 async function generateToken() {
   var res;
   try {
-    res = await apiJSON('/portal/mcp-token', 'POST');
+    /* botão vive no painel Claude Code; backend pode ignorar o body sem quebrar nada */
+    res = await apiJSON('/portal/mcp-token', 'POST', { label: 'Claude Code' });
   } catch (e) { toast('Erro de rede ao gerar token.'); return; }
-  if (!res.ok) { toast('Nao consegui gerar o token.'); return; }
+  if (!res.ok) { toast('Não consegui gerar o token.'); return; }
   var data = await res.json();
   var token = data.token;
   var mcpUrl = data.mcp_url || 'https://zinom.ai/mcp';
@@ -1833,11 +2475,175 @@ async function generateToken() {
   renderInicio(window._lastMe, window._lastBilling);
 }
 
-/* ==================== CHAT DE TESTE ====================  */
+/* ==================== CONSULTAR (ex Chat de teste) ====================  */
 
 var chatBusy = false;
 // E3: histórico de conversa (últimas 6 mensagens, gerenciado no cliente)
 var chatHistory = [];
+
+/* ---- histórico de consultas (localStorage, sem backend) ----
+   chave zinom_consults_v1: array de {id, title, msgs, ts, history}
+   msgs: {role:'user', text} | {role:'ai', html} | {role:'block', html} */
+var CONV_KEY = 'zinom_consults_v1';
+var CONV_MAX = 20;
+var currentConvId = null;
+
+function loadConvs() {
+  try {
+    var raw = localStorage.getItem(CONV_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function saveConvs(convs) {
+  try { localStorage.setItem(CONV_KEY, JSON.stringify(convs.slice(0, CONV_MAX))); } catch (e) { /* quota */ }
+}
+
+function renderConvRail() {
+  var listEl = document.getElementById('conv-list');
+  if (!listEl) return;
+  var convs = loadConvs();
+  listEl.innerHTML = convs.map(function (c) {
+    return '<button class="conv-item' + (c.id === currentConvId ? ' active' : '') + '" type="button" data-conv-id="' + escapeHtml(String(c.id)) + '">' +
+      escapeHtml(c.title || 'Consulta') + '<span class="cm">' + escapeHtml(relTime(c.ts)) + '</span></button>';
+  }).join('');
+}
+
+/* salva/atualiza a conversa atual ao receber resposta */
+function appendToCurrentConv(q, aiHtml, role) {
+  var convs = loadConvs();
+  var conv = null;
+  if (currentConvId) conv = convs.find(function (c) { return c.id === currentConvId; }) || null;
+  if (!conv) {
+    conv = {
+      id: 'c' + Date.now() + Math.random().toString(36).slice(2, 6),
+      title: String(q || 'Consulta').slice(0, 48),
+      msgs: [],
+      ts: Date.now()
+    };
+    convs.unshift(conv);
+    currentConvId = conv.id;
+  }
+  if (q != null) conv.msgs.push({ role: 'user', text: q });
+  /* guarda a pergunta junto da resposta para religar o feedback com a query real */
+  if (aiHtml != null) conv.msgs.push({ role: role || 'ai', html: aiHtml, q: q != null ? String(q) : '' });
+  conv.ts = Date.now();
+  conv.history = chatHistory.slice(-12);
+  convs = [conv].concat(convs.filter(function (c) { return c.id !== conv.id; }));
+  saveConvs(convs);
+  renderConvRail();
+}
+
+function startNewConsult() {
+  currentConvId = null;
+  chatHistory = [];
+  var threadEl = document.getElementById('thread');
+  var emptyEl = document.getElementById('chat-empty');
+  if (threadEl) { threadEl.innerHTML = ''; threadEl.classList.add('hidden'); }
+  if (emptyEl) emptyEl.classList.remove('hidden');
+  renderConvRail();
+}
+
+/* Botões de action-card/capture-card não têm listener depois do restore:
+   desabilita com visual claro para não parecerem vivos. (cite-n e fb-btn são
+   religados; copy-btn e data-nav usam delegação global, então continuam vivos.) */
+function neutralizeRestoredButtons(scope) {
+  scope.querySelectorAll('.action-confirm, .action-cancel, [data-retry], .capture-card button').forEach(function (b) {
+    b.disabled = true;
+    b.classList.add('restored-off');
+    b.title = 'Disponível só na consulta original';
+  });
+}
+
+function restoreConv(id) {
+  var conv = loadConvs().find(function (c) { return c.id === id; });
+  if (!conv) return;
+  currentConvId = id;
+  chatHistory = (conv.history || []).slice();
+  var threadEl = document.getElementById('thread');
+  var emptyEl = document.getElementById('chat-empty');
+  if (emptyEl) emptyEl.classList.add('hidden');
+  if (!threadEl) return;
+  threadEl.classList.remove('hidden');
+  threadEl.innerHTML = '';
+  (conv.msgs || []).forEach(function (m) {
+    if (m.role === 'user') {
+      var u = document.createElement('div');
+      u.className = 'msg-user';
+      u.innerHTML = '<div class="q"></div>';
+      u.querySelector('.q').textContent = m.text || '';
+      threadEl.appendChild(u);
+      return;
+    }
+    if (m.role === 'block') {
+      var holder = document.createElement('div');
+      holder.innerHTML = m.html || '';
+      neutralizeRestoredButtons(holder);
+      while (holder.firstChild) threadEl.appendChild(holder.firstChild);
+      return;
+    }
+    var ai = document.createElement('div');
+    ai.className = 'msg-ai';
+    ai.innerHTML = '<span class="av">' + logoSvg(30) + '</span><div class="stack">' + (m.html || '') + '</div>';
+    var stack = ai.querySelector('.stack');
+    wireCiteRefs(stack);
+    wireFeedbackBtns(stack, m.q || ''); // religa o feedback com a query original
+    neutralizeRestoredButtons(stack);
+    threadEl.appendChild(ai);
+  });
+  renderConvRail();
+  scrollBottom();
+}
+
+/* ---- captura de URL (POST /portal/index-web — não passa pelo /portal/ask) ---- */
+async function captureUrl(url) {
+  if (chatBusy) return;
+  chatBusy = true;
+
+  var emptyEl = document.getElementById('chat-empty');
+  var threadEl = document.getElementById('thread');
+  if (emptyEl) emptyEl.classList.add('hidden');
+  if (threadEl) threadEl.classList.remove('hidden');
+
+  var userEl = document.createElement('div');
+  userEl.className = 'msg-user';
+  userEl.innerHTML = '<div class="q"></div>';
+  userEl.querySelector('.q').textContent = url;
+  if (threadEl) threadEl.appendChild(userEl);
+
+  var card = document.createElement('div');
+  card.className = 'capture-card';
+  var shortUrl = url.replace(/^https?:\/\//, '').slice(0, 60);
+  card.innerHTML = '<span class="si">' + ICONS.web + '</span>' +
+    '<span class="grow">Indexando <strong>' + escapeHtml(shortUrl) + '</strong> no seu cérebro…</span>';
+  if (threadEl) threadEl.appendChild(card);
+  scrollBottom();
+
+  var grow = card.querySelector('.grow');
+  try {
+    var res = await apiJSON('/portal/index-web', 'POST', { url: url });
+    var data = await res.json().catch(function () { return {}; });
+    if (res.ok && data.ok !== false) {
+      grow.innerHTML = 'Página indexada ✓ — ' +
+        (data.title ? '<strong>' + escapeHtml(data.title) + '</strong> ' : '') +
+        'já pesquisável por você e pelos seus assistentes.';
+    } else if (res.status === 402) {
+      card.classList.add('err');
+      grow.innerHTML = 'Limite de páginas indexadas do seu plano atingido. <a href="/plano.html">Ver planos →</a>';
+    } else {
+      card.classList.add('err');
+      grow.innerHTML = 'Não consegui indexar essa página' + (data.error ? ' (' + escapeHtml(String(data.error)) + ')' : '') + '. Verifique a URL e tente de novo.';
+    }
+  } catch (e) {
+    card.classList.add('err');
+    grow.innerHTML = 'Sem conexão — não consegui indexar agora. Tente de novo.';
+  } finally {
+    chatBusy = false;
+    appendToCurrentConv(url, card.outerHTML, 'block');
+    scrollBottom();
+  }
+}
 var SUGGESTIONS_DATA = [
   { type: 'granola', text: 'O que ficou decidido na ultima reuniao do time?' },
   { type: 'calendar', text: 'O que tenho na agenda esta semana?' },
@@ -1899,6 +2705,7 @@ function renderActionCard(proposedAction, stack, q) {
         chatHistory.push({ role: 'user', content: q || resumo });
         chatHistory.push({ role: 'assistant', content: '✓ ' + (data.message || 'Criado!') + (data.url ? ' ' + data.url : '') });
         if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+        appendToCurrentConv(q || resumo, stack.innerHTML);
       } else {
         resultEl.innerHTML = '<span style="color:var(--red,#c0392b)">✗ ' + escapeHtml(data.message || 'Erro ao criar.') + '</span>';
         confirmBtn.disabled = false;
@@ -1916,6 +2723,7 @@ function renderActionCard(proposedAction, stack, q) {
     chatHistory.push({ role: 'user', content: q || resumo });
     chatHistory.push({ role: 'assistant', content: 'Ação cancelada.' });
     if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+    appendToCurrentConv(q || resumo, stack.innerHTML);
   });
 }
 
@@ -2034,6 +2842,10 @@ function scrollBottom() {
 
 async function ask(q) {
   if (!q || chatBusy) return;
+
+  /* mensagem que é só uma URL http(s) → indexa via /portal/index-web */
+  if (/^https?:\/\/\S+$/i.test(q.trim())) { captureUrl(q.trim()); return; }
+
   chatBusy = true;
 
   var emptyEl = document.getElementById('chat-empty');
@@ -2109,6 +2921,9 @@ async function ask(q) {
     chatHistory.push({ role: 'user', content: q });
     chatHistory.push({ role: 'assistant', content: answer });
     if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+
+    // v2: salva/atualiza a conversa no histórico local
+    appendToCurrentConv(q, stack.innerHTML);
   } catch (e) {
     stack.innerHTML = '<div class="chat-block neterr">' +
       '<span class="bh">Sem conexao</span>' +
@@ -2157,6 +2972,16 @@ function wireChat() {
       if (b) ask(SUGGESTIONS_DATA[+b.getAttribute('data-sugg')].text);
     });
   }
+
+  /* rail de conversas (desktop) */
+  var convNew = document.getElementById('conv-new-btn');
+  if (convNew) convNew.addEventListener('click', startNewConsult);
+  var convList = document.getElementById('conv-list');
+  if (convList) convList.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-conv-id]');
+    if (b) restoreConv(b.getAttribute('data-conv-id'));
+  });
+  renderConvRail();
 }
 
 /* ==================== WIRING de eventos globais ====================  */
@@ -2196,10 +3021,36 @@ function wireGlobal(me) {
     }
   });
 
-  /* navegacao */
+  /* navegacao (com suporte a deep-link data-guia="conectar") */
   document.body.addEventListener('click', function (e) {
     var nav = e.target.closest('[data-nav]');
-    if (nav) go(nav.getAttribute('data-nav'));
+    if (!nav) return;
+    e.preventDefault();
+    if (nav.getAttribute('data-nav') === 'guia' && nav.getAttribute('data-guia') === 'conectar') {
+      goGuiaConectar();
+    } else {
+      go(nav.getAttribute('data-nav'));
+    }
+  });
+
+  /* revogar token MCP (Início + Conta) e encerrar sessão (Conta) — delegação global */
+  document.body.addEventListener('click', function (e) {
+    var rmA = e.target.closest('[data-rm-assist]');
+    if (rmA) { revokeAssistant(rmA.getAttribute('data-rm-assist')); return; }
+    var rmS = e.target.closest('[data-rm-session]');
+    if (rmS) { revokeSession(rmS.getAttribute('data-rm-session'), false); return; }
+  });
+
+  /* filtros de receitas (Guia) */
+  var rfWrap = document.getElementById('recipe-filters');
+  if (rfWrap) rfWrap.addEventListener('click', function (e) {
+    var fchip = e.target.closest('.fchip');
+    if (!fchip) return;
+    var cat = fchip.getAttribute('data-rcat');
+    rfWrap.querySelectorAll('.fchip').forEach(function (c2) { c2.classList.toggle('active', c2 === fchip); });
+    document.querySelectorAll('#recipe-grid .recipe-card').forEach(function (card) {
+      card.style.display = (cat === 'todas' || card.getAttribute('data-rcat') === cat) ? '' : 'none';
+    });
   });
 
   /* activation steps */
@@ -2211,6 +3062,7 @@ function wireGlobal(me) {
       var i = +b.getAttribute('data-step');
       /* Step 2 (Tarefas) com sub-fluxo inline: nao navega; os botoes internos tratam os cliques */
       if (i === 2 && !_actDone[2] && _actNotionConnected) return;
+      if (ACT_STEPS[i].go === 'guia-conectar') { goGuiaConectar(); return; }
       if (ACT_STEPS[i].go) go(ACT_STEPS[i].go);
     });
   }
@@ -2320,17 +3172,6 @@ function wireGlobal(me) {
     /* reindex */
     var reindexBtn = document.getElementById('reindex-btn');
     if (reindexBtn) reindexBtn.addEventListener('click', runIndex);
-  }
-
-  /* assistant-list: revogar */
-  var alEl = document.getElementById('assistant-list');
-  if (alEl) {
-    alEl.addEventListener('click', async function (e) {
-      var b = e.target.closest('[data-rm-assist]');
-      if (!b) return;
-      var tokenId = b.getAttribute('data-rm-assist');
-      await revokeAssistant(tokenId);
-    });
   }
 
   /* token gen */
@@ -2488,23 +3329,28 @@ async function load() {
     el.style.color = ICON_COLOR[t] || '';
   });
 
-  /* google accounts (lista separada de /portal/google/accounts) */
-  var googleAccounts = [];
-  try {
-    var gRes = await api('/portal/google/accounts');
-    if (gRes.ok) googleAccounts = await gRes.json();
-  } catch (e) { /* ignore */ }
+  /* chamadas independentes em paralelo: google accounts, ativação e tokens MCP */
   me.sources = me.sources || {};
+  var results = await Promise.all([
+    api('/portal/google/accounts')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .catch(function () { return []; }),
+    loadActivation(me.sources),
+    loadMcpTokens()
+  ]);
+  var googleAccounts = results[0] || [];
   me.sources.google = googleAccounts.map(function (a) { return a.email; });
   me.google_configured = me.google_configured !== false;
 
   renderFontes(me);
-  await loadActivation(me.sources);
-  await loadMcpTokens();
+  renderConta(me);
   renderInicio(me, window._lastBilling);
   renderChatEmpty(me);
+  renderGuiaPipeline();
   /* Preencher URLs nos painéis guiados com a URL real do servidor */
-  var baseMcpUrl = (me && me.mcp_url) ? me.mcp_url : (window.location.origin + '/mcp');
+  var baseMcpUrl = (me && me.mcp && me.mcp.url) ? me.mcp.url
+    : (me && me.mcp_url) ? me.mcp_url
+    : (window.location.origin + '/mcp');
   fillGuidedEndpoints(baseMcpUrl);
   renderFontesNudge(me);
 }
@@ -2521,21 +3367,31 @@ function init() {
   wireConnectWindow();
   wireChat();
   wireAiTabs();
+  wireDiag();
 
-  /* rota inicial */
+  /* rota inicial (suporta rota legada #chat e deep-link #guia-conectar) */
   var hash = (location.hash || '#inicio').slice(1).split('?')[0];
-  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
-  go(validViews.includes(hash) ? hash : 'inicio');
+  if (hash === 'guia-conectar') {
+    goGuiaConectar();
+  } else {
+    var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
+    go(validViews.includes(hash) ? hash : 'inicio');
+  }
 
   load();
   loadBilling();
   loadStatus();
   loadBrain(true);
+  loadWeek();
+  loadAiSearches();
+  loadNextMeeting();
+  loadSessions();
 }
 
 window.addEventListener('hashchange', function () {
   var h = (location.hash || '#inicio').slice(1).split('?')[0];
-  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
+  if (h === 'guia-conectar') { goGuiaConectar(); return; }
+  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
   if (validViews.includes(h)) go(h);
 });
 
