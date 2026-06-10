@@ -7,6 +7,7 @@
 import express from "express";
 import { getPool } from "../rag/storage.js";
 import { escapeHtml } from "../rag/status.js";
+import { safeEqual } from "../crypto-utils.js";
 import { generateInviteCode, issueInvite, hashInvite } from "../portal/invites.js";
 import { sendInviteEmail } from "../portal/email.js";
 import { listInviteRequests, markRequestInvited, type InviteRequest } from "../portal/leads.js";
@@ -982,16 +983,17 @@ export function createAdminRouter(bearerToken?: string): express.Router {
 
   // Gate by the operator BEARER_TOKEN (header OR ?token=). Returns the token on
   // success (so server-rendered forms can carry it), or null after replying 401.
+  // SECURITY (pentest F-1): operator token in query string — pending session-cookie redesign
   const gate = (req: express.Request, res: express.Response): string | null => {
     const auth = req.headers["authorization"];
     const headerToken = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
-    const queryToken = typeof req.query.token === "string" ? req.query.token : null;
+    const queryToken = typeof req.query.token === "string" ? req.query.token : null; // SECURITY (pentest F-1): operator token in query string — pending session-cookie redesign
     const token = headerToken ?? queryToken;
-    if (!bearerToken || token !== bearerToken) {
+    if (!bearerToken || !token || !safeEqual(token, bearerToken)) {
       res.status(401).type("html").send("<!doctype html><meta charset=utf-8><p>401 — informe ?token=&lt;BEARER_TOKEN&gt;</p>");
       return null;
     }
-    return token!;
+    return token;
   };
 
   router.get("/admin", async (req, res) => {
