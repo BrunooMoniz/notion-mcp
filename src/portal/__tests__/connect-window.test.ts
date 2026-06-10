@@ -9,7 +9,7 @@ import type { Server } from "node:http";
 import { createPortalRouter } from "../routes.js";
 import { __setPoolForTest } from "../../rag/storage.js";
 import { hashSession } from "../session.js";
-import { isRegistrationOpen, closeRegistrationWindow } from "../../oauth-registration-window.js";
+import { isRegistrationOpen, closeRegistrationWindow, getWindowAccountId } from "../../oauth-registration-window.js";
 
 // Pool that recognizes exactly one session id → account (mirrors resolveSession).
 const SID = "test-session-id";
@@ -72,4 +72,18 @@ test("signed-in friend → 200, opens the window, returns mcp_url + expiry", asy
   assert.ok(typeof body.mcp_url === "string" && body.mcp_url.endsWith("/mcp"));
   assert.ok(typeof body.open_until === "string");
   assert.ok(body.ttl_seconds > 0);
+});
+
+test("signed-in friend → window stores accountId", async () => {
+  closeRegistrationWindow();
+  await fetch(`${base}/portal/connect-window`, {
+    method: "POST",
+    headers: { cookie: `portal_session=${SID}` },
+  });
+  assert.equal(getWindowAccountId(), "acct_test");
+});
+
+test("closeRegistrationWindow clears accountId", () => {
+  closeRegistrationWindow();
+  assert.equal(getWindowAccountId(), null);
 });

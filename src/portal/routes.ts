@@ -242,8 +242,9 @@ export function createPortalRouter(): express.Router {
   // right trade, and far better than the manual 60-min operator window.
   const CONNECT_WINDOW_MS = parseInt(process.env.PORTAL_CONNECT_WINDOW_MINUTES ?? "5", 10) * 60_000;
   router.post("/portal/connect-window", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
     const { openRegistrationWindow } = await import("../oauth-registration-window.js");
-    const expiry = openRegistrationWindow(CONNECT_WINDOW_MS);
+    const expiry = openRegistrationWindow(CONNECT_WINDOW_MS, accountId);
     res.json({
       open_until: new Date(expiry).toISOString(),
       ttl_seconds: Math.round(CONNECT_WINDOW_MS / 1000),
