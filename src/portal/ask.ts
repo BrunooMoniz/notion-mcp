@@ -5,12 +5,14 @@
 //   - filtro de relevância (ASK_MIN_SCORE) + dedup por source_id
 //   - proposed_action para ações (sem executar aqui)
 //   - histórico de conversa (history: últimas 6 mensagens)
+// F2: LLM token usage metered per account via recordLlmUsage.
 import Anthropic from "@anthropic-ai/sdk";
 import type { Request, Response } from "express";
 import { brainSearch } from "../rag/search.js";
 import { toBrainResult, type BrainResult } from "../rag/brain-format.js";
 import { QuotaExceededError } from "../billing/usage.js";
 import { requestContext } from "../context.js";
+import { recordLlmUsage } from "../llm-usage.js";
 
 // ---------------------------------------------------------------------------
 // Model config (env-injectable, analogous to CLASSIFIER_MODEL)
@@ -37,12 +39,16 @@ type SearchFn = (query: string, accountId: string) => Promise<BrainResult[]>;
 type CompleteFn = (system: string, user: string) => Promise<string>;
 /** E3: classify intent — injectable for tests (avoid real Anthropic call). */
 type ClassifyFn = (message: string) => Promise<IntentRoute>;
+/** F2: meter function — injectable for tests (avoid real DB calls). */
+type MeterFn = (accountId: string, usage: { input_tokens: number; output_tokens: number }, label: string) => Promise<void>;
 
 interface AskDeps {
   search: SearchFn;
   complete: CompleteFn;
   /** E3: override intent classification in tests. */
   classify?: ClassifyFn;
+  /** F2: override metering in tests. */
+  meter?: MeterFn;
 }
 
 const defaultDeps: AskDeps = {
@@ -401,6 +407,9 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("");
+      // F2: meter usage best-effort.
+      const meterFn = deps.meter ?? recordLlmUsage;
+      meterFn(accountId, { input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens }, "ask:meta").catch(() => {/* swallowed */});
     } catch {
       answer = "Sou o Zinom, seu assistente pessoal. Indexo seu Notion, reuniões Granola e Google Calendar para você encontrar informações rapidamente.";
     }
@@ -482,6 +491,9 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("");
+      // F2: meter usage best-effort.
+      const meterFn = deps.meter ?? recordLlmUsage;
+      meterFn(accountId, { input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens }, "ask:search").catch(() => {/* swallowed */});
     }
   } catch {
     res.status(502).json({ error: "llm" });

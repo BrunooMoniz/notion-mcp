@@ -37,7 +37,7 @@ export async function extractFactsFromText(text: string, ctx: FactContext): Prom
   if (!trimmed) return [];
 
   const prompt = buildFactExtractionPrompt(trimmed, ctx);
-  const raw = await callHaiku(SYSTEM_PROMPT, prompt);
+  const { text: raw } = await callHaiku(SYSTEM_PROMPT, prompt);
 
   // parseFactsResponse already drops items missing s/p/o; normalizeFact then
   // fills provenance from ctx, clamps confidence, and validates dates.

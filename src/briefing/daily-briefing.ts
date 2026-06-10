@@ -349,7 +349,7 @@ export async function buildBriefingMarkdown(
   contexts: EventContext[],
   tasks: BriefingTask[],
   now: Date,
-  synth: SynthFn = callHaiku,
+  synth: SynthFn = async (system, user) => (await callHaiku(system, user)).text,
 ): Promise<string> {
   const user = buildBriefingPrompt(events, contexts, tasks, now);
   const md = await synth(BRIEFING_SYSTEM, user);
