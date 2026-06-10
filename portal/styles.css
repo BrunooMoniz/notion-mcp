@@ -865,37 +865,70 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 #brain-graph-empty { display: none; padding: 36px 12px; text-align: center; color: var(--muted); font-size: 14px; }
 
 /* ---- Explorador Unificado (brain-explorer) ---- */
-.explorer-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-.explorer-search { width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid #e2e2e2; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
-.explorer-search:focus { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(0,0,0,0.06); }
+.explorer-filters { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
 
-/* Selection pills row */
-.explorer-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: #f7f7f7; border-radius: 8px; border: 1px solid #e8e8e8; }
+/* Linha 1: busca + filtro por fonte */
+.explorer-top { display: flex; flex-direction: column; gap: 10px; }
+.explorer-top .filters { margin-bottom: 0; }
+/* Source filter chips: softer selected state (accent-soft, not solid black) */
+#doc-filters .fchip.active { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+#doc-filters .fchip.active:hover { background: var(--accent-soft); }
+#doc-filters .fchip.active .cnt { opacity: .85; }
+.explorer-search { width: 100%; box-sizing: border-box; padding: 9px 13px; border: 1px solid var(--line-2); border-radius: var(--r-xs); font-size: 14px; font-family: inherit; color: var(--ink); outline: none; background: var(--bg); transition: border-color .14s, box-shadow .14s; }
+.explorer-search::placeholder { color: var(--muted); }
+.explorer-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+
+/* Linha 2: pills das entidades selecionadas + toggle Todas|Qualquer */
+.explorer-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; background: var(--accent-soft); border-radius: var(--r-xs); border: 1px solid #cfe6d8; }
 .explorer-selection-pills { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
-.explorer-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 10px; background: var(--ink); color: #fff; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.explorer-pill-rm { background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; padding: 0; font-size: 11px; line-height: 1; }
-.explorer-pill-rm:hover { color: #fff; }
-.explorer-match-toggle { display: flex; gap: 4px; flex-shrink: 0; }
-.explorer-match-toggle .fchip { font-size: 12px; padding: 3px 10px; }
+.explorer-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 11px; background: var(--bg); color: var(--accent-strong); border: 1px solid var(--accent); border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.explorer-pill .entity-type { color: var(--accent); font-weight: 500; font-family: var(--mono); font-size: 10.5px; }
+.explorer-pill-rm { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0 0 0 1px; font-size: 12px; line-height: 1; opacity: .65; transition: opacity .12s; }
+.explorer-pill-rm:hover { opacity: 1; }
+
+/* Toggle Todas|Qualquer — segmented control */
+.explorer-match { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.explorer-match-label { font-size: 12px; color: var(--ink-soft); font-weight: 500; cursor: help; }
+.segmented { display: inline-flex; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg); padding: 2px; gap: 2px; }
+.segmented .seg-btn { border: none; background: none; color: var(--ink-soft); font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px; cursor: pointer; transition: background .14s, color .14s; }
+.segmented .seg-btn:hover { color: var(--ink); }
+.segmented .seg-btn.active { background: var(--accent); color: #fff; }
+
+/* Linha 3: seletor de entidades (details/summary colapsável, fechado por padrão) */
+.explorer-entities-panel { border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--paper); transition: border-color .14s; }
+.explorer-entities-panel[open] { border-color: var(--line-2); }
+.explorer-entities-toggle { cursor: pointer; font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 10px; list-style: none; user-select: none; padding: 11px 13px; }
+.explorer-entities-toggle:hover { color: var(--ink); }
+.explorer-entities-toggle::-webkit-details-marker { display: none; }
+.explorer-entities-toggle::before { content: '+'; font-family: var(--mono); font-size: 15px; line-height: 1; color: var(--accent); width: 14px; text-align: center; transition: transform .15s; }
+details[open] > .explorer-entities-toggle::before { content: '−'; }
+.explorer-entities-add { font-weight: 600; color: var(--accent-strong); }
+.explorer-entities-hint { color: var(--muted); font-size: 12px; }
+.explorer-sel-count { font-size: 11px; font-weight: 700; background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 8px; margin-left: auto; }
+.explorer-entities-panel > :not(summary) { margin-left: 13px; margin-right: 13px; }
+.explorer-entities-panel > #entities-block { margin-bottom: 4px; }
 
 /* Entity search input */
-.entity-search-input { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #e2e2e2; border-radius: 6px; font-size: 13px; font-family: inherit; outline: none; margin-bottom: 8px; }
-.entity-search-input:focus { border-color: var(--ink); }
+.entity-search-input { display: block; width: auto; box-sizing: border-box; padding: 7px 11px; border: 1px solid var(--line-2); border-radius: var(--r-xs); font-size: 13px; font-family: inherit; color: var(--ink); outline: none; margin-bottom: 8px; background: var(--bg); transition: border-color .14s, box-shadow .14s; }
+.entity-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
-/* Entity panel (details/summary collapsible) */
-.explorer-entities-panel { border: 1px solid #e8e8e8; border-radius: 8px; padding: 10px 12px; background: #fafafa; }
-.explorer-entities-toggle { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; list-style: none; user-select: none; }
-.explorer-entities-toggle::-webkit-details-marker { display: none; }
-.explorer-entities-toggle::before { content: '▶'; font-size: 10px; color: var(--muted); transition: transform 0.15s; }
-details[open] > .explorer-entities-toggle::before { transform: rotate(90deg); }
-.explorer-sel-count { font-size: 11px; font-weight: 700; background: var(--ink); color: #fff; border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+/* Entity chips: lighter weight, accent-soft selection (no aggressive solid black) */
+.entity-group .meta { color: var(--ink-soft); }
+.entity-chip { font-weight: 500; }
+.entity-chip .entity-type { color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.entity-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
+.entity-chip.active:hover { background: var(--accent-soft); }
+.entity-chip.active .entity-type { color: var(--accent); }
+.entity-chip.active .cnt { opacity: .9; }
 
 /* Explorer empty state */
 .explorer-empty { padding: 20px 2px; text-align: center; }
 .explorer-empty.hidden { display: none; }
 
-/* Mobile: entity panel starts open on desktop, collapses on narrow */
+/* Mobile: filtros colapsáveis, painel compacto */
 @media (max-width: 600px) {
-  .explorer-entities-panel { padding: 8px 10px; }
+  .explorer-selection { gap: 8px; padding: 9px 10px; }
+  .explorer-match { width: 100%; justify-content: space-between; }
+  .explorer-entities-toggle { padding: 10px 11px; flex-wrap: wrap; }
   #brain-graph-canvas { height: 60vh; min-height: 300px; }
 }

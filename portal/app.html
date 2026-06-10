@@ -332,27 +332,31 @@
 
           <!-- ---- Barra de filtros ---- -->
           <div class="explorer-filters" id="explorer-filters">
-            <!-- Busca por texto -->
-            <input type="text" id="doc-search" class="explorer-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
+            <!-- Linha 1: busca de título + filtro por fonte -->
+            <div class="explorer-top">
+              <input type="text" id="doc-search" class="explorer-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
+              <div class="filters" id="doc-filters" aria-label="Filtro por fonte"></div>
+            </div>
 
-            <!-- Filtro de fonte -->
-            <div class="filters" id="doc-filters" aria-label="Filtro por fonte"></div>
-
-            <!-- Entidades selecionadas (pills removíveis) -->
+            <!-- Linha 2: entidades selecionadas (pills removíveis com tipo) + toggle Todas|Qualquer -->
             <div class="explorer-selection" id="explorer-selection" style="display:none" aria-live="polite">
               <div class="explorer-selection-pills" id="explorer-selection-pills"></div>
-              <div class="explorer-match-toggle" role="group" aria-label="Modo de combinação">
-                <button class="fchip active" id="match-all-btn" type="button"
-                  title="Mostrar documentos que citam TODAS as entidades selecionadas">Todas</button>
-                <button class="fchip" id="match-any-btn" type="button"
-                  title="Mostrar documentos que citam QUALQUER uma das entidades selecionadas">Qualquer</button>
+              <div class="explorer-match" role="group" aria-label="Modo de combinação">
+                <span class="explorer-match-label" title="Todas = documentos que citam todas as entidades selecionadas. Qualquer = que citam ao menos uma.">Combinar:</span>
+                <div class="segmented">
+                  <button class="seg-btn active" id="match-all-btn" type="button"
+                    title="Todas = documentos que citam TODAS as entidades selecionadas">Todas</button>
+                  <button class="seg-btn" id="match-any-btn" type="button"
+                    title="Qualquer = documentos que citam AO MENOS UMA das entidades selecionadas">Qualquer</button>
+                </div>
               </div>
             </div>
 
-            <!-- Painel de entidades (aberto por padrão; colapsável em mobile) -->
-            <details class="explorer-entities-panel" id="entities-panel" open>
+            <!-- Linha 3: seletor de entidades — COLAPSADO por padrão -->
+            <details class="explorer-entities-panel" id="entities-panel">
               <summary class="explorer-entities-toggle">
-                <span>Pessoas · Empresas · Projetos</span>
+                <span class="explorer-entities-add">Adicionar entidade</span>
+                <span class="explorer-entities-hint">Pessoas · Empresas · Projetos</span>
                 <span class="explorer-sel-count" id="explorer-sel-count" style="display:none"></span>
               </summary>
               <!-- Busca de entidade (visível quando >30) -->

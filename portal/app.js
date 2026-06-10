@@ -329,6 +329,32 @@ function renderFontes(me) {
 var entityState = { expanded: { pessoa: false, empresa: false, projeto: false }, entityQ: '' };
 var _entitiesCache = null;
 
+/* Singular type labels for disambiguation suffixes (chips + pills). */
+var TYPE_LABEL_SINGULAR = { pessoa: 'pessoa', empresa: 'empresa', projeto: 'projeto' };
+
+/* Names that exist under more than one entity (any type) in the current cache.
+ * Memoized per cache identity so we recompute only when entities reload. */
+var _ambiguousNames = null;
+var _ambiguousNamesFor = null;
+function getAmbiguousNames() {
+  if (_ambiguousNamesFor === _entitiesCache && _ambiguousNames) return _ambiguousNames;
+  var seen = Object.create(null);
+  var dupes = Object.create(null);
+  (_entitiesCache || []).forEach(function (e) {
+    var key = (e.name || '').toLowerCase();
+    if (seen[key]) dupes[key] = true;
+    seen[key] = true;
+  });
+  _ambiguousNames = dupes;
+  _ambiguousNamesFor = _entitiesCache;
+  return dupes;
+}
+
+/* True when the given name collides with another entity (so we must show type). */
+function isAmbiguousName(name) {
+  return !!getAmbiguousNames()[(name || '').toLowerCase()];
+}
+
 // COMPAT: kept for any code that reads _activeEntityId (e.g. openGraphPanel)
 Object.defineProperty(window, '_activeEntityId', {
   get: function() { return explorerState.entityIds.size === 1 ? explorerState.entityIds.values().next().value : null; },
@@ -377,8 +403,12 @@ function renderEntities(wrap, entities) {
     var visible = (entityState.expanded[type] || q) ? items : items.slice(0, SHOW);
     var chips = visible.map(function(e) {
       var active = explorerState.entityIds.has(e.id);
-      return '<button class="fchip entity-chip' + (active ? ' active' : '') + '" type="button" data-testid="entity-chip" data-entity-id="' + e.id + '" data-entity-name="' + escapeHtml(e.name) + '">' +
-        escapeHtml(e.name) + ' <span class="cnt">' + e.mention_count + '</span></button>';
+      // Disambiguate: when the same name exists under >1 type, append "· tipo".
+      var typeSuffix = isAmbiguousName(e.name)
+        ? ' <span class="entity-type">· ' + escapeHtml(TYPE_LABEL_SINGULAR[e.type] || e.type) + '</span>'
+        : '';
+      return '<button class="fchip entity-chip' + (active ? ' active' : '') + '" type="button" data-testid="entity-chip" data-entity-id="' + e.id + '" data-entity-name="' + escapeHtml(e.name) + '" data-entity-type="' + escapeHtml(e.type) + '">' +
+        escapeHtml(e.name) + typeSuffix + ' <span class="cnt">' + e.mention_count + '</span></button>';
     }).join('');
     var moreBtn = (!entityState.expanded[type] && !q && items.length > SHOW)
       ? '<button class="btn btn-ghost btn-sm" style="font-size:12px" type="button" data-expand-type="' + type + '">ver mais (' + (items.length - SHOW) + ')</button>'
@@ -402,12 +432,15 @@ function renderEntities(wrap, entities) {
     btn.addEventListener('click', function() {
       var id = parseInt(btn.getAttribute('data-entity-id'), 10);
       var name = btn.getAttribute('data-entity-name') || '';
+      var type = btn.getAttribute('data-entity-type') || '';
       if (explorerState.entityIds.has(id)) {
         explorerState.entityIds.delete(id);
         delete explorerState.entityNames[id];
+        delete explorerState.entityTypes[id];
       } else {
         explorerState.entityIds.add(id);
         explorerState.entityNames[id] = name;
+        explorerState.entityTypes[id] = type;
       }
       renderEntities(wrap, _entitiesCache);
       renderExplorerSelection();
@@ -440,7 +473,13 @@ function renderExplorerSelection() {
   if (!pillsEl) return;
   pillsEl.innerHTML = Array.from(explorerState.entityIds).map(function(id) {
     var name = explorerState.entityNames[id] || String(id);
-    return '<span class="explorer-pill">' + escapeHtml(name) +
+    var type = explorerState.entityTypes[id] || '';
+    // Show "· tipo" on the pill whenever the name is ambiguous, so a selected
+    // "global cripto · empresa" never reads identically to its projeto twin.
+    var typeSuffix = (type && isAmbiguousName(name))
+      ? '<span class="entity-type">· ' + escapeHtml(TYPE_LABEL_SINGULAR[type] || type) + '</span>'
+      : '';
+    return '<span class="explorer-pill">' + escapeHtml(name) + typeSuffix +
       ' <button class="explorer-pill-rm" type="button" aria-label="Remover ' + escapeHtml(name) + '" data-remove-id="' + id + '">✕</button></span>';
   }).join('');
 
@@ -449,6 +488,7 @@ function renderExplorerSelection() {
       var id = parseInt(btn.getAttribute('data-remove-id'), 10);
       explorerState.entityIds.delete(id);
       delete explorerState.entityNames[id];
+      delete explorerState.entityTypes[id];
       if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
       renderExplorerSelection();
       refreshExplorer(true);
@@ -734,6 +774,7 @@ function openGraphPanel(node) {
       var id = parseInt(node.id.slice(2), 10); // strip "e:"
       explorerState.entityIds.add(id);
       explorerState.entityNames[id] = node.label;
+      explorerState.entityTypes[id] = node.type || '';
       if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
       renderExplorerSelection();
       switchBrainView('lista');
@@ -792,6 +833,7 @@ function switchBrainView(view) {
 var explorerState = {
   entityIds: new Set(),
   entityNames: {},
+  entityTypes: {},   // id -> 'pessoa'|'empresa'|'projeto' (for type-disambiguated pills)
   match: 'all',
   sourceType: 'all',
   q: '',
