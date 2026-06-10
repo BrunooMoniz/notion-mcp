@@ -402,6 +402,425 @@ function renderEntities(wrap, entities) {
   });
 }
 
+/* ==================== BRAIN GRAPH (F5) ====================  */
+
+var _graphData = null;          // {nodes, edges} from /portal/brain/graph
+var _graphLoaded = false;
+var _graphInstance = null;      // ForceGraph instance
+
+/**
+ * ForceGraph — vanilla 2D canvas force-directed layout.
+ * No external dependencies. Runs ~300 RAF iterations then freezes.
+ * Supports: drag node, wheel zoom, pan (drag background), pinch-zoom on mobile.
+ */
+function ForceGraph(canvas, data) {
+  var self = this;
+  var ctx = canvas.getContext('2d');
+  var W = canvas.offsetWidth || 800;
+  var H = canvas.offsetHeight || 480;
+  canvas.width = W;
+  canvas.height = H;
+
+  var TYPE_COLOR = { pessoa: '#1f8b4c', empresa: '#7fb0ee', projeto: '#f6c544' };
+  var DOC_COLOR = '#bbb';
+
+  // --- Node layout state ---
+  var nodes = data.nodes.map(function(n, i) {
+    var angle = (2 * Math.PI * i) / data.nodes.length;
+    return {
+      id: n.id, kind: n.kind, label: n.label, type: n.type,
+      weight: n.weight || 1, url: n.url || null,
+      x: W / 2 + Math.cos(angle) * 160,
+      y: H / 2 + Math.sin(angle) * 160,
+      vx: 0, vy: 0,
+    };
+  });
+  var byId = {};
+  nodes.forEach(function(n) { byId[n.id] = n; });
+
+  var edges = data.edges.filter(function(e) { return byId[e.a] && byId[e.b]; });
+
+  // --- Physics constants ---
+  var REPULSION = 3000;
+  var ATTRACT   = 0.04;
+  var DAMPING   = 0.82;
+  var CENTER    = 0.003;
+  var MAX_ITER  = 300;
+  var iter = 0;
+  var frozen = false;
+
+  // --- Viewport state ---
+  var scale = 1, tx = 0, ty = 0;
+  var dragNode = null, dragStart = null;
+  var panStart = null;
+  var raf = null;
+
+  // --- Hover state ---
+  var hoveredId = null;
+  var selectedId = null;
+
+  // --- onSelect callback ---
+  self.onSelect = null;
+
+  // Radius of a node
+  function radius(n) { return n.kind === 'entity' ? Math.max(6, Math.sqrt(n.weight) * 2.5) : Math.max(3, Math.sqrt(n.weight) * 1.5); }
+
+  // Screen to world coords
+  function toWorld(sx, sy) { return { x: (sx - tx) / scale, y: (sy - ty) / scale }; }
+
+  // Find node at screen (sx, sy)
+  function nodeAt(sx, sy) {
+    var w = toWorld(sx, sy);
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      var n = nodes[i];
+      var r = radius(n);
+      var dx = n.x - w.x, dy = n.y - w.y;
+      if (dx * dx + dy * dy <= r * r) return n;
+    }
+    return null;
+  }
+
+  function neighborSet(id) {
+    var s = new Set();
+    edges.forEach(function(e) {
+      if (e.a === id) s.add(e.b);
+      if (e.b === id) s.add(e.a);
+    });
+    return s;
+  }
+
+  // --- Simulation step ---
+  function step() {
+    if (frozen) return;
+    // Repulsion
+    for (var i = 0; i < nodes.length; i++) {
+      for (var j = i + 1; j < nodes.length; j++) {
+        var a = nodes[i], b = nodes[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var d2 = dx * dx + dy * dy + 0.01;
+        var f = REPULSION / d2;
+        var fx = f * dx / Math.sqrt(d2), fy = f * dy / Math.sqrt(d2);
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+    // Attraction along edges
+    edges.forEach(function(e) {
+      var a = byId[e.a], b = byId[e.b];
+      if (!a || !b) return;
+      var dx = b.x - a.x, dy = b.y - a.y;
+      var f = Math.sqrt(dx * dx + dy * dy) * ATTRACT * Math.log(1 + e.weight);
+      a.vx += f * dx; a.vy += f * dy;
+      b.vx -= f * dx; b.vy -= f * dy;
+    });
+    // Center gravity
+    nodes.forEach(function(n) {
+      n.vx += (W / 2 - n.x) * CENTER;
+      n.vy += (H / 2 - n.y) * CENTER;
+      n.vx *= DAMPING; n.vy *= DAMPING;
+      n.x += n.vx; n.y += n.vy;
+    });
+    iter++;
+    if (iter >= MAX_ITER) frozen = true;
+  }
+
+  // --- Render ---
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Dotted background
+    ctx.save();
+    ctx.fillStyle = '#f9f9f9';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ddd';
+    var spacing = 20 * scale;
+    var offX = tx % spacing, offY = ty % spacing;
+    for (var x = offX; x < W; x += spacing) {
+      for (var y = offY; y < H; y += spacing) {
+        ctx.beginPath(); ctx.arc(x, y, 0.8, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.scale(scale, scale);
+
+    var activeId = hoveredId || selectedId;
+    var neighbours = activeId ? neighborSet(activeId) : null;
+
+    // Edges
+    edges.forEach(function(e) {
+      var a = byId[e.a], b = byId[e.b];
+      if (!a || !b) return;
+      var dim = neighbours && !neighbours.has(e.a) && !neighbours.has(e.b) && e.a !== activeId && e.b !== activeId;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = dim ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.12)';
+      ctx.lineWidth = Math.max(0.5, e.weight * 0.3) / scale;
+      ctx.stroke();
+    });
+
+    // Nodes
+    nodes.forEach(function(n) {
+      var r = radius(n);
+      var isActive = n.id === activeId;
+      var isNeighbour = neighbours && neighbours.has(n.id);
+      var dimNode = neighbours && !isActive && !isNeighbour;
+      var color = n.kind === 'entity' ? (TYPE_COLOR[n.type] || '#999') : DOC_COLOR;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = dimNode ? 'rgba(200,200,200,0.3)' : color;
+      ctx.fill();
+      if (isActive) { ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5 / scale; ctx.stroke(); }
+
+      // Labels: entities always; docs only on hover
+      if (n.kind === 'entity' || isActive || isNeighbour) {
+        var alpha = dimNode ? 0.2 : 1;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#222';
+        ctx.font = (isActive ? 'bold ' : '') + Math.max(9, 11 / scale) + 'px "Geist Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        var label = n.label.length > 22 ? n.label.slice(0, 21) + '...' : n.label;
+        ctx.fillText(label, n.x, n.y + r + 3 / scale);
+        ctx.globalAlpha = 1;
+      }
+    });
+
+    ctx.restore();
+  }
+
+  // --- Main loop ---
+  function loop() {
+    step();
+    draw();
+    if (!frozen) raf = requestAnimationFrame(loop);
+    else draw(); // one final stable frame
+  }
+
+  self.start = function() { raf = requestAnimationFrame(loop); };
+
+  self.stop = function() { if (raf) cancelAnimationFrame(raf); raf = null; };
+
+  self.redraw = function() { draw(); };
+
+  // --- Event handlers ---
+  function getPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('mousedown', function(e) {
+    var pos = getPos(e);
+    var hit = nodeAt(pos.x, pos.y);
+    if (hit) {
+      dragNode = hit;
+      dragStart = { mx: pos.x, my: pos.y, nx: hit.x, ny: hit.y };
+    } else {
+      panStart = { mx: pos.x, my: pos.y, tx: tx, ty: ty };
+    }
+  });
+
+  canvas.addEventListener('mousemove', function(e) {
+    var pos = getPos(e);
+    if (dragNode && dragStart) {
+      var w = toWorld(pos.x, pos.y);
+      dragNode.x = w.x; dragNode.y = w.y;
+      dragNode.vx = 0; dragNode.vy = 0;
+      frozen = false; // resume simulation for dragged node
+      if (raf === null) raf = requestAnimationFrame(loop);
+      draw();
+      return;
+    }
+    if (panStart) {
+      tx = panStart.tx + (pos.x - panStart.mx);
+      ty = panStart.ty + (pos.y - panStart.my);
+      draw(); return;
+    }
+    var hit = nodeAt(pos.x, pos.y);
+    var newId = hit ? hit.id : null;
+    if (newId !== hoveredId) { hoveredId = newId; draw(); }
+    canvas.style.cursor = hit ? 'pointer' : (panStart ? 'grabbing' : 'grab');
+  });
+
+  canvas.addEventListener('mouseup', function(e) {
+    if (dragNode && dragStart) {
+      var pos = getPos(e);
+      var moved = Math.abs(pos.x - dragStart.mx) + Math.abs(pos.y - dragStart.my) < 4;
+      if (moved) {
+        // treat as click
+        selectedId = dragNode.id === selectedId ? null : dragNode.id;
+        if (self.onSelect) self.onSelect(selectedId ? dragNode : null);
+        draw();
+      }
+      dragNode = null; dragStart = null;
+    } else if (panStart) {
+      panStart = null;
+    }
+  });
+
+  canvas.addEventListener('click', function(e) {
+    // clicks handled in mouseup for drag vs click distinction
+    void e;
+  });
+
+  canvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var pos = getPos(e);
+    var factor = e.deltaY < 0 ? 1.1 : 0.91;
+    var wx = (pos.x - tx) / scale, wy = (pos.y - ty) / scale;
+    scale = Math.max(0.15, Math.min(8, scale * factor));
+    tx = pos.x - wx * scale;
+    ty = pos.y - wy * scale;
+    draw();
+  }, { passive: false });
+
+  // Pinch zoom (mobile)
+  var lastPinchDist = null;
+  canvas.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 2) {
+      var dx = e.touches[0].clientX - e.touches[1].clientX;
+      var dy = e.touches[0].clientY - e.touches[1].clientY;
+      lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+    } else if (e.touches.length === 1) {
+      var rect = canvas.getBoundingClientRect();
+      var t = e.touches[0];
+      panStart = { mx: t.clientX - rect.left, my: t.clientY - rect.top, tx: tx, ty: ty };
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function(e) {
+    if (e.touches.length === 2 && lastPinchDist !== null) {
+      var dx = e.touches[0].clientX - e.touches[1].clientX;
+      var dy = e.touches[0].clientY - e.touches[1].clientY;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var factor = dist / lastPinchDist;
+      scale = Math.max(0.15, Math.min(8, scale * factor));
+      lastPinchDist = dist;
+      draw();
+    } else if (e.touches.length === 1 && panStart) {
+      var rect = canvas.getBoundingClientRect();
+      var t = e.touches[0];
+      tx = panStart.tx + (t.clientX - rect.left - panStart.mx);
+      ty = panStart.ty + (t.clientY - rect.top - panStart.my);
+      draw();
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function() {
+    lastPinchDist = null; panStart = null;
+  });
+}
+
+/**
+ * loadGraph: fetch /portal/brain/graph, render canvas.
+ * Called once when the user first switches to the Grafo tab.
+ * entity_id param: when a brain entity filter is active, pass it to focus the subgraph.
+ */
+async function loadGraph() {
+  if (_graphLoaded) {
+    // Already loaded — just ensure canvas is sized
+    if (_graphInstance) { _graphInstance.redraw(); }
+    return;
+  }
+  var wrap = document.getElementById('brain-graph-wrap');
+  var empty = document.getElementById('brain-graph-empty');
+  if (!wrap || !empty) return;
+
+  try {
+    var params = new URLSearchParams();
+    // Pass active entity filter if any
+    if (typeof docState !== 'undefined' && docState.entityId !== undefined) {
+      params.set('entity_id', String(docState.entityId));
+    }
+    var res = await api('/portal/brain/graph?' + params.toString());
+    if (!res.ok) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
+    var data = await res.json();
+    _graphData = data;
+
+    if (!data.nodes || data.nodes.length === 0) {
+      empty.style.display = 'block'; wrap.style.display = 'none';
+    } else {
+      empty.style.display = 'none'; wrap.style.display = 'block';
+      var canvas = document.getElementById('brain-graph-canvas');
+      if (!canvas) return;
+      if (_graphInstance) _graphInstance.stop();
+      _graphInstance = new ForceGraph(canvas, data);
+      _graphInstance.onSelect = openGraphPanel;
+      _graphInstance.start();
+    }
+    _graphLoaded = true;
+  } catch (e) {
+    empty.style.display = 'block'; wrap.style.display = 'none';
+  }
+}
+
+/** Open the side panel for a selected node (entity click). */
+function openGraphPanel(node) {
+  var panel = document.getElementById('graph-panel');
+  var nameEl = document.getElementById('graph-panel-name');
+  var metaEl = document.getElementById('graph-panel-meta');
+  var docsBtn = document.getElementById('graph-panel-docs');
+  if (!panel) return;
+  if (!node) { panel.classList.remove('open'); return; }
+
+  panel.classList.add('open');
+  nameEl.textContent = node.label;
+
+  if (node.kind === 'entity') {
+    var TYPE_PT = { pessoa: 'Pessoa', empresa: 'Empresa', projeto: 'Projeto' };
+    metaEl.textContent = (TYPE_PT[node.type] || node.type) + ' · ' + node.weight + ' menções';
+    docsBtn.style.display = 'inline-block';
+    docsBtn.textContent = 'Ver documentos →';
+    docsBtn.onclick = function() {
+      // Switch to Lista view, filter by this entity
+      var id = parseInt(node.id.slice(2), 10); // strip "e:"
+      _activeEntityId = id;
+      docState.entityId = id;
+      // re-render entities to show active chip
+      if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
+      // switch to lista view
+      switchBrainView('lista');
+      loadBrain(true);
+    };
+  } else {
+    // doc node
+    metaEl.textContent = (node.type || '') + ' · ' + node.weight + ' menções';
+    if (node.url) {
+      docsBtn.style.display = 'inline-block';
+      docsBtn.textContent = 'Abrir documento →';
+      docsBtn.onclick = function() { window.open(node.url, '_blank', 'noopener'); };
+    } else {
+      docsBtn.style.display = 'none';
+    }
+  }
+}
+
+/** Switch between Lista and Grafo views inside Atividade. */
+function switchBrainView(view) {
+  var listaEl = document.getElementById('brain-lista-view');
+  var grafoEl = document.getElementById('brain-grafo-view');
+  var btnLista = document.getElementById('brain-toggle-lista');
+  var btnGrafo = document.getElementById('brain-toggle-grafo');
+  if (!listaEl || !grafoEl) return;
+
+  if (view === 'grafo') {
+    listaEl.style.display = 'none';
+    grafoEl.style.display = 'block';
+    if (btnLista) btnLista.classList.remove('active');
+    if (btnGrafo) btnGrafo.classList.add('active');
+    loadGraph();
+  } else {
+    grafoEl.style.display = 'none';
+    listaEl.style.display = 'block';
+    if (btnLista) btnLista.classList.add('active');
+    if (btnGrafo) btnGrafo.classList.remove('active');
+  }
+}
+
 /* ==================== ATIVIDADE ====================  */
 
 var docState = { filter: 'all', q: '', offset: 0, entityId: undefined };
@@ -601,6 +1020,21 @@ function wireAtividade() {
   if (pagerPrev) pagerPrev.addEventListener('click', function () { /* não usado — modo scroll */ });
   var pagerNext = document.getElementById('pager-next');
   if (pagerNext) pagerNext.addEventListener('click', function () { loadBrain(false); });
+
+  // Brain view toggle (Lista | Grafo)
+  var toggleLista = document.getElementById('brain-toggle-lista');
+  var toggleGrafo = document.getElementById('brain-toggle-grafo');
+  if (toggleLista) toggleLista.addEventListener('click', function() { switchBrainView('lista'); });
+  if (toggleGrafo) toggleGrafo.addEventListener('click', function() { switchBrainView('grafo'); });
+
+  // Graph side panel close
+  var panelClose = document.getElementById('graph-panel-close');
+  if (panelClose) panelClose.addEventListener('click', function() {
+    var panel = document.getElementById('graph-panel');
+    if (panel) panel.classList.remove('open');
+    if (_graphInstance) { _graphInstance.onSelect && _graphInstance.onSelect(null); _graphInstance.redraw(); }
+  });
+
   // Load entities block on Atividade tab open
   loadEntities();
 }
