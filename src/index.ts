@@ -18,6 +18,7 @@ import { registerBrainStatusTool, setReindexInFlightSet } from "./rag/brain-stat
 import { registerBrainReindexTool, setReindexSet } from "./rag/brain-reindex-tool.js";
 import { registerBrainTodayTool } from "./rag/brain-today-tool.js";
 import { registerBrainListDocumentsTool } from "./rag/brain-list-documents-tool.js";
+import { registerBrainFeedbackTool } from "./rag/brain-feedback-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
@@ -519,6 +520,7 @@ app.post("/mcp", async (req, res) => {
     registerBrainReindexTool(server);
     registerBrainTodayTool(server);
     registerBrainListDocumentsTool(server);
+    registerBrainFeedbackTool(server);
   } else {
     registerBrainSearchTool(server);
     registerBrainIndexUrlTool(server);
@@ -531,6 +533,7 @@ app.post("/mcp", async (req, res) => {
     registerBrainReindexTool(server);
     registerBrainTodayTool(server);
     registerBrainListDocumentsTool(server);
+    registerBrainFeedbackTool(server);
   }
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);

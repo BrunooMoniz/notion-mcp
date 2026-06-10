@@ -297,3 +297,40 @@ export function mrrFromSubscriptions(subs: StripeSub[]): MrrResult {
 
   return { mrrCents, byStatus };
 }
+
+// ---------------------------------------------------------------------------
+// Spec 004: memória quality helpers (pure — no DB)
+// ---------------------------------------------------------------------------
+
+/** One row from the top_useful_chunks query. */
+export interface TopUsefulChunkRow {
+  id: string;
+  account_id: string;
+  utility_score: number;
+  feedback_count: number;
+  source_type: string;
+  parent_url: string | null;
+  text_snippet: string;
+}
+
+/** Summary for the "Qualidade da memória" admin section. */
+export interface MemoryQualitySummary {
+  topUsefulChunks: TopUsefulChunkRow[];
+  /** Percentage of searches that have at least one feedback event (approx). */
+  feedbackPct: number;
+  /** Count of stale memories (from the stale_memories view). */
+  staleCount: number;
+}
+
+/**
+ * Compute feedback coverage percentage.
+ * feedbackPct = (distinct chunks with at least 1 feedback) / (total searches) * 100
+ * Both values are injected for purity.
+ */
+export function computeFeedbackPct(
+  distinctFeedbackChunks: number,
+  totalSearches: number,
+): number {
+  if (totalSearches === 0) return 0;
+  return Math.min(100, Math.round((distinctFeedbackChunks / totalSearches) * 100));
+}

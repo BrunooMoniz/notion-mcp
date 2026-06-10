@@ -1410,16 +1410,24 @@ function renderAskAnswer(answer, sources) {
         var title = s.title || '(sem titulo)';
         var safeUrl = isHttpUrl(s.source_url) ? s.source_url : null;
         var metaStr = [s.date || s.doc_date, s.db_name || s.db || TYPE_LABEL[t]].filter(Boolean).join(' · ');
-        return '<details class="cite-card" data-cite="' + n + '">' +
+        var chunkId = s.chunk_id || '';
+        var feedbackBtns = chunkId
+          ? '<span class="fb-btns">' +
+              '<button class="fb-btn" type="button" data-fb-up data-chunk-id="' + escapeHtml(chunkId) + '" title="Util" aria-label="Util">&#128077;</button>' +
+              '<button class="fb-btn" type="button" data-fb-down data-chunk-id="' + escapeHtml(chunkId) + '" title="Nao util" aria-label="Nao util">&#128078;</button>' +
+            '</span>'
+          : '';
+        return '<details class="cite-card" data-cite="' + n + '" data-chunk-id="' + escapeHtml(chunkId) + '">' +
           '<summary><span class="cn">' + n + '</span>' + srcIcon(t) +
           (safeUrl
             ? '<a class="ttl" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + escapeHtml(title) + '</a>'
             : '<span class="ttl">' + escapeHtml(title) + '</span>') +
           '<span class="meta">' + escapeHtml(metaStr) + '</span>' +
+          feedbackBtns +
           '<svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
           '</summary>' +
           (s.excerpt ? '<div class="cite-excerpt">' + escapeHtml(s.excerpt) +
-            (safeUrl ? '<a class="src-link" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener">abrir original ↗</a>' : '') +
+            (safeUrl ? '<a class="src-link" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener">abrir original &#8599;</a>' : '') +
             '</div>' : '') +
           '</details>';
       }).join('') + '</div>';
@@ -1443,6 +1451,36 @@ function wireCiteRefs(scope) {
         main.scrollTo({ top: main.scrollTop + top - window.innerHeight / 2, behavior: 'smooth' });
       }
       setTimeout(function () { card.classList.remove('hot'); }, 1200);
+    });
+  });
+}
+
+// Spec 004: feedback per cite source (1 voto por chunk por sessao de chat)
+// votedChunks tracks which chunk IDs were voted in this session.
+var votedChunks = {};
+
+function wireFeedbackBtns(scope, currentQuery) {
+  scope.querySelectorAll('.fb-btn').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var chunkId = btn.getAttribute('data-chunk-id');
+      if (!chunkId || votedChunks[chunkId]) return; // 1 vote per chunk per session
+      var isUp = btn.hasAttribute('data-fb-up');
+      votedChunks[chunkId] = true;
+      // Mark voted visually
+      var card = btn.closest('.cite-card');
+      if (card) card.classList.add(isUp ? 'fb-up' : 'fb-down');
+      btn.disabled = true;
+      var sibling = btn.closest('.fb-btns')
+        ? btn.closest('.fb-btns').querySelector(isUp ? '[data-fb-down]' : '[data-fb-up]')
+        : null;
+      if (sibling) sibling.disabled = true;
+      // POST feedback (best-effort: failure swallowed silently)
+      apiJSON('/portal/feedback', 'POST', {
+        chunk_id: chunkId,
+        value: isUp ? 'up' : 'down',
+        query: currentQuery || ''
+      }).catch(function () {});
     });
   });
 }
@@ -1522,6 +1560,7 @@ async function ask(q) {
     // meta or search route
     stack.innerHTML = renderAskAnswer(answer, route === 'meta' ? [] : sources);
     wireCiteRefs(stack);
+    wireFeedbackBtns(stack, q); // Spec 004: wire 👍/👎 buttons
     scrollBottom();
 
     // E3: atualiza histórico

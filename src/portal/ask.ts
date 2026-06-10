@@ -288,6 +288,8 @@ export function citedNumbers(answer: string, hitsLength: number): number[] {
 
 export interface AskSource {
   n: number;
+  /** Spec 004: chunk identifier for feedback (👍/👎). */
+  chunk_id: string;
   title: string;
   source_type: string;
   source_url: string | null;
@@ -309,6 +311,7 @@ export function toAskSources(hits: BrainResult[], cited: number[]): AskSource[] 
       typeof hit.metadata?.data === "string" ? hit.metadata.data : null;
     return {
       n,
+      chunk_id: hit.chunk_id,
       title: hit.title,
       source_type: hit.source_type,
       source_url: hit.source_url,
@@ -503,6 +506,28 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
   // --- Build response ---
   const cited = citedNumbers(answer, filteredHits.length);
   const sources = toAskSources(filteredHits, cited);
+
+  // Spec 004 §4: implicit signal — chunks cited [n] in the answer get +0.3.
+  // Best-effort: never blocks the response; errors are swallowed.
+  if (cited.length > 0) {
+    (async () => {
+      try {
+        const { applyFeedback } = await import("../rag/feedback.js");
+        const { UTILITY_WEIGHTS } = await import("../rag/utility.js");
+        for (const n of cited) {
+          const hit = filteredHits[n - 1];
+          if (!hit?.chunk_id) continue;
+          await applyFeedback({
+            accountId,
+            chunkId: hit.chunk_id,
+            source: "implicit_cited",
+            delta: UTILITY_WEIGHTS.implicit_cited,
+            query: raw.slice(0, 300),
+          });
+        }
+      } catch { /* swallowed — never blocks response */ }
+    })();
+  }
 
   res.json({ answer, sources, route: "search" });
 }
