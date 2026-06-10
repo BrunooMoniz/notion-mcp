@@ -720,6 +720,81 @@ details.tutorial ol { color: var(--muted); font-size: 13.5px; padding-left: 18px
 .step-item .sc strong { color: var(--ink); }
 
 /* =====================================================================
+   CONEXÃO GUIADA — seletor de assistente (Parte A)
+   ===================================================================== */
+.connect-active-badge {
+  margin-bottom: 14px;
+}
+
+.ai-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0;
+}
+.ai-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-size: 13.5px; font-weight: 560; color: var(--muted);
+  cursor: pointer; white-space: nowrap;
+  transition: color .14s, border-color .14s;
+  border-radius: 0;
+}
+.ai-tab:hover { color: var(--ink); }
+.ai-tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); font-weight: 620; }
+.ai-tab-icon { font-size: 14px; }
+
+.ai-panel { display: none; }
+.ai-panel.active { display: block; }
+.ai-panel-desc { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+
+/* Passo de teste: destaque sutil */
+.step-item-test { background: var(--accent-soft); border-radius: var(--r-xs); border-bottom: none !important; margin-top: 2px; }
+.step-item-test::before { background: var(--accent); color: #fff; }
+
+/* Fonte help (disclosure "Onde encontro?") */
+details.source-help {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 0;
+}
+details.source-help[open] { padding-bottom: 10px; }
+.source-help-summary {
+  cursor: pointer; font-size: 12.5px; font-weight: 560; color: var(--accent-strong);
+  list-style: none; display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+}
+.source-help-summary::-webkit-details-marker { display: none; }
+.source-help-summary::before { content: "?"; font-family: var(--mono); font-size: 11px; font-weight: 700;
+  width: 16px; height: 16px; display: grid; place-items: center;
+  background: var(--accent-soft); border: 1px solid #cfe6d8; border-radius: 50%;
+  color: var(--accent-strong); flex: 0 0 auto; }
+details.source-help[open] .source-help-summary::before { content: "−"; }
+.source-help-steps {
+  color: var(--muted); font-size: 13px; padding: 0 14px 0 28px; margin: 4px 0 0; line-height: 1.7;
+}
+.source-help-steps li { margin-bottom: 3px; }
+
+/* Nudge de próximo passo (Fontes view) */
+.fontes-nudge { margin-top: 6px; }
+.nudge-card {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--accent-soft); border: 1px solid #cfe6d8; border-radius: var(--r-sm);
+  padding: 12px 16px; font-size: 13.5px;
+}
+.nudge-icon { font-size: 16px; flex: 0 0 auto; }
+.nudge-text { flex: 1; min-width: 180px; color: var(--accent-strong); font-weight: 540; }
+
+/* Mensagem de conclusão de indexação */
+.index-done {
+  margin-top: 8px; font-size: 13px; color: var(--accent-strong);
+}
+.index-done.hidden { display: none; }
+
+/* =====================================================================
    PLANO
    ===================================================================== */
 .plan-hero {
