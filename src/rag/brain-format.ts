@@ -32,6 +32,8 @@ export function sourceUrlOf(chunk: { parent_url: string | null; source_type: str
 }
 
 export interface BrainResult {
+  /** Spec 004: chunk identifier — enables the model to report which chunks it used via brain_feedback. */
+  chunk_id: string;
   title: string;
   text: string;
   score: number;
@@ -49,6 +51,7 @@ export interface BrainResult {
 export function toBrainResult(hit: SearchHit): BrainResult {
   const url = sourceUrlOf(hit.chunk);
   return {
+    chunk_id: hit.chunk.id,
     title: titleFromChunkText(hit.chunk.text),
     text: hit.chunk.text,
     score: hit.score,

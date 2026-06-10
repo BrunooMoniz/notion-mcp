@@ -9,6 +9,7 @@ import {
   mrrFromSubscriptions,
   estimateLlmCost,
   summariseCostReport,
+  computeFeedbackPct,
   DEFAULT_LLM_IN_PER_MTOK,
   DEFAULT_LLM_OUT_PER_MTOK,
   type FunnelRow,
@@ -366,4 +367,24 @@ test("summariseCostReport: ignores invalid/non-numeric amounts", () => {
   };
   const summary = summariseCostReport(report);
   assert.ok(Math.abs(summary.totalUsdCents - 50.0) < 0.001);
+});
+
+// ---------------------------------------------------------------------------
+// Spec 004: computeFeedbackPct
+// ---------------------------------------------------------------------------
+
+test("computeFeedbackPct: 10 distinct feedback chunks / 100 searches = 10%", () => {
+  assert.equal(computeFeedbackPct(10, 100), 10);
+});
+
+test("computeFeedbackPct: 0 searches returns 0 (no division by zero)", () => {
+  assert.equal(computeFeedbackPct(5, 0), 0);
+});
+
+test("computeFeedbackPct: more feedback chunks than searches → capped at 100%", () => {
+  assert.equal(computeFeedbackPct(200, 100), 100);
+});
+
+test("computeFeedbackPct: 0 feedback chunks → 0%", () => {
+  assert.equal(computeFeedbackPct(0, 500), 0);
 });

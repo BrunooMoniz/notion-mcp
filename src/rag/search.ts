@@ -15,6 +15,7 @@ import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedW
 import { getAccountId } from "../context.js";
 import { recordUsage } from "./usage.js";
 import { assertSearchWithinLimit } from "../billing/usage.js";
+import { applyFinalScore, getUtilityAlpha, computeEffectiveUtility } from "./utility.js";
 
 export interface RankedChunk {
   chunk: Chunk;
@@ -310,15 +311,25 @@ export async function brainSearch(
       );
       const anyScored = results.some((r) => r.relevance_score !== null);
       if (anyScored) {
-        // Use the reranker's relevance_score, in its returned (desc) order,
-        // then diversify (dedup text + cap per url) down to topK.
+        // Use the reranker's relevance_score, apply utility boost, then diversify.
+        // Spec 004 §3: final = rerank_score * (1 + UTILITY_ALPHA * tanh(eff_utility/10))
+        // alpha=0 reproduces pre-spec ranking byte-for-byte (kill switch).
+        const alpha = getUtilityAlpha();
         const ranked = results
           .map((r) => {
             const ph = poolByChunkId.get(r.id);
             if (!ph) return null;
-            return { chunk: ph.chunk, score: r.relevance_score as number };
+            const rerankScore = r.relevance_score as number;
+            const effUtility = computeEffectiveUtility(
+              ph.chunk.utility_score ?? 0,
+              ph.chunk.last_useful_at ?? null,
+            );
+            const finalScore = applyFinalScore(rerankScore, effUtility, alpha);
+            return { chunk: ph.chunk, score: finalScore };
           })
-          .filter((h): h is SearchHit => h !== null);
+          .filter((h): h is SearchHit => h !== null)
+          // Re-sort by final score (utility may reorder equal-score neighbors).
+          .sort((a, b) => b.score - a.score);
         hits = diversifyHits(ranked, { topK, maxPerUrl });
         reranked = true;
       }

@@ -539,6 +539,18 @@ details.tutorial ol { color: var(--muted); font-size: 13.5px; padding-left: 18px
 }
 .cite-excerpt .src-link { display: block; margin-top: 7px; font-style: normal; font-family: var(--mono); font-size: 10.5px; }
 
+/* Spec 004: feedback thumbs */
+.fb-btns { display: inline-flex; gap: 2px; margin-left: 6px; flex: 0 0 auto; }
+.fb-btn {
+  background: none; border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; font-size: 13px; line-height: 1; padding: 1px 4px;
+  opacity: .55; transition: opacity .15s, border-color .15s;
+}
+.fb-btn:hover:not(:disabled) { opacity: 1; border-color: var(--accent); }
+.fb-btn:disabled { cursor: default; opacity: .3; }
+.cite-card.fb-up { border-color: var(--accent); }
+.cite-card.fb-down { border-color: #e57373; }
+
 /* digitando */
 .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
 .typing i {
