@@ -14,7 +14,7 @@ test("buildSuccessPage includes escaped account name in output", () => {
   assert.ok(html.includes("user@example.com"), "should include email");
   assert.ok(html.includes("Google"), "should mention Google");
   assert.ok(html.includes("Pode fechar"), "should tell user to close tab");
-  assert.ok(html.includes("✅"), "should have success icon");
+  assert.ok(html.includes("status-icon ok"), "should have success icon container");
 });
 
 test("buildSuccessPage escapes HTML in account name", () => {
@@ -48,7 +48,7 @@ test("buildSuccessPage includes Zinom logo SVG", () => {
 
 test("buildErrorPage includes error reason (escaped) and retry link", () => {
   const html = buildErrorPage("google", "access_denied", "/portal/google/connect");
-  assert.ok(html.includes("❌"), "should have error icon");
+  assert.ok(html.includes("status-icon err"), "should have error icon container");
   assert.ok(html.includes("access_denied"), "should include reason");
   assert.ok(html.includes("/portal/google/connect"), "should include retry link");
 });
