@@ -121,3 +121,24 @@ CREATE TABLE IF NOT EXISTS invite_requests (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS invite_requests_email_uniq ON invite_requests (email);
 CREATE INDEX IF NOT EXISTS invite_requests_status_idx ON invite_requests (status, requested_at DESC);
+
+-- Entities + entity_mentions (mirror of migration 0011, for dev).
+CREATE TABLE IF NOT EXISTS entities (
+  id          bigserial PRIMARY KEY,
+  account_id  text NOT NULL,
+  type        text NOT NULL CHECK (type IN ('pessoa','empresa','projeto')),
+  name        text NOT NULL,
+  aliases     text[] NOT NULL DEFAULT '{}',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (account_id, type, name)
+);
+
+CREATE TABLE IF NOT EXISTS entity_mentions (
+  id           bigserial PRIMARY KEY,
+  entity_id    bigint NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  chunk_id     text NOT NULL,
+  confidence   real CHECK (confidence BETWEEN 0 AND 1),
+  extracted_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (entity_id, chunk_id)
+);
