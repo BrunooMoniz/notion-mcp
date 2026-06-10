@@ -36,6 +36,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.6a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.7-.8L3 20l1-5a8 8 0 0 1-.9-3.6A8.4 8.4 0 0 1 11.6 3a8.4 8.4 0 0 1 9.4 8.6z" stroke-linejoin="round"/></svg>
         Chat de teste
       </button>
+      <button class="nav-item" data-nav="guia" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke-linejoin="round"/></svg>
+        Guia
+      </button>
       <a class="nav-item" href="/plano.html">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13.5" rx="3"/><path d="M3 10h18M7 15h4" stroke-linecap="round"/></svg>
         Plano
@@ -361,6 +365,220 @@
       </div>
     </section>
 
+    <!-- ============ GUIA ============ -->
+    <section class="view" id="view-guia" data-screen-label="Guia">
+      <div class="view-inner">
+        <div class="page-head">
+          <p class="eyebrow">boas práticas</p>
+          <h1>Guia de uso do Zinom</h1>
+          <p class="lead">Como tirar o máximo do seu segundo cérebro — do setup à rotina diária.</p>
+        </div>
+
+        <!-- Seção 1: Como o Zinom funciona -->
+        <div class="card guia-section" id="guia-s1">
+          <h2 class="card-title">Como o Zinom funciona</h2>
+          <p class="muted">O Zinom é um servidor MCP — ele lê suas fontes (Notion, Granola, agendas, páginas web) e transforma tudo em memória pesquisável. Quando você pede algo no Claude ou no ChatGPT, o assistente consulta esse índice antes de responder. A busca é semântica: você não precisa lembrar a palavra exata. Cada resposta traz a citação da fonte original para você rastrear. O Zinom não gera texto — ele fornece contexto.</p>
+
+          <!-- Diagrama 1: fontes → Zinom → assistentes -->
+          <svg class="guia-diagram" viewBox="0 0 520 130" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: fontes conectam ao Zinom, que conecta aos assistentes">
+            <!-- coluna fontes -->
+            <rect x="2" y="10" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="10" y="27" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">📄 Notion</text>
+            <rect x="2" y="42" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="10" y="59" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">🎙️ Granola</text>
+            <rect x="2" y="74" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="10" y="91" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">📅 Agendas</text>
+            <rect x="2" y="106" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="10" y="123" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">🌐 Web</text>
+            <!-- setas esquerda → centro -->
+            <line x1="113" y1="23" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
+            <line x1="113" y1="55" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
+            <line x1="113" y1="87" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
+            <line x1="113" y1="119" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
+            <!-- nó central Zinom -->
+            <rect x="185" y="38" width="90" height="52" rx="10" fill="var(--accent-soft)" stroke="#cfe6d8" stroke-width="1.4"/>
+            <text x="230" y="62" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">Zinom</text>
+            <text x="230" y="79" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent)">busca + fontes</text>
+            <!-- setas centro → direita -->
+            <line x1="276" y1="55" x2="348" y2="30" stroke="var(--line-2)" stroke-width="1.2"/>
+            <line x1="276" y1="65" x2="348" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
+            <line x1="276" y1="75" x2="348" y2="100" stroke="var(--line-2)" stroke-width="1.2"/>
+            <!-- coluna assistentes -->
+            <rect x="348" y="16" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="358" y="33" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">✦ Claude.ai</text>
+            <rect x="348" y="52" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="358" y="69" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">⌨ Claude Code</text>
+            <rect x="348" y="88" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="358" y="105" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">💬 ChatGPT</text>
+            <!-- pulsos animados -->
+            <circle r="3.5" fill="var(--accent)" opacity="0.85">
+              <animateMotion dur="2s" repeatCount="indefinite" path="M113,23 L185,65"/>
+            </circle>
+            <circle r="3.5" fill="var(--accent)" opacity="0.85">
+              <animateMotion dur="2.4s" repeatCount="indefinite" begin="0.5s" path="M276,65 L348,65"/>
+            </circle>
+          </svg>
+
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver Início →</button></p>
+        </div>
+
+        <!-- Seção 2: Configure suas fontes -->
+        <div class="card guia-section" id="guia-s2">
+          <h2 class="card-title">Configure suas fontes</h2>
+          <p class="muted">Cada fonte que você conecta vira matéria-prima do seu cérebro. O Notion se conecta via OAuth (recomendado — acesso ao workspace inteiro com um clique) ou via Personal Access Token (PAT). Para o Google Calendar, conecte sua conta Google diretamente na aba Fontes. Para calendários sem conta Google (iCal de qualquer serviço), cole o link secreto da agenda. O Granola precisa apenas da chave de API — copie em granola.ai nas configurações.</p>
+
+          <!-- Diagrama 2: passos de configuração -->
+          <svg class="guia-diagram" viewBox="0 0 480 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: passos Notion, Google/iCal, Granola">
+            <!-- Passo Notion -->
+            <rect x="2" y="14" width="130" height="52" rx="8" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="67" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--ink)">📄 Notion</text>
+            <text x="67" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">OAuth ou PAT</text>
+            <!-- seta -->
+            <line x1="134" y1="40" x2="158" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="158,36 166,40 158,44" fill="var(--line-2)"/>
+            <!-- Passo Google/iCal -->
+            <rect x="168" y="14" width="130" height="52" rx="8" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="233" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--ink)">📅 Google / iCal</text>
+            <text x="233" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">conta ou link secreto</text>
+            <!-- seta -->
+            <line x1="300" y1="40" x2="324" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="324,36 332,40 324,44" fill="var(--line-2)"/>
+            <!-- Passo Granola -->
+            <rect x="334" y="14" width="130" height="52" rx="8" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
+            <text x="399" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--accent-strong)">🎙️ Granola</text>
+            <text x="399" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">chave de API</text>
+          </svg>
+
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Ir para Fontes →</button></p>
+        </div>
+
+        <!-- Seção 3: Use na sua IA favorita -->
+        <div class="card guia-section" id="guia-s3">
+          <h2 class="card-title">Use na sua IA favorita, todo dia</h2>
+          <p class="muted">O Zinom se conecta a qualquer cliente MCP. No <strong>Claude.ai</strong>: clique em "Liberar conexão" na aba Início, depois vá em Configurações → Conectores → Adicionar conector personalizado e cole o endereço MCP — o Claude vai pedir seu e-mail e um código de 6 dígitos para autorizar. No <strong>Claude Code</strong>: rode <code>claude mcp add --transport http zinom &lt;URL&gt;</code> com seu token gerado na aba Início. No <strong>ChatGPT</strong>: adicione como conector MCP nas configurações do GPT.</p>
+
+          <!-- Diagrama 3: fluxo Claude.ai -->
+          <svg class="guia-diagram" viewBox="0 0 480 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: passos para conectar ao Claude.ai">
+            <rect x="2" y="20" width="100" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="52" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Liberar</text>
+            <text x="52" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">conexão</text>
+            <line x1="104" y1="45" x2="124" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="124,41 132,45 124,49" fill="var(--line-2)"/>
+            <rect x="134" y="20" width="110" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="189" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Settings →</text>
+            <text x="189" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Connectors</text>
+            <line x1="246" y1="45" x2="266" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="266,41 274,45 266,49" fill="var(--line-2)"/>
+            <rect x="276" y="20" width="110" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="331" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Colar URL</text>
+            <text x="331" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">+ autorizar</text>
+            <line x1="388" y1="45" x2="408" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="408,41 416,45 408,49" fill="var(--line-2)"/>
+            <rect x="418" y="20" width="60" height="50" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
+            <text x="448" y="48" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent-strong)">✓ Pronto</text>
+          </svg>
+
+          <p class="muted" style="margin-top:12px">Prompts que funcionam bem — clique para copiar:</p>
+          <div class="guia-chips" id="guia-chips-s3">
+            <button class="guia-chip" type="button" data-copy="O que decidimos sobre X?">O que decidimos sobre X?</button>
+            <button class="guia-chip" type="button" data-copy="Prepara meu briefing pra reunião com Y">Prepara meu briefing pra reunião com Y</button>
+            <button class="guia-chip" type="button" data-copy="Cria um evento amanhã 9h sobre Z">Cria um evento amanhã 9h sobre Z</button>
+          </div>
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver Início →</button></p>
+        </div>
+
+        <!-- Seção 4: Granola -->
+        <div class="card guia-section" id="guia-s4">
+          <h2 class="card-title">Granola: suas reuniões viram memória</h2>
+          <p class="muted">O <a href="https://granola.ai" target="_blank" rel="noopener">Granola</a> é um app que escuta e transcreve suas reuniões. Funciona tanto em chamadas online (Zoom, Meet, Teams) quanto em conversas presenciais pelo app do celular — basta deixar gravando. Depois de cada reunião o Granola gera um resumo automático. Na próxima sincronização do Zinom esse resumo entra no seu cérebro e fica pesquisável, com data e participantes. Você não precisa fazer nada: conecte a chave da API uma vez e o fluxo é automático.</p>
+
+          <!-- Diagrama 4: reunião → transcript → cérebro -->
+          <svg class="guia-diagram" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: reunião vira transcript no Granola, que entra no cérebro Zinom">
+            <rect x="2" y="18" width="100" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="52" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">🎙️ Reunião</text>
+            <text x="52" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">online / presencial</text>
+            <line x1="104" y1="40" x2="134" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="134,36 142,40 134,44" fill="var(--line-2)"/>
+            <rect x="144" y="18" width="110" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="199" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">📝 Transcript</text>
+            <text x="199" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">Granola auto-resume</text>
+            <line x1="256" y1="40" x2="286" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="286,36 294,40 286,44" fill="var(--line-2)"/>
+            <rect x="296" y="18" width="100" height="44" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
+            <text x="346" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">🧠 Cérebro</text>
+            <text x="346" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">pesquisável</text>
+          </svg>
+
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Conectar Granola →</button></p>
+        </div>
+
+        <!-- Seção 5: Tarefas e blocktime -->
+        <div class="card guia-section" id="guia-s5">
+          <h2 class="card-title">Tarefas e blocktime</h2>
+          <p class="muted">Tenha uma base de Tarefas no Notion — o Zinom detecta ou cria uma para você no checklist de ativação. Com as tarefas indexadas, você pode pedir ao assistente para alocar tempo no seu calendário de forma conversacional. O assistente lê suas tarefas pendentes, vê os buracos na agenda e cria os eventos. Isso fecha o ciclo: do registro de uma decisão até o tempo reservado para executá-la.</p>
+
+          <!-- Diagrama 5: tarefas → assistente → agenda -->
+          <svg class="guia-diagram" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: tarefas no Notion, assistente aloca, evento na agenda">
+            <rect x="2" y="18" width="110" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="57" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">📋 Tarefas</text>
+            <text x="57" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">Notion database</text>
+            <line x1="114" y1="40" x2="144" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="144,36 152,40 144,44" fill="var(--line-2)"/>
+            <rect x="154" y="18" width="90" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="199" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">✦ Assistente</text>
+            <text x="199" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">aloca tempo</text>
+            <line x1="246" y1="40" x2="276" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
+            <polygon points="276,36 284,40 276,44" fill="var(--line-2)"/>
+            <rect x="286" y="18" width="110" height="44" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
+            <text x="341" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">📅 Evento</text>
+            <text x="341" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">Google Calendar</text>
+          </svg>
+
+          <p class="muted" style="margin-top:12px">Prompts de blocktime — clique para copiar:</p>
+          <div class="guia-chips" id="guia-chips-s5">
+            <button class="guia-chip" type="button" data-copy="Aloca 2h amanhã de manhã para a tarefa X e cria o evento">Aloca 2h amanhã de manhã para a tarefa X e cria o evento</button>
+            <button class="guia-chip" type="button" data-copy="Quais tarefas estão pendentes esta semana?">Quais tarefas estão pendentes esta semana?</button>
+            <button class="guia-chip" type="button" data-copy="Planeja meu dia de amanhã com base nas tarefas abertas">Planeja meu dia de amanhã com base nas tarefas abertas</button>
+          </div>
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver ativação →</button></p>
+        </div>
+
+        <!-- Seção 6: Alimente o cérebro -->
+        <div class="card guia-section" id="guia-s6">
+          <h2 class="card-title">Alimente o cérebro do jeito certo</h2>
+          <p class="muted">Registre decisões com contexto — não apenas "decidimos X", mas "decidimos X porque Y, e quem participou". Nomeie pessoas e empresas de forma consistente: o Zinom aprende com a frequência. Crie uma base de conhecimento paralela no Notion — pode ser feita junto com a IA, página por página. Indexe artigos e páginas web importantes pedindo ao assistente para rodar <code>brain_index_web</code> com a URL. Quanto mais estruturado o input, mais preciso o recall.</p>
+
+          <!-- Diagrama 6: qualidade do input -->
+          <svg class="guia-diagram" viewBox="0 0 480 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: boas práticas de alimentação do cérebro">
+            <rect x="2" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="52" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">📝 Decisões</text>
+            <text x="52" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">com contexto</text>
+            <text x="52" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">quem, por quê</text>
+            <rect x="114" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="164" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">🏷️ Nomes</text>
+            <text x="164" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">consistentes</text>
+            <text x="164" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">pessoas, empresas</text>
+            <rect x="226" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
+            <text x="276" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">📚 Base de</text>
+            <text x="276" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">conhecimento</text>
+            <text x="276" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">Notion + IA</text>
+            <rect x="338" y="14" width="100" height="62" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
+            <text x="388" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent-strong)">🌐 Web index</text>
+            <text x="388" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent)">brain_index_web</text>
+            <text x="388" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--accent)">via assistente</text>
+          </svg>
+
+          <p class="muted" style="margin-top:12px">Prompt para indexar uma página web — clique para copiar:</p>
+          <div class="guia-chips" id="guia-chips-s6">
+            <button class="guia-chip" type="button" data-copy="Indexa essa URL no meu Zinom: https://...">Indexa essa URL no meu Zinom: https://...</button>
+            <button class="guia-chip" type="button" data-copy="Quais decisões foram registradas sobre o projeto X?">Quais decisões foram registradas sobre o projeto X?</button>
+          </div>
+          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Ir para Fontes →</button></p>
+        </div>
+
+      </div>
+    </section>
+
   </main>
 
   <!-- ===================== TAB BAR (mobile) ===================== -->
@@ -380,6 +598,10 @@
     <button data-nav="chat" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.6a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.7-.8L3 20l1-5a8 8 0 0 1-.9-3.6A8.4 8.4 0 0 1 11.6 3a8.4 8.4 0 0 1 9.4 8.6z" stroke-linejoin="round"/></svg>
       Chat
+    </button>
+    <button data-nav="guia" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke-linejoin="round"/></svg>
+      Guia
     </button>
     <a class="tabbar-link" href="/plano.html">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13.5" rx="3"/><path d="M3 10h18M7 15h4" stroke-linecap="round"/></svg>
