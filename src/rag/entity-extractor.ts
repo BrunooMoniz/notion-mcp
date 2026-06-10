@@ -104,8 +104,8 @@ async function extractFromChunk(
   const trimmed = (chunkText ?? "").trim();
   if (trimmed) {
     const { callHaiku } = await import("../classifier/anthropic.js");
-    const raw = await callHaiku(EXTRACTION_SYSTEM, trimmed.slice(0, 4000));
-    llmEntities = parseEntityResponse(raw);
+    const result = await callHaiku(EXTRACTION_SYSTEM, trimmed.slice(0, 4000));
+    llmEntities = parseEntityResponse(result.text);
   }
 
   // Merge: metadata entities take precedence (confidence 1.0)
