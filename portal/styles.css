@@ -864,3 +864,39 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 #graph-panel .panel-meta { font-size: 12px; color: var(--muted); }
 #graph-panel .panel-action { margin-top: 6px; }
 #brain-graph-empty { display: none; padding: 36px 12px; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* ---- Explorador Unificado (brain-explorer) ---- */
+.explorer-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.explorer-search { width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid #e2e2e2; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
+.explorer-search:focus { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(0,0,0,0.06); }
+
+/* Selection pills row */
+.explorer-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: #f7f7f7; border-radius: 8px; border: 1px solid #e8e8e8; }
+.explorer-selection-pills { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.explorer-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 10px; background: var(--ink); color: #fff; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.explorer-pill-rm { background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; padding: 0; font-size: 11px; line-height: 1; }
+.explorer-pill-rm:hover { color: #fff; }
+.explorer-match-toggle { display: flex; gap: 4px; flex-shrink: 0; }
+.explorer-match-toggle .fchip { font-size: 12px; padding: 3px 10px; }
+
+/* Entity search input */
+.entity-search-input { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #e2e2e2; border-radius: 6px; font-size: 13px; font-family: inherit; outline: none; margin-bottom: 8px; }
+.entity-search-input:focus { border-color: var(--ink); }
+
+/* Entity panel (details/summary collapsible) */
+.explorer-entities-panel { border: 1px solid #e8e8e8; border-radius: 8px; padding: 10px 12px; background: #fafafa; }
+.explorer-entities-toggle { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; list-style: none; user-select: none; }
+.explorer-entities-toggle::-webkit-details-marker { display: none; }
+.explorer-entities-toggle::before { content: '▶'; font-size: 10px; color: var(--muted); transition: transform 0.15s; }
+details[open] > .explorer-entities-toggle::before { transform: rotate(90deg); }
+.explorer-sel-count { font-size: 11px; font-weight: 700; background: var(--ink); color: #fff; border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+
+/* Explorer empty state */
+.explorer-empty { padding: 20px 2px; text-align: center; }
+.explorer-empty.hidden { display: none; }
+
+/* Mobile: entity panel starts open on desktop, collapses on narrow */
+@media (max-width: 600px) {
+  .explorer-entities-panel { padding: 8px 10px; }
+  #brain-graph-canvas { height: 60vh; }
+}

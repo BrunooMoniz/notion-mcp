@@ -316,20 +316,13 @@
           <div class="src-status" id="src-status"></div>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <h2 class="card-title">Pessoas · Empresas · Projetos</h2>
-          </div>
-          <div id="entities-block" style="padding:4px 0 8px">
-            <span class="muted" style="font-size:13px">carregando entidades…</span>
-          </div>
-        </div>
-
-        <div class="card">
+        <!-- ============ EXPLORADOR UNIFICADO ============ -->
+        <div class="card" id="brain-explorer">
+          <!-- Cabeçalho com título e toggle Lista|Grafo -->
           <div class="card-head">
             <div>
-              <h2 class="card-title">Navegar nos documentos</h2>
-              <p class="card-sub">Filtre por fonte ou busque por título. Clique para abrir o original.</p>
+              <h2 class="card-title">Explorador do Cérebro</h2>
+              <p class="card-sub">Filtre por entidades, fonte ou busca. Lista e Grafo reagem aos mesmos filtros.</p>
             </div>
             <div class="brain-view-toggle" role="group" aria-label="Modo de visualização">
               <button class="fchip active" id="brain-toggle-lista" type="button">Lista</button>
@@ -337,11 +330,46 @@
             </div>
           </div>
 
-          <!-- Lista view -->
+          <!-- ---- Barra de filtros ---- -->
+          <div class="explorer-filters" id="explorer-filters">
+            <!-- Busca por texto -->
+            <input type="text" id="doc-search" class="explorer-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
+
+            <!-- Filtro de fonte -->
+            <div class="filters" id="doc-filters" aria-label="Filtro por fonte"></div>
+
+            <!-- Entidades selecionadas (pills removíveis) -->
+            <div class="explorer-selection" id="explorer-selection" style="display:none" aria-live="polite">
+              <div class="explorer-selection-pills" id="explorer-selection-pills"></div>
+              <div class="explorer-match-toggle" role="group" aria-label="Modo de combinação">
+                <button class="fchip active" id="match-all-btn" type="button"
+                  title="Mostrar documentos que citam TODAS as entidades selecionadas">Todas</button>
+                <button class="fchip" id="match-any-btn" type="button"
+                  title="Mostrar documentos que citam QUALQUER uma das entidades selecionadas">Qualquer</button>
+              </div>
+            </div>
+
+            <!-- Painel de entidades (aberto por padrão; colapsável em mobile) -->
+            <details class="explorer-entities-panel" id="entities-panel" open>
+              <summary class="explorer-entities-toggle">
+                <span>Pessoas · Empresas · Projetos</span>
+                <span class="explorer-sel-count" id="explorer-sel-count" style="display:none"></span>
+              </summary>
+              <!-- Busca de entidade (visível quando >30) -->
+              <input type="text" id="entity-search" class="entity-search-input" placeholder="Filtrar entidades…" aria-label="Buscar entidade" style="display:none">
+              <div id="entities-block" style="padding:4px 0 8px">
+                <span class="muted" style="font-size:13px">carregando entidades…</span>
+              </div>
+            </details>
+          </div>
+
+          <!-- ---- Vista Lista ---- -->
           <div id="brain-lista-view">
-            <div class="filters" id="doc-filters"></div>
-            <input type="text" id="doc-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
             <div class="doc-list" id="doc-list"></div>
+            <div class="explorer-empty hidden" id="doc-empty">
+              <p class="muted">Nenhum documento encontrado com os filtros atuais.</p>
+              <p class="muted" id="doc-empty-hint" style="display:none">Tente o modo <strong>Qualquer</strong> para ver documentos que citam ao menos uma das entidades.</p>
+            </div>
             <div class="pager hidden" id="doc-pager">
               <span id="pager-info"></span>
               <div class="pgbtns">
@@ -351,7 +379,7 @@
             </div>
           </div>
 
-          <!-- Graph view -->
+          <!-- ---- Vista Grafo ---- -->
           <div id="brain-grafo-view" style="display:none">
             <div id="brain-graph-empty">
               <p>Nenhuma entidade extraída ainda.<br>Execute um reindex para visualizar o grafo.</p>
