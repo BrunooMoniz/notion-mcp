@@ -15,12 +15,13 @@ function makePool(responses: Array<{ rows: unknown[] }>) {
   };
 }
 
+// ---- EXISTING TESTS (updated for new 2-call overview mode) ----
+
 test("buildBrainGraph: empty DB returns empty graph", async () => {
+  // overview mode: 2 DB calls (entity nodes + entity-entity edges)
   __setPoolForTest(makePool([
     { rows: [] }, // entity nodes
-    { rows: [] }, // doc nodes
-    { rows: [] }, // entity-doc edges
-    { rows: [] }, // entity-entity edges
+    { rows: [] }, // entity-entity edges (skipped when entityIds < 2, but pool returns [] anyway)
   ]) as never);
 
   const g = await buildBrainGraph("acc-1", {});
@@ -29,6 +30,7 @@ test("buildBrainGraph: empty DB returns empty graph", async () => {
 });
 
 test("buildBrainGraph: maps entity rows to nodes with kind=entity", async () => {
+  // overview mode: 2 calls (no doc query)
   __setPoolForTest(makePool([
     {
       rows: [
@@ -36,9 +38,7 @@ test("buildBrainGraph: maps entity rows to nodes with kind=entity", async () => 
         { id: 2, type: "empresa", name: "nora finance", mention_count: "12" },
       ],
     },
-    { rows: [] }, // no doc nodes
-    { rows: [] }, // no entity-doc edges
-    { rows: [] }, // no entity-entity edges
+    { rows: [] }, // entity-entity edges
   ]) as never);
 
   const g = await buildBrainGraph("acc-1", {});
@@ -55,53 +55,20 @@ test("buildBrainGraph: maps entity rows to nodes with kind=entity", async () => 
   assert.equal(e2.weight, 12);
 });
 
-test("buildBrainGraph: maps doc rows to nodes with kind=doc", async () => {
-  // Doc query only runs when there are entities — include one entity to trigger it.
+test("buildBrainGraph: overview has NO doc nodes", async () => {
+  // Overview mode (default) should never include doc nodes
   __setPoolForTest(makePool([
-    { rows: [{ id: 1, type: "pessoa", name: "ana", mention_count: "1" }] }, // entity needed
-    {
-      rows: [
-        { source_id: "src-abc", source_type: "granola", title: "Reunião Nora", parent_url: "https://granola.so/x", doc_mention_count: "3" },
-      ],
-    },
-    { rows: [] }, // no entity-doc edges (separate query)
-    { rows: [] }, // no entity-entity edges (only 1 entity, skipped)
+    { rows: [{ id: 1, type: "pessoa", name: "ana", mention_count: "3" }] },
+    { rows: [] }, // entity-entity edges
   ]) as never);
 
   const g = await buildBrainGraph("acc-1", {});
-  // 2 nodes: 1 entity + 1 doc
-  assert.equal(g.nodes.length, 2);
-  const d = g.nodes.find((n) => n.kind === "doc")!;
-  assert.ok(d, "doc node not found");
-  assert.equal(d.id, "d:src-abc");
-  assert.equal(d.kind, "doc");
-  assert.equal(d.label, "Reunião Nora");
-  assert.equal(d.type, "granola");
-  assert.equal(d.weight, 3);
-  assert.equal(d.url, "https://granola.so/x");
+  assert.ok(g.nodes.every(n => n.kind === "entity"), "overview must have no doc nodes");
+  assert.equal(g.mode, "overview");
 });
 
-test("buildBrainGraph: maps entity-doc edge rows", async () => {
-  __setPoolForTest(makePool([
-    { rows: [{ id: 7, type: "pessoa", name: "ana", mention_count: "2" }] },
-    { rows: [{ source_id: "doc-1", source_type: "notion", title: "Doc 1", parent_url: null, doc_mention_count: "2" }] },
-    {
-      rows: [{ entity_id: 7, source_id: "doc-1", weight: "2" }],
-    },
-    { rows: [] }, // no entity-entity edges
-  ]) as never);
-
-  const g = await buildBrainGraph("acc-1", {});
-  assert.equal(g.edges.length, 1);
-  assert.deepEqual(g.edges[0], { a: "e:7", b: "d:doc-1", weight: 2 });
-});
-
-test("buildBrainGraph: maps entity-entity co-occurrence edges", async () => {
-  // Call sequence when docs are empty:
-  // 0: entity nodes (2 entities returned)
-  // 1: doc nodes (entityIds.length > 0, returns empty → docNodes stays [])
-  // 2: entity-doc edges SKIPPED (docNodes.length === 0)
-  // 2: entity-entity edges (entityIds.length > 1, 3rd actual call)
+test("buildBrainGraph: maps entity-entity co-occurrence edges in overview", async () => {
+  // overview: 2 calls (entity nodes + entity-entity edges)
   __setPoolForTest(makePool([
     {
       rows: [
@@ -109,8 +76,6 @@ test("buildBrainGraph: maps entity-entity co-occurrence edges", async () => {
         { id: 2, type: "empresa", name: "nora", mention_count: "6" },
       ],
     },
-    { rows: [] }, // doc nodes — empty
-    // entity-doc edges skipped because docNodes is empty
     { rows: [{ entity_a: 1, entity_b: 2, weight: "3" }] }, // entity-entity edges
   ]) as never);
 
@@ -133,23 +98,21 @@ test("buildBrainGraph: type filter is forwarded (query receives it)", async () =
   assert.ok(capturedParams.includes("empresa"), "type filter not forwarded to query");
 });
 
-test("buildBrainGraph: max_nodes cap defaults to 120 and is respected", async () => {
-  // Returns 150 entity rows — graph should still only keep 120
-  const manyEntities = Array.from({ length: 150 }, (_, i) => ({
+test("buildBrainGraph: max_nodes cap defaults to 40 in overview", async () => {
+  // overview default cap is 40 (not 120)
+  const manyEntities = Array.from({ length: 60 }, (_, i) => ({
     id: i + 1,
     type: "pessoa",
     name: `person ${i + 1}`,
-    mention_count: String(150 - i),
+    mention_count: String(60 - i),
   }));
   __setPoolForTest(makePool([
     { rows: manyEntities },
-    { rows: [] },
-    { rows: [] },
-    { rows: [] },
+    { rows: [] }, // entity-entity edges
   ]) as never);
 
   const g = await buildBrainGraph("acc-1", {});
-  assert.ok(g.nodes.length <= 120, `expected ≤120 nodes, got ${g.nodes.length}`);
+  assert.ok(g.nodes.length <= 40, `expected ≤40 nodes in overview, got ${g.nodes.length}`);
 });
 
 test("buildBrainGraph: entity_id subgraph filter restricts to that entity's neighbourhood", async () => {
@@ -165,4 +128,133 @@ test("buildBrainGraph: entity_id subgraph filter restricts to that entity's neig
   // At least one query must reference entity_id=42 filtering
   assert.ok(queries.some((q) => q.includes("$") || q.toLowerCase().includes("entity_id")),
     "entity_id subgraph filter not applied");
+});
+
+// ---- NEW MODE TESTS ----
+
+test("buildBrainGraph overview: does not include doc nodes", async () => {
+  // DB returns 2 entities — overview must suppress doc nodes
+  __setPoolForTest(makePool([
+    { rows: [
+      { id: 1, type: "pessoa", name: "ana", mention_count: "5" },
+      { id: 2, type: "empresa", name: "nora", mention_count: "3" },
+    ]},
+    { rows: [] }, // entity-entity edges
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "overview" });
+  assert.ok(g.nodes.every(n => n.kind === "entity"), "overview must have no doc nodes");
+  assert.equal(g.nodes.length, 2);
+});
+
+test("buildBrainGraph overview: default max_nodes is 40", async () => {
+  // Return 60 entity rows — overview should cap at 40
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    id: i + 1, type: "pessoa", name: `p${i + 1}`, mention_count: String(60 - i),
+  }));
+  __setPoolForTest(makePool([
+    { rows: many },
+    { rows: [] },
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "overview" });
+  assert.ok(g.nodes.length <= 40, `overview capped at 40, got ${g.nodes.length}`);
+});
+
+test("buildBrainGraph overview: edges are entity-entity only (no entity-doc)", async () => {
+  __setPoolForTest(makePool([
+    { rows: [
+      { id: 1, type: "pessoa", name: "ana", mention_count: "4" },
+      { id: 2, type: "empresa", name: "nora", mention_count: "6" },
+    ]},
+    { rows: [{ entity_a: 1, entity_b: 2, weight: "3" }] },
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "overview" });
+  // All edges must connect two entity nodes
+  const entityIds = new Set(g.nodes.filter(n => n.kind === "entity").map(n => n.id));
+  g.edges.forEach(e => {
+    assert.ok(entityIds.has(e.a), `edge.a=${e.a} is not an entity`);
+    assert.ok(entityIds.has(e.b), `edge.b=${e.b} is not an entity`);
+  });
+});
+
+test("buildBrainGraph focus: returns selected entity + neighbors", async () => {
+  __setPoolForTest(makePool([
+    { rows: [
+      { id: 42, type: "pessoa", name: "target", mention_count: "8" },
+      { id: 99, type: "empresa", name: "neighbor", mention_count: "3" },
+    ]},
+    { rows: [] }, // entity-entity edges
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "focus", entity_ids: [42] });
+  assert.ok(g.nodes.some(n => n.id === "e:42"), "target entity must be present");
+  assert.equal(g.mode, "focus");
+});
+
+test("buildBrainGraph focus with include_docs=false: no doc nodes returned", async () => {
+  __setPoolForTest(makePool([
+    { rows: [{ id: 1, type: "pessoa", name: "ana", mention_count: "2" }] },
+    { rows: [] }, // entity-entity edges
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "focus", entity_ids: [1], include_docs: false });
+  assert.ok(g.nodes.every(n => n.kind === "entity"), "no docs when include_docs=false");
+});
+
+test("buildBrainGraph focus with include_docs=true: doc nodes present", async () => {
+  __setPoolForTest(makePool([
+    { rows: [{ id: 1, type: "pessoa", name: "ana", mention_count: "2" }] },
+    { rows: [{ source_id: "doc-x", source_type: "notion", title: "My Doc", parent_url: null, doc_mention_count: "2" }] },
+    { rows: [{ entity_id: 1, source_id: "doc-x", weight: "2" }] }, // entity-doc edges
+    { rows: [] }, // entity-entity edges
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "focus", entity_ids: [1], include_docs: true });
+  assert.ok(g.nodes.some(n => n.kind === "doc"), "doc nodes must appear when include_docs=true");
+});
+
+test("buildBrainGraph focus: max_nodes defaults to 60 and is capped at 150", async () => {
+  const many = Array.from({ length: 200 }, (_, i) => ({
+    id: i + 1, type: "pessoa", name: `p${i + 1}`, mention_count: String(200 - i),
+  }));
+  __setPoolForTest(makePool([
+    { rows: many },
+    { rows: [] },
+  ]) as never);
+
+  const g = await buildBrainGraph("acc-1", { mode: "focus", entity_ids: [1] });
+  assert.ok(g.nodes.length <= 150, `focus cap 150, got ${g.nodes.length}`);
+  assert.ok(g.nodes.length <= 60, `focus default cap 60, got ${g.nodes.length}`);
+});
+
+test("buildBrainGraph: legacy entity_id maps to focus mode", async () => {
+  let capturedSQL = "";
+  __setPoolForTest({
+    query: async (sql: string) => {
+      capturedSQL += sql;
+      return { rows: [] };
+    },
+  } as never);
+
+  // Using legacy entity_id should trigger subgraph / focus behaviour
+  await buildBrainGraph("acc-1", { entity_id: 7 });
+  // The SQL must reference a subgraph filter (entity neighbour join)
+  assert.ok(capturedSQL.includes("entity_id") || capturedSQL.includes("em1") || capturedSQL.includes("em2"),
+    "legacy entity_id must trigger focus/subgraph SQL");
+});
+
+test("buildBrainGraph: legacy entityIds (plural) maps to focus mode", async () => {
+  let capturedSQL = "";
+  __setPoolForTest({
+    query: async (sql: string) => {
+      capturedSQL += sql;
+      return { rows: [] };
+    },
+  } as never);
+
+  await buildBrainGraph("acc-1", { entityIds: [3, 4] });
+  assert.ok(capturedSQL.includes("entity_id") || capturedSQL.includes("em1"),
+    "legacy entityIds must trigger focus/subgraph SQL");
 });
