@@ -125,37 +125,161 @@
           <div id="assistant-list"><p class="muted">Nenhum assistente conectado ainda — siga um dos caminhos abaixo.</p></div>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <h2 class="card-title">Endereço do seu Zinom</h2>
-          </div>
-          <div class="code-block" id="endpoint-block">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
-        </div>
-
-        <div class="card" id="connect-claudeai">
+        <!-- ===== CONECTAR SUA IA (guiado) ===== -->
+        <div class="card" id="connect-guided">
           <div class="card-head">
             <div>
-              <h2 class="card-title">Conectar ao Claude.ai <span class="tag mono">5 min</span></h2>
-              <p class="card-sub">Para quem usa o Claude no navegador ou no app.</p>
+              <h2 class="card-title">Conectar sua IA</h2>
+              <p class="card-sub">Escolha seu assistente e siga o passo a passo — leva menos de 5 minutos.</p>
             </div>
           </div>
-          <div class="step-list">
-            <div class="step-item"><div class="sc">Clique em <strong>Liberar conexão</strong> — abre uma janela de 5 minutos para autorizar.<div class="flex wrap mt-sm"><button class="btn btn-primary btn-sm" type="button" id="connect-window-btn">Liberar conexão ao Claude.ai (5 min)</button><span class="muted" id="connect-window-status"></span></div></div></div>
-            <div class="step-item"><div class="sc">No Claude: <strong>Configurações → Conectores → Adicionar conector personalizado</strong> e cole o endereço acima.</div></div>
-            <div class="step-item"><div class="sc">Autorize com seu e-mail + código de 6 dígitos. Pronto — peça <em>"busca no meu Zinom: …"</em>.</div></div>
-          </div>
-        </div>
 
-        <div class="card" id="connect-token">
-          <div class="card-head">
-            <div>
-              <h2 class="card-title">Conectar ao Claude Code / Cursor <span class="tag mono">token</span></h2>
-              <p class="card-sub">Gere um token pessoal e rode um comando no terminal.</p>
-            </div>
-            <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn">Gerar token pessoal</button>
+          <!-- Selo de conexão ativa -->
+          <div class="connect-active-badge hidden" id="connect-active-badge">
+            <span class="tag ok">Sua IA já está conectada e usando o cérebro ✓</span>
           </div>
-          <div id="token-area">
-            <p class="muted">Nenhum token ativo. O token aparece <strong>uma única vez</strong> — se perder, gere outro (o anterior é revogado).</p>
+
+          <!-- Seletor de assistente (tabs) -->
+          <div class="ai-tabs" role="tablist" aria-label="Escolha seu assistente">
+            <button class="ai-tab active" type="button" role="tab" aria-selected="true" data-ai="claudeai">
+              <span class="ai-tab-icon">✦</span> Claude.ai
+            </button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="claudecode">
+              <span class="ai-tab-icon">⌨</span> Claude Code
+            </button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="chatgpt">
+              <span class="ai-tab-icon">💬</span> ChatGPT
+            </button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="outra">
+              <span class="ai-tab-icon">⚙</span> Outra IA
+            </button>
+          </div>
+
+          <!-- Painel: Claude.ai -->
+          <div class="ai-panel active" id="ai-panel-claudeai" role="tabpanel">
+            <p class="ai-panel-desc">Para quem usa o Claude no navegador ou no app de desktop.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Clique em <strong>Liberar conexão</strong> — abre uma janela de 5 minutos para autorizar.
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-primary btn-sm" type="button" id="connect-window-btn">Liberar conexão ao Claude.ai (5 min)</button>
+                    <span class="muted" id="connect-window-status"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  No Claude.ai, vá em <strong>Configurações → Conectores → Adicionar conector personalizado</strong> e cole o endereço do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-claudeai">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Autorize com seu e-mail e o código de 6 dígitos exibido na tela do Zinom.</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: Claude Code -->
+          <div class="ai-panel" id="ai-panel-claudecode" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Para quem usa o Claude Code no terminal (ou Cursor / Windsurf).</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Gere seu token pessoal — ele aparece <strong>uma única vez</strong> (se perder, gere outro):
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Cole o comando no terminal (gerado automaticamente após o passo anterior).</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: ChatGPT -->
+          <div class="ai-panel" id="ai-panel-chatgpt" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Para quem usa o ChatGPT com suporte a conectores MCP.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Gere um token pessoal para autenticar o ChatGPT:
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-chatgpt">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area-chatgpt" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  No ChatGPT, vá em <strong>Configurações → Conectores → Adicionar</strong> (o caminho pode variar conforme a versão). Cole o endereço do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-chatgpt">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                  <p class="muted mt-sm" style="font-size:12.5px">Adicione também o cabeçalho de autenticação: <code>Authorization: Bearer &lt;seu-token&gt;</code></p>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  <span class="tag warn" style="font-size:11px">Nota</span> O caminho exato varia conforme a versão do ChatGPT. Procure por "Conectores MCP" ou "Custom connectors" nas configurações.
+                </div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao ChatGPT — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: Outra IA -->
+          <div class="ai-panel" id="ai-panel-outra" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Qualquer cliente MCP (Cursor, Windsurf, Continue, etc.) funciona com o Zinom.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Endereço MCP do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-outra">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  Gere um token pessoal e use-o no cabeçalho <code>Authorization: Bearer &lt;token&gt;</code>:
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-outra">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area-outra" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Configure o transporte como <code>HTTP streamable</code> (ou <code>SSE</code> para clientes mais antigos). O Zinom suporta o protocolo MCP padrão.</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte à sua IA — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -235,11 +359,14 @@
           <div id="notion-list"></div>
           <details class="tutorial">
             <summary>Prefere conectar com um token? (alternativa ao OAuth)</summary>
-            <ol>
-              <li>Abra <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> → aba <strong>Personal access tokens</strong> → <strong>New token</strong>.</li>
-              <li>Escolha o workspace e confirme. Copie o token (começa com <code>ntn_</code>).</li>
-              <li>Cole aqui e conecte:</li>
-            </ol>
+            <details class="source-help" style="margin-bottom:10px">
+              <summary class="source-help-summary">Onde encontro o token PAT do Notion?</summary>
+              <ol class="source-help-steps">
+                <li>Acesse <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> → aba <strong>Personal access tokens</strong> → <strong>New token</strong>.</li>
+                <li>Dê um nome, escolha o workspace e confirme. Copie o token — começa com <code>ntn_</code>.</li>
+                <li><strong>Importante:</strong> compartilhe as páginas do Notion com a integração (botão "Conectar" dentro de cada página ou database).</li>
+              </ol>
+            </details>
             <form id="pat-form" class="flex wrap">
               <input type="password" id="pat-input" placeholder="ntn_…" autocomplete="off" style="flex:1;min-width:200px">
               <button class="btn btn-primary btn-sm" type="submit">Conectar com token</button>
@@ -269,6 +396,14 @@
             </div>
           </div>
           <div id="ical-list"></div>
+          <details class="source-help" style="margin-bottom:10px">
+            <summary class="source-help-summary">Onde encontro meu link iCal?</summary>
+            <ol class="source-help-steps">
+              <li>No Google Calendar (web), passe o mouse sobre a agenda → <strong>Configurações e compartilhamento</strong>.</li>
+              <li>Role até <strong>Integrar agenda</strong> → copie o <strong>Endereço secreto no formato iCal</strong> (termina em <code>basic.ics</code>).</li>
+              <li>Cole abaixo. Trate o link como uma senha — quem tem o link lê a agenda.</li>
+            </ol>
+          </details>
           <form id="ical-form" class="stack-v mt-sm">
             <div>
               <label for="ical-url">Link iCal secreto</label>
@@ -279,14 +414,6 @@
               <button class="btn btn-ghost btn-sm" type="submit">Adicionar calendário</button>
             </div>
           </form>
-          <details class="tutorial">
-            <summary>Onde encontro meu link iCal?</summary>
-            <ol>
-              <li>No Google Calendar (web), passe o mouse sobre a agenda → <strong>Configurações e compartilhamento</strong>.</li>
-              <li>Role até <strong>Integrar agenda</strong> → copie o <strong>Endereço secreto no formato iCal</strong> (termina em <code>basic.ics</code>).</li>
-              <li>Cole acima. Trate o link como uma senha — quem tem o link lê a agenda.</li>
-            </ol>
-          </details>
         </div>
 
         <!-- Granola -->
@@ -298,6 +425,14 @@
             </div>
           </div>
           <div id="granola-state"></div>
+          <details class="source-help" style="margin-bottom:10px">
+            <summary class="source-help-summary">Onde encontro minha chave do Granola?</summary>
+            <ol class="source-help-steps">
+              <li>Abra o app Granola no seu Mac ou acesse <a href="https://granola.ai" target="_blank" rel="noopener">granola.ai</a>.</li>
+              <li>Vá em <strong>Configurações → Integrações</strong> (ou similar — o caminho pode variar conforme a versão).</li>
+              <li>Copie a chave de API e cole abaixo.</li>
+            </ol>
+          </details>
           <form id="granola-form" class="flex wrap mt-sm">
             <input type="password" id="granola-key" autocomplete="off" placeholder="Cole a chave da API do Granola" style="flex:1;min-width:200px" aria-label="Chave da API Granola">
             <button class="btn btn-primary btn-sm" type="submit" id="granola-save">Salvar</button>
@@ -314,9 +449,13 @@
               <div class="meter-head"><span id="index-step">Iniciando…</span><strong id="index-pct"></strong></div>
               <div class="meter-track"><div class="meter-bar" id="index-bar-fill" style="width:0%"></div></div>
             </div>
+            <div class="index-done hidden" id="index-done-msg"></div>
           </div>
           <button class="btn btn-primary" type="button" id="reindex-btn">Indexar agora</button>
         </div>
+
+        <!-- Nudge: próximo passo após indexação -->
+        <div class="fontes-nudge hidden" id="fontes-nudge"></div>
       </div>
     </section>
 

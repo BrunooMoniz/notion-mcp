@@ -102,6 +102,9 @@ function renderInicio(me, billing) {
   var plLogo = document.getElementById('pl-logo');
   if (plLogo) plLogo.innerHTML = logoSvg(30);
 
+  /* Badge de conexão ativa */
+  renderConnectActiveBadge();
+
   /* pipeline: fontes */
   var sources = (me && me.sources) || {};
   var nActive = 0;
@@ -322,6 +325,54 @@ function renderFontes(me) {
   if (grSave) grSave.textContent = granola.set ? 'Trocar' : 'Salvar';
   var grRm = document.getElementById('granola-remove');
   if (grRm) grRm.classList.toggle('hidden', !granola.set);
+}
+
+/* ==================== FONTES: NUDGE DE PRÓXIMO PASSO ====================  */
+
+/**
+ * Mostra nudge contextual na view Fontes:
+ * - Se há ≥1 fonte indexada mas nenhuma IA conectada → "Conecte sua IA"
+ * - Se IA conectada → "Faça sua primeira pergunta"
+ */
+function renderFontesNudge(me) {
+  var nudge = document.getElementById('fontes-nudge');
+  if (!nudge) return;
+
+  var hasIndexedSources = false;
+  if (me && me.sources) {
+    var s = me.sources;
+    hasIndexedSources = !!(
+      (s.notion && s.notion.connected) ||
+      (s.google && s.google.length) ||
+      (s.ical && s.ical.links && s.ical.links.length) ||
+      (s.granola && s.granola.set)
+    );
+  }
+
+  var hasAi = assistants.length > 0;
+
+  if (!hasIndexedSources) {
+    nudge.classList.add('hidden');
+    nudge.innerHTML = '';
+    return;
+  }
+
+  nudge.classList.remove('hidden');
+  if (!hasAi) {
+    nudge.innerHTML =
+      '<div class="nudge-card">' +
+      '<span class="nudge-icon">✦</span>' +
+      '<span class="nudge-text">Fontes prontas! Agora conecte sua IA favorita para começar a perguntar.</span>' +
+      '<button class="btn btn-primary btn-sm" type="button" data-nav="inicio">Conectar minha IA →</button>' +
+      '</div>';
+  } else {
+    nudge.innerHTML =
+      '<div class="nudge-card">' +
+      '<span class="nudge-icon">✓</span>' +
+      '<span class="nudge-text">IA conectada e fontes prontas — faça sua primeira pergunta!</span>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-nav="chat">Testar no chat →</button>' +
+      '</div>';
+  }
 }
 
 /* ==================== ENTIDADES ====================  */
@@ -1541,7 +1592,7 @@ async function runIndex() {
   /* progresso simulado enquanto o servidor processa */
   var steps = [
     ['Lendo Notion…', 18], ['Lendo reunioes do Granola…', 42],
-    ['Lendo agendas…', 58], ['Gerando embeddings…', 86], ['Pronto', 100]
+    ['Lendo agendas…', 58], ['Gerando embeddings…', 86], ['Indexando…', 100]
   ];
   var si = 0;
   function tick() {
@@ -1551,19 +1602,164 @@ async function runIndex() {
     if (fillEl) fillEl.style.width = st[1] + '%';
     si++;
     if (si < steps.length) { setTimeout(tick, 1100); return; }
-    setTimeout(function () {
-      indexing = false;
-      if (btn) btn.disabled = false;
-      if (bar) bar.classList.add('hidden');
-      if (subEl) subEl.classList.remove('hidden');
-      if (itag) itag.classList.add('hidden');
-      /* recarregar status e dados */
-      loadStatus();
-      load();
-      loadBilling();
-    }, 900);
+    /* Aguardar a conclusão real via polling de /portal/status */
+    var pollCount = 0;
+    var pollDone = setInterval(async function () {
+      pollCount++;
+      try {
+        var r = await api('/portal/status');
+        if (!r.ok) { clearInterval(pollDone); finishIndex(); return; }
+        var s = await r.json();
+        if (!s.running || pollCount > 30) {
+          clearInterval(pollDone);
+          finishIndex(s);
+        } else {
+          if (stepEl) stepEl.textContent = 'Indexando suas fontes…';
+        }
+      } catch (e) {
+        clearInterval(pollDone);
+        finishIndex(null);
+      }
+    }, 3000);
   }
+
+  function finishIndex(statusData) {
+    indexing = false;
+    if (btn) btn.disabled = false;
+    if (bar) bar.classList.add('hidden');
+    if (subEl) subEl.classList.remove('hidden');
+    if (itag) itag.classList.add('hidden');
+    /* Mostrar mensagem de conclusão com stats */
+    var doneEl = document.getElementById('index-done-msg');
+    if (doneEl) {
+      var totals = (statusData && statusData.counts && statusData.counts.totals) || {};
+      var docs = totals.documents || 0;
+      var chunks = totals.chunks || 0;
+      if (docs > 0 || chunks > 0) {
+        doneEl.innerHTML =
+          'Pronto: <strong>' + fmt(docs) + ' documentos</strong> · <strong>' + fmt(chunks) + ' trechos</strong> indexados. ' +
+          '<button class="link-quiet" type="button" data-nav="atividade">Ver Atividade →</button>';
+        doneEl.classList.remove('hidden');
+        /* Ocultar após 12s */
+        setTimeout(function () { doneEl.classList.add('hidden'); }, 12000);
+      } else {
+        doneEl.classList.add('hidden');
+      }
+    }
+    /* recarregar status e dados */
+    if (statusData) {
+      renderBrainMini(false, statusData);
+    } else {
+      loadStatus();
+    }
+    load();
+    loadBilling();
+  }
+
   tick();
+}
+
+/* ==================== CONEXÃO GUIADA (Parte A) ====================  */
+
+/** Preenche todas as ocorrências de endpoint-block nos painéis guiados com a URL real. */
+function fillGuidedEndpoints(mcpUrl) {
+  var url = mcpUrl || 'https://zinom.ai/mcp';
+  ['endpoint-claudeai', 'endpoint-chatgpt', 'endpoint-outra'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    /* Preserva o botão de copiar, atualiza só o texto nó e o data-copy */
+    var btn = el.querySelector('.copy-btn');
+    el.textContent = url;
+    if (btn) {
+      btn.setAttribute('data-copy', url);
+      el.appendChild(btn);
+    }
+  });
+}
+
+/** Exibe/oculta o selo "Sua IA já está conectada" com base nos tokens. */
+function renderConnectActiveBadge() {
+  var badge = document.getElementById('connect-active-badge');
+  if (!badge) return;
+  /* Considera ativo se há algum token (last_used_at ou apenas existência) */
+  var hasActive = assistants.length > 0;
+  badge.classList.toggle('hidden', !hasActive);
+}
+
+/** Troca a aba ativa na seção de conexão guiada. */
+function switchAiTab(aiKey) {
+  document.querySelectorAll('.ai-tab').forEach(function (t) {
+    var isActive = t.getAttribute('data-ai') === aiKey;
+    t.classList.toggle('active', isActive);
+    t.setAttribute('aria-selected', String(isActive));
+  });
+  document.querySelectorAll('.ai-panel').forEach(function (p) {
+    var isActive = p.id === 'ai-panel-' + aiKey;
+    p.classList.toggle('active', isActive);
+    if (isActive) { p.removeAttribute('hidden'); } else { p.setAttribute('hidden', ''); }
+  });
+}
+
+function wireAiTabs() {
+  document.querySelectorAll('.ai-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      switchAiTab(tab.getAttribute('data-ai'));
+    });
+  });
+
+  /* Botão de token para ChatGPT (espelha o token principal) */
+  var tgenChatgpt = document.getElementById('token-gen-btn-chatgpt');
+  if (tgenChatgpt) tgenChatgpt.addEventListener('click', function () { generateTokenFor('chatgpt'); });
+
+  /* Botão de token para Outra IA */
+  var tgenOutra = document.getElementById('token-gen-btn-outra');
+  if (tgenOutra) tgenOutra.addEventListener('click', function () { generateTokenFor('outra'); });
+
+  /* copy-test-prompt: botões com data-copy já são tratados pelo handler global de .copy-btn via data-copy;
+     usamos a classe copy-test-prompt para feedback visual diferenciado */
+  document.body.addEventListener('click', function (e) {
+    var btn = e.target.closest('.copy-test-prompt');
+    if (!btn) return;
+    var txt = btn.getAttribute('data-copy');
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+      .then(function () {
+        var orig = btn.textContent;
+        btn.textContent = 'Copiado ✓';
+        setTimeout(function () { btn.textContent = orig; }, 1800);
+        toast('Prompt copiado!');
+      })
+      .catch(function () { toast('Selecione e copie manualmente'); });
+  });
+}
+
+/** Gera token e renderiza no painel indicado ('chatgpt' ou 'outra'). */
+async function generateTokenFor(panel) {
+  var areaId = panel === 'chatgpt' ? 'token-area-chatgpt' : 'token-area-outra';
+  var btnId = panel === 'chatgpt' ? 'token-gen-btn-chatgpt' : 'token-gen-btn-outra';
+  var area = document.getElementById(areaId);
+  var btn = document.getElementById(btnId);
+  var res;
+  try {
+    res = await apiJSON('/portal/mcp-token', 'POST');
+  } catch (e) { toast('Erro de rede ao gerar token.'); return; }
+  if (!res.ok) { toast('Não consegui gerar o token.'); return; }
+  var data = await res.json();
+  var token = data.token;
+  var mcpUrl = data.mcp_url || 'https://zinom.ai/mcp';
+  /* Atualiza todos os endpoints dos painéis */
+  fillGuidedEndpoints(mcpUrl);
+  if (area) {
+    area.innerHTML =
+      '<div class="token-reveal">' +
+      '<div class="meter-head" style="margin-bottom:7px"><strong>Seu token pessoal</strong><span class="tag warn">aparece só uma vez</span></div>' +
+      '<div class="tk">' + escapeHtml(token) + '</div>' +
+      '<button class="btn btn-ghost btn-sm mt-sm" type="button" data-copy-token="' + escapeHtml(token) + '">Copiar token</button>' +
+      '</div>' +
+      '<p class="muted mt-sm" style="font-size:12.5px">Use esse token no cabeçalho <code>Authorization: Bearer &lt;token&gt;</code>.</p>';
+  }
+  if (btn) btn.textContent = 'Gerar novo token';
+  await loadMcpTokens();
+  renderInicio(window._lastMe, window._lastBilling);
 }
 
 /* ==================== JANELA CLAUDE.AI ====================  */
@@ -1628,6 +1824,8 @@ async function generateToken() {
       '<button class="copy-btn" type="button" data-copy="' + escapeHtml(cmd.replace(/\n/g, ' ').replace(/\\ /g, '')) + '">copiar</button></div>' +
       '<p class="muted mt-sm">Outros clientes MCP (Cursor etc.): use o endereco acima com o cabecalho <code>Authorization: Bearer &lt;token&gt;</code>.</p>';
   }
+  /* Atualiza endpoints nos demais painéis guiados */
+  fillGuidedEndpoints(mcpUrl);
   var genBtn = document.getElementById('token-gen-btn');
   if (genBtn) genBtn.textContent = 'Gerar novo token';
   /* recarregar lista de tokens */
@@ -2305,6 +2503,10 @@ async function load() {
   await loadMcpTokens();
   renderInicio(me, window._lastBilling);
   renderChatEmpty(me);
+  /* Preencher URLs nos painéis guiados com a URL real do servidor */
+  var baseMcpUrl = (me && me.mcp_url) ? me.mcp_url : (window.location.origin + '/mcp');
+  fillGuidedEndpoints(baseMcpUrl);
+  renderFontesNudge(me);
 }
 
 /* ==================== INIT ====================  */
@@ -2318,6 +2520,7 @@ function init() {
   wireAtividade();
   wireConnectWindow();
   wireChat();
+  wireAiTabs();
 
   /* rota inicial */
   var hash = (location.hash || '#inicio').slice(1).split('?')[0];
