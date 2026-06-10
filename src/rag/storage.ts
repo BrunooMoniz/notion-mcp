@@ -657,7 +657,7 @@ export function titleFromHeaderLine(line: string | null | undefined): string {
  */
 export async function listBrainDocuments(
   accountId: string,
-  opts: { sourceType?: string; q?: string; limit?: number; offset?: number } = {},
+  opts: { sourceType?: string; q?: string; limit?: number; offset?: number; entityId?: number } = {},
 ): Promise<BrainDocument[]> {
   const p = getPool();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
@@ -671,6 +671,15 @@ export async function listBrainDocuments(
   if (opts.q && opts.q.trim()) {
     params.push(`%${opts.q.trim()}%`);
     where += ` AND text ILIKE $${params.length}`;
+  }
+  if (opts.entityId !== undefined) {
+    params.push(opts.entityId);
+    where += ` AND source_id IN (
+      SELECT DISTINCT bc2.source_id
+      FROM entity_mentions em2
+      JOIN brain_chunks bc2 ON bc2.id = em2.chunk_id AND bc2.account_id = $1
+      WHERE em2.entity_id = $${params.length}
+    )`;
   }
   params.push(limit);
   const limIdx = params.length;

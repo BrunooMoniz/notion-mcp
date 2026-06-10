@@ -324,9 +324,87 @@ function renderFontes(me) {
   if (grRm) grRm.classList.toggle('hidden', !granola.set);
 }
 
+/* ==================== ENTIDADES ====================  */
+
+var entityState = { expanded: { pessoa: false, empresa: false, projeto: false } };
+var _entitiesCache = null;
+var _activeEntityId = null;
+
+async function loadEntities() {
+  var wrap = document.getElementById('entities-block');
+  if (!wrap) return;
+  wrap.innerHTML = '<span class="muted" style="font-size:13px">carregando entidades…</span>';
+  try {
+    var res = await api('/portal/brain/entities');
+    if (!res.ok && res.status !== 503) { renderEntitiesEmpty(wrap); return; }
+    var data = res.ok ? await res.json() : { entities: [], total: 0 };
+    _entitiesCache = data.entities || [];
+    renderEntities(wrap, _entitiesCache);
+  } catch (e) {
+    wrap.innerHTML = '<span class="muted" style="font-size:13px">Erro ao carregar entidades. <button class="btn btn-ghost btn-sm" type="button" onclick="loadEntities()">Tentar de novo</button></span>';
+  }
+}
+
+function renderEntitiesEmpty(wrap) {
+  wrap.innerHTML = '<span class="muted" style="font-size:13px">Nenhuma entidade extraída ainda. Execute um reindex para começar.</span>';
+}
+
+function renderEntities(wrap, entities) {
+  if (!entities || entities.length === 0) { renderEntitiesEmpty(wrap); return; }
+
+  var TYPES = ['pessoa', 'empresa', 'projeto'];
+  var TYPE_LABEL_E = { pessoa: 'Pessoas', empresa: 'Empresas', projeto: 'Projetos' };
+
+  var html = TYPES.map(function(type) {
+    var items = entities.filter(function(e) { return e.type === type; });
+    if (items.length === 0) return '';
+    var SHOW = 10;
+    var visible = entityState.expanded[type] ? items : items.slice(0, SHOW);
+    var chips = visible.map(function(e) {
+      var active = _activeEntityId === e.id;
+      return '<button class="fchip entity-chip' + (active ? ' active' : '') + '" type="button" data-testid="entity-chip" data-entity-id="' + e.id + '" data-entity-name="' + escapeHtml(e.name) + '">' +
+        escapeHtml(e.name) + ' <span class="cnt">' + e.mention_count + '</span></button>';
+    }).join('');
+    var moreBtn = (!entityState.expanded[type] && items.length > SHOW)
+      ? '<button class="btn btn-ghost btn-sm" style="font-size:12px" type="button" data-expand-type="' + type + '">ver mais (' + (items.length - SHOW) + ')</button>'
+      : '';
+    return '<div class="entity-group" style="margin-bottom:10px">' +
+      '<div class="meta" style="margin-bottom:4px;font-weight:600">' + TYPE_LABEL_E[type] + '</div>' +
+      '<div class="entity-chips" style="display:flex;flex-wrap:wrap;gap:6px">' + chips + moreBtn + '</div>' +
+      '</div>';
+  }).join('');
+
+  wrap.innerHTML = html;
+
+  // Wire click handlers
+  wrap.querySelectorAll('.entity-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = parseInt(btn.getAttribute('data-entity-id'), 10);
+      if (_activeEntityId === id) {
+        // Deselect
+        _activeEntityId = null;
+        docState.entityId = undefined;
+      } else {
+        _activeEntityId = id;
+        docState.entityId = id;
+      }
+      renderEntities(wrap, _entitiesCache);
+      loadBrain(true);
+    });
+  });
+
+  wrap.querySelectorAll('[data-expand-type]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-expand-type');
+      entityState.expanded[type] = true;
+      renderEntities(wrap, _entitiesCache);
+    });
+  });
+}
+
 /* ==================== ATIVIDADE ====================  */
 
-var docState = { filter: 'all', q: '', offset: 0 };
+var docState = { filter: 'all', q: '', offset: 0, entityId: undefined };
 var PAGE = 50;
 var statusPollTimer = null;
 /* E2.3: last counts from /portal/status for filter button rendering */
@@ -462,6 +540,7 @@ async function loadBrain(reset) {
   var params = new URLSearchParams();
   if (docState.q) params.set('q', docState.q);
   if (docState.filter !== 'all') params.set('source_type', docState.filter);
+  if (docState.entityId !== undefined) params.set('entity_id', String(docState.entityId));
   params.set('limit', String(PAGE));
   params.set('offset', String(docState.offset));
   var docs = [];
@@ -522,6 +601,8 @@ function wireAtividade() {
   if (pagerPrev) pagerPrev.addEventListener('click', function () { /* não usado — modo scroll */ });
   var pagerNext = document.getElementById('pager-next');
   if (pagerNext) pagerNext.addEventListener('click', function () { loadBrain(false); });
+  // Load entities block on Atividade tab open
+  loadEntities();
 }
 
 /* ==================== CHECKLIST DE ATIVACAO ====================  */

@@ -577,16 +577,69 @@ export function createPortalRouter(): express.Router {
     const accountId: string = res.locals.accountId;
     try {
       const { listBrainDocuments } = await import("../rag/storage.js");
+      const entityId = typeof req.query.entity_id === "string" ? parseInt(req.query.entity_id, 10) || undefined : undefined;
       const documents = await listBrainDocuments(accountId, {
         q: typeof req.query.q === "string" ? req.query.q : undefined,
         sourceType: typeof req.query.source_type === "string" ? req.query.source_type : undefined,
         limit: typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || undefined : undefined,
         offset: typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || undefined : undefined,
+        entityId,
       });
       res.json({ documents });
     } catch (err: any) {
       console.warn(`[portal] brain/documents unavailable: ${err?.message ?? err}`);
       res.status(503).json({ error: "navegação indisponível neste ambiente", documents: [] });
+    }
+  });
+
+  // GET /portal/brain/entities — list entities for the account, gated by ENTITIES_ENABLED.
+  // Returns { entities: [], total: 0 } (200) when flag off, so UI doesn't break.
+  router.get("/portal/brain/entities", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (process.env.ENTITIES_ENABLED !== "true") {
+      res.json({ entities: [], total: 0 });
+      return;
+    }
+    try {
+      const { listEntities } = await import("../rag/entity-storage.js");
+      const type = typeof req.query.type === "string" ? req.query.type : undefined;
+      const q = typeof req.query.q === "string" ? req.query.q : undefined;
+      const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || undefined : undefined;
+      const offset = typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || undefined : undefined;
+      const result = await listEntities(accountId, { type, q, limit, offset });
+      res.json(result);
+    } catch (err: any) {
+      console.warn(`[portal] brain/entities unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "entidades indisponíveis", entities: [], total: 0 });
+    }
+  });
+
+  // GET /portal/brain/entities/:id/documents — documents mentioning a specific entity.
+  // 404 if entity does not belong to the account (cross-account guard).
+  router.get("/portal/brain/entities/:id/documents", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    if (process.env.ENTITIES_ENABLED !== "true") {
+      res.status(404).json({ error: "entidade não encontrada" });
+      return;
+    }
+    const entityId = parseInt(req.params.id, 10);
+    if (isNaN(entityId)) {
+      res.status(400).json({ error: "id inválido" });
+      return;
+    }
+    try {
+      const { listEntityDocuments } = await import("../rag/entity-storage.js");
+      const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) || undefined : undefined;
+      const offset = typeof req.query.offset === "string" ? parseInt(req.query.offset, 10) || undefined : undefined;
+      const result = await listEntityDocuments(accountId, entityId, { limit, offset });
+      if (result === null) {
+        res.status(404).json({ error: "entidade não encontrada" });
+        return;
+      }
+      res.json(result);
+    } catch (err: any) {
+      console.warn(`[portal] brain/entities/:id/documents unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "entidades indisponíveis" });
     }
   });
 
