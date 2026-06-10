@@ -748,6 +748,8 @@ async function generateToken() {
 /* ==================== CHAT DE TESTE ====================  */
 
 var chatBusy = false;
+// E3: histórico de conversa (últimas 6 mensagens, gerenciado no cliente)
+var chatHistory = [];
 var SUGGESTIONS_DATA = [
   { type: 'granola', text: 'O que ficou decidido na ultima reuniao do time?' },
   { type: 'calendar', text: 'O que tenho na agenda esta semana?' },
@@ -773,6 +775,60 @@ function renderChatEmpty(me) {
 
 function escapeForAttr(s) {
   return String(s).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+// E3: card de confirmação de ação
+function renderActionCard(proposedAction, stack, q) {
+  var resumo = (proposedAction && proposedAction.resumo) ? proposedAction.resumo : 'ação desconhecida';
+  var html = '<div class="action-card">' +
+    '<div class="action-header">' +
+    '<span class="action-icon">⚡</span>' +
+    '<span>Vou criar: <strong>' + escapeHtml(resumo) + '</strong></span>' +
+    '</div>' +
+    '<div class="action-btns">' +
+    '<button class="btn btn-primary btn-sm action-confirm" type="button">Confirmar</button>' +
+    '<button class="btn btn-ghost btn-sm action-cancel" type="button">Cancelar</button>' +
+    '</div>' +
+    '<div class="action-result"></div>' +
+    '</div>';
+  stack.innerHTML = html;
+
+  var confirmBtn = stack.querySelector('.action-confirm');
+  var cancelBtn = stack.querySelector('.action-cancel');
+  var resultEl = stack.querySelector('.action-result');
+
+  if (confirmBtn) confirmBtn.addEventListener('click', async function () {
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    resultEl.innerHTML = '<span class="spin" aria-hidden="true"></span> Criando…';
+    try {
+      var res = await apiJSON('/portal/ask/execute', 'POST', { proposed_action: proposedAction });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok && data.ok) {
+        var link = data.url ? ' <a href="' + escapeHtml(data.url) + '" target="_blank" rel="noopener">Abrir ↗</a>' : '';
+        resultEl.innerHTML = '<span style="color:var(--green,#1a8a42)">✓ ' + escapeHtml(data.message || 'Criado!') + link + '</span>';
+        // Add to history as completed action
+        chatHistory.push({ role: 'user', content: q || resumo });
+        chatHistory.push({ role: 'assistant', content: '✓ ' + (data.message || 'Criado!') + (data.url ? ' ' + data.url : '') });
+        if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+      } else {
+        resultEl.innerHTML = '<span style="color:var(--red,#c0392b)">✗ ' + escapeHtml(data.message || 'Erro ao criar.') + '</span>';
+        confirmBtn.disabled = false;
+        cancelBtn.disabled = false;
+      }
+    } catch (e) {
+      resultEl.innerHTML = '<span style="color:var(--red,#c0392b)">✗ Erro de conexão. Tente de novo.</span>';
+      confirmBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  });
+
+  if (cancelBtn) cancelBtn.addEventListener('click', function () {
+    stack.innerHTML = '<div class="chat-block"><span class="muted">Ação cancelada.</span></div>';
+    chatHistory.push({ role: 'user', content: q || resumo });
+    chatHistory.push({ role: 'assistant', content: 'Ação cancelada.' });
+    if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+  });
 }
 
 function renderAskAnswer(answer, sources) {
@@ -880,7 +936,9 @@ async function ask(q) {
   scrollBottom();
 
   try {
-    var res = await apiJSON('/portal/ask', 'POST', { question: q });
+    // E3: envia histórico (últimas 6 mensagens)
+    var historyToSend = chatHistory.slice(-6);
+    var res = await apiJSON('/portal/ask', 'POST', { question: q, history: historyToSend });
 
     if (res.status === 402) {
       stack.innerHTML = '<div class="chat-block limit">' +
@@ -905,9 +963,25 @@ async function ask(q) {
     var data = await res.json();
     var answer = data.answer || '';
     var sources = data.sources || [];
-    stack.innerHTML = renderAskAnswer(answer, sources);
+    var route = data.route || 'search';
+
+    // E3: action route — show confirmation card
+    if (route === 'action' && data.proposed_action) {
+      renderActionCard(data.proposed_action, stack, q);
+      scrollBottom();
+      // Don't add to history until confirmed/cancelled (handled inside renderActionCard)
+      return;
+    }
+
+    // meta or search route
+    stack.innerHTML = renderAskAnswer(answer, route === 'meta' ? [] : sources);
     wireCiteRefs(stack);
     scrollBottom();
+
+    // E3: atualiza histórico
+    chatHistory.push({ role: 'user', content: q });
+    chatHistory.push({ role: 'assistant', content: answer });
+    if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
   } catch (e) {
     stack.innerHTML = '<div class="chat-block neterr">' +
       '<span class="bh">Sem conexao</span>' +

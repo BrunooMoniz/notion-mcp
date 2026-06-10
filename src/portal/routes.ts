@@ -640,6 +640,38 @@ export function createPortalRouter(): express.Router {
     await handleAsk(req, res);
   });
 
+  // POST /portal/ask/execute — execute a proposed action after user confirmation.
+  // Same rate limit as /portal/ask (shared window). Audited in executeAction.
+  router.post("/portal/ask/execute", requireSession, askLimiter, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const proposed = req.body?.proposed_action;
+    if (
+      !proposed ||
+      typeof proposed !== "object" ||
+      !["criar_evento", "criar_tarefa", "criar_pagina_notion"].includes(proposed.type) ||
+      typeof proposed.resumo !== "string"
+    ) {
+      res.status(400).json({ error: "proposed_action inválido ou ausente" });
+      return;
+    }
+    try {
+      const { executeAction } = await import("./ask-actions.js");
+      const result = await executeAction(accountId, {
+        type: proposed.type,
+        params: typeof proposed.params === "object" && proposed.params !== null ? proposed.params : {},
+        resumo: proposed.resumo,
+      });
+      if (result.ok) {
+        res.json({ ok: true, message: result.message, url: result.url ?? null });
+      } else {
+        res.status(422).json({ ok: false, error: result.error, message: result.message });
+      }
+    } catch (err: any) {
+      console.error(`[portal] ask/execute ${accountId}: ${err?.message ?? err}`);
+      res.status(500).json({ ok: false, error: "server_error", message: "Erro interno ao executar a ação." });
+    }
+  });
+
   // --- MCP token list + per-token revoke ---------------------------------------
   // GET /portal/mcp-tokens — list tokens for the session account.
   // Returns [{id: token_hash, name, created_at, last_used_at}]. The hash is
