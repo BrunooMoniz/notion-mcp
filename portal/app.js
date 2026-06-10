@@ -72,7 +72,7 @@ function logoSvg(size) {
 }
 
 /* ---- navegação por hash ---- */
-var VIEWS = ['inicio', 'chat', 'fontes', 'atividade'];
+var VIEWS = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
 
 function go(view) {
   // plano vai para /plano.html (link externo)
@@ -684,7 +684,7 @@ function renderActivation() {
     return btn;
   }).join('');
 
-  stepsEl.innerHTML = html;
+  stepsEl.innerHTML = html + '<p class="muted" style="font-size:12px;margin:10px 0 0;padding-top:8px;border-top:1px solid var(--line)">Dúvida de como usar? <button class="link-quiet" type="button" data-nav="guia" style="font-size:12px">Entenda como usar no Guia →</button></p>';
 
   /* Wiring dos botoes do sub-fluxo de Tarefas (existem apenas quando step 2 incompleto e notion conectado) */
   var detectBtn = document.getElementById('act-tasks-detect-btn');
@@ -1149,6 +1149,19 @@ function wireChat() {
 function wireGlobal(me) {
   /* copy buttons */
   document.body.addEventListener('click', function (e) {
+    /* guia chips */
+    var chip = e.target.closest('.guia-chip');
+    if (chip) {
+      var chipTxt = chip.getAttribute('data-copy');
+      (navigator.clipboard ? navigator.clipboard.writeText(chipTxt) : Promise.reject())
+        .then(function () {
+          chip.classList.add('copied');
+          setTimeout(function () { chip.classList.remove('copied'); }, 1800);
+          toast('Copiado!');
+        })
+        .catch(function () { toast('Selecione e copie manualmente'); });
+    }
+
     var c = e.target.closest('.copy-btn');
     if (c) {
       var txt = c.getAttribute('data-copy');
@@ -1491,7 +1504,7 @@ function init() {
 
   /* rota inicial */
   var hash = (location.hash || '#inicio').slice(1).split('?')[0];
-  var validViews = ['inicio', 'chat', 'fontes', 'atividade'];
+  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
   go(validViews.includes(hash) ? hash : 'inicio');
 
   load();
@@ -1502,7 +1515,7 @@ function init() {
 
 window.addEventListener('hashchange', function () {
   var h = (location.hash || '#inicio').slice(1).split('?')[0];
-  var validViews = ['inicio', 'chat', 'fontes', 'atividade'];
+  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'guia'];
   if (validViews.includes(h)) go(h);
 });
 

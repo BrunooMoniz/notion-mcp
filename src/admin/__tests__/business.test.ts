@@ -7,11 +7,18 @@ import {
   estimateCost,
   engagementOf,
   mrrFromSubscriptions,
+  estimateLlmCost,
+  summariseCostReport,
+  DEFAULT_LLM_IN_PER_MTOK,
+  DEFAULT_LLM_OUT_PER_MTOK,
   type FunnelRow,
   type UsageInput,
   type CostEnv,
   type EngagementRow,
   type StripeSub,
+  type LlmUsageInput,
+  type LlmCostEnv,
+  type CostReportResponse,
 } from "../business.js";
 
 // ---------------------------------------------------------------------------
@@ -205,4 +212,158 @@ test("mrrFromSubscriptions: all canceled yields 0 MRR", () => {
   ];
   const { mrrCents } = mrrFromSubscriptions(subs);
   assert.equal(mrrCents, 0);
+});
+
+// ---------------------------------------------------------------------------
+// estimateLlmCost (F2)
+// ---------------------------------------------------------------------------
+
+test("estimateLlmCost: uses default Haiku 4.5 prices when env vars absent", () => {
+  const usage: LlmUsageInput = { llm_input_tokens: 1_000_000, llm_output_tokens: 1_000_000 };
+  const env: LlmCostEnv = {};
+  const result = estimateLlmCost(usage, env);
+  // $1.00/MTok input + $5.00/MTok output
+  assert.ok(Math.abs(result.inputCost - DEFAULT_LLM_IN_PER_MTOK) < 0.0001);
+  assert.ok(Math.abs(result.outputCost - DEFAULT_LLM_OUT_PER_MTOK) < 0.0001);
+  assert.ok(Math.abs(result.totalCost - (DEFAULT_LLM_IN_PER_MTOK + DEFAULT_LLM_OUT_PER_MTOK)) < 0.0001);
+});
+
+test("estimateLlmCost: uses overridden env prices", () => {
+  const usage: LlmUsageInput = { llm_input_tokens: 2_000_000, llm_output_tokens: 500_000 };
+  const env: LlmCostEnv = { COST_LLM_IN_PER_MTOK: "2.00", COST_LLM_OUT_PER_MTOK: "10.00" };
+  const result = estimateLlmCost(usage, env);
+  // in: 2M * 2.00 = 4.00; out: 0.5M * 10.00 = 5.00; total = 9.00
+  assert.ok(Math.abs(result.inputCost - 4.0) < 0.0001);
+  assert.ok(Math.abs(result.outputCost - 5.0) < 0.0001);
+  assert.ok(Math.abs(result.totalCost - 9.0) < 0.0001);
+});
+
+test("estimateLlmCost: zero tokens yields zero costs", () => {
+  const usage: LlmUsageInput = { llm_input_tokens: 0, llm_output_tokens: 0 };
+  const env: LlmCostEnv = {};
+  const result = estimateLlmCost(usage, env);
+  assert.equal(result.inputCost, 0);
+  assert.equal(result.outputCost, 0);
+  assert.equal(result.totalCost, 0);
+});
+
+test("estimateLlmCost: default prices match documented Haiku 4.5 pricing", () => {
+  // Verify the defaults are the values documented in business.ts comments.
+  // Source: https://platform.claude.com/docs/en/docs/about-claude/models/overview
+  // Fetched: 2026-06-09
+  assert.equal(DEFAULT_LLM_IN_PER_MTOK, 1.0);
+  assert.equal(DEFAULT_LLM_OUT_PER_MTOK, 5.0);
+});
+
+// ---------------------------------------------------------------------------
+// summariseCostReport (F2)
+// ---------------------------------------------------------------------------
+
+test("summariseCostReport: sums all amounts across buckets and results", () => {
+  const report: CostReportResponse = {
+    has_more: false,
+    next_page: null,
+    data: [
+      {
+        starting_at: "2026-06-01T00:00:00Z",
+        ending_at: "2026-06-02T00:00:00Z",
+        results: [
+          {
+            amount: "100.00",
+            currency: "USD",
+            cost_type: "tokens",
+            model: "claude-haiku-4-5-20251001",
+            token_type: "uncached_input_tokens",
+            service_tier: "standard",
+            context_window: "0-200k",
+            workspace_id: null,
+            description: null,
+            inference_geo: "global",
+          },
+          {
+            amount: "50.50",
+            currency: "USD",
+            cost_type: "tokens",
+            model: "claude-haiku-4-5-20251001",
+            token_type: "output_tokens",
+            service_tier: "standard",
+            context_window: "0-200k",
+            workspace_id: null,
+            description: null,
+            inference_geo: "global",
+          },
+        ],
+      },
+      {
+        starting_at: "2026-06-02T00:00:00Z",
+        ending_at: "2026-06-03T00:00:00Z",
+        results: [
+          {
+            amount: "25.25",
+            currency: "USD",
+            cost_type: "tokens",
+            model: "claude-haiku-4-5-20251001",
+            token_type: "output_tokens",
+            service_tier: "standard",
+            context_window: "0-200k",
+            workspace_id: null,
+            description: null,
+            inference_geo: "global",
+          },
+        ],
+      },
+    ],
+  };
+  const summary = summariseCostReport(report);
+  // 100.00 + 50.50 + 25.25 = 175.75
+  assert.ok(Math.abs(summary.totalUsdCents - 175.75) < 0.001);
+  assert.equal(summary.buckets, 2);
+});
+
+test("summariseCostReport: empty data returns zero", () => {
+  const report: CostReportResponse = { data: [], has_more: false, next_page: null };
+  const summary = summariseCostReport(report);
+  assert.equal(summary.totalUsdCents, 0);
+  assert.equal(summary.buckets, 0);
+});
+
+test("summariseCostReport: ignores invalid/non-numeric amounts", () => {
+  const report: CostReportResponse = {
+    has_more: false,
+    next_page: null,
+    data: [
+      {
+        starting_at: "2026-06-01T00:00:00Z",
+        ending_at: "2026-06-02T00:00:00Z",
+        results: [
+          {
+            amount: "50.00",
+            currency: "USD",
+            cost_type: null,
+            model: null,
+            token_type: null,
+            service_tier: null,
+            context_window: null,
+            workspace_id: null,
+            description: null,
+            inference_geo: null,
+          },
+          {
+            amount: "not-a-number",
+            currency: "USD",
+            cost_type: null,
+            model: null,
+            token_type: null,
+            service_tier: null,
+            context_window: null,
+            workspace_id: null,
+            description: null,
+            inference_geo: null,
+          },
+        ],
+      },
+    ],
+  };
+  const summary = summariseCostReport(report);
+  assert.ok(Math.abs(summary.totalUsdCents - 50.0) < 0.001);
 });

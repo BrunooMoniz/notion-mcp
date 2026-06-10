@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ClassificationResult, Frente, ReuniaoTipo, InsightCategoria, PageToClassify } from "./types.js";
 import { validateClassification } from "./validate.js";
+import { recordLlmUsage } from "../llm-usage.js";
 
 const MODEL = process.env.CLASSIFIER_MODEL ?? "claude-haiku-4-5-20251001";
 
@@ -16,11 +17,24 @@ function getClient(): Anthropic {
   return client;
 }
 
+/** Usage counts returned alongside the generated text. */
+export interface HaikuUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Result of a callHaiku invocation: text + token usage. */
+export interface HaikuResult {
+  text: string;
+  usage: HaikuUsage;
+}
+
 /**
  * Generic "ask Haiku" helper: one system prompt + one user message, returns the
- * concatenated text. Reusable beyond classification (e.g. an eval LLM-judge).
+ * concatenated text AND usage (input/output tokens) for metering.
+ * Reusable beyond classification (e.g. an eval LLM-judge).
  */
-export async function callHaiku(system: string, user: string): Promise<string> {
+export async function callHaiku(system: string, user: string): Promise<HaikuResult> {
   const c = getClient();
   const resp = await c.messages.create({
     model: MODEL,
@@ -28,10 +42,17 @@ export async function callHaiku(system: string, user: string): Promise<string> {
     system,
     messages: [{ role: "user", content: user }],
   });
-  return resp.content
+  const text = resp.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
+  return {
+    text,
+    usage: {
+      input_tokens: resp.usage.input_tokens,
+      output_tokens: resp.usage.output_tokens,
+    },
+  };
 }
 
 const SYSTEM_PROMPT = `Você é um classificador de notas do "segundo cérebro" do Bruno Moniz.
@@ -48,23 +69,39 @@ Categorias de Insight (use exatamente um): "Estrategia" | "Regulacao" | "Produto
 
 Responda APENAS com JSON válido. Sem markdown, sem texto explicativo.`;
 
-export async function classifyPage(page: PageToClassify): Promise<ClassificationResult> {
+/**
+ * Classify a Notion page with Haiku. Meters token usage against accountId
+ * (defaults to "bruno", the owner, which is who the cron runs as).
+ * Injectable `meter` for tests.
+ */
+export async function classifyPage(
+  page: PageToClassify,
+  accountId = "bruno",
+  meter: typeof recordLlmUsage = recordLlmUsage,
+): Promise<ClassificationResult> {
   const userPrompt = buildUserPrompt(page);
 
-  let text = await callHaiku(SYSTEM_PROMPT, userPrompt);
+  let result = await callHaiku(SYSTEM_PROMPT, userPrompt);
+  // Accumulate usage across retries.
+  const totalUsage = { input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens };
 
   let parsed: ClassificationResult;
   try {
-    parsed = parseJsonResponse(text, page.db);
+    parsed = parseJsonResponse(result.text, page.db);
   } catch (err) {
     // 1-retry JSON repair: re-ask Haiku for STRICT JSON only when the first
     // response was malformed (no parseable JSON object).
-    text = await callHaiku(
+    result = await callHaiku(
       SYSTEM_PROMPT,
       `${userPrompt}\n\n---\nSua resposta anterior não era JSON válido. Responda APENAS com o objeto JSON pedido, sem markdown, sem texto antes ou depois.`,
     );
-    parsed = parseJsonResponse(text, page.db);
+    totalUsage.input_tokens += result.usage.input_tokens;
+    totalUsage.output_tokens += result.usage.output_tokens;
+    parsed = parseJsonResponse(result.text, page.db);
   }
+
+  // Meter token usage best-effort (fire-and-forget pattern).
+  meter(accountId, totalUsage, "classifier").catch(() => {/* swallowed */});
 
   // Enum validation: drop any hallucinated frente/tipo/categoria so a value
   // outside the union in types.ts is never propagated to Notion.
