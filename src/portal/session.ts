@@ -18,20 +18,25 @@ export function hashSession(id: string): string {
   return createHash("sha256").update(id).digest("hex");
 }
 
+/** Max stored user-agent length — enough to recognize a browser/device. */
+const USER_AGENT_MAX_CHARS = 200;
+
 /** Create a session for an account; store only the hash. Returns the plaintext
- *  id the caller sets as the cookie value. */
+ *  id the caller sets as the cookie value. `userAgent` (002-app-v2) is the
+ *  browser's User-Agent at sign-in, truncated, shown in "Sessões ativas". */
 export async function createSession(
   accountId: string,
   now: Date = new Date(),
   ttlMs: number = SESSION_TTL_MS,
+  userAgent?: string | null,
 ): Promise<string> {
   const id = generateSessionId();
   const expiresAt = new Date(now.getTime() + ttlMs);
   const p = getPool();
   await p.query(
-    `INSERT INTO portal_sessions (session_hash, account_id, expires_at, last_seen_at)
-     VALUES ($1, $2, $3, $4)`,
-    [hashSession(id), accountId, expiresAt, now],
+    `INSERT INTO portal_sessions (session_hash, account_id, expires_at, last_seen_at, user_agent)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [hashSession(id), accountId, expiresAt, now, userAgent ? userAgent.slice(0, USER_AGENT_MAX_CHARS) : null],
   );
   return id;
 }

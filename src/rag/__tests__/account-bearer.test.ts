@@ -45,16 +45,16 @@ test("issueBearer stores the HASH (never the token) and returns the plaintext", 
   assert.equal(params[1], "notion:ws-1");
 });
 
-test("resolveBearer maps a token to its account + workspaces", async () => {
+test("resolveBearer maps a token to its account + workspaces + label", async () => {
   __setPoolForTest({
     query: async (sql: string) => {
-      if (/FROM account_api_tokens/i.test(sql)) return { rows: [{ account_id: "notion:ws-1" }] };
+      if (/FROM account_api_tokens/i.test(sql)) return { rows: [{ account_id: "notion:ws-1", label: "claude-code" }] };
       if (/FROM account_workspaces/i.test(sql)) return { rows: [{ workspace: "ws-1" }] };
       return { rows: [] };
     },
   } as never);
   const r = await resolveBearer("acct_deadbeef");
-  assert.deepEqual(r, { accountId: "notion:ws-1", workspaces: ["ws-1"] });
+  assert.deepEqual(r, { accountId: "notion:ws-1", workspaces: ["ws-1"], label: "claude-code" });
 });
 
 test("resolveBearer fast-rejects non-account tokens without a DB hit", async () => {

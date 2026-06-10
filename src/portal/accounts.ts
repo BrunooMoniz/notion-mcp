@@ -115,3 +115,16 @@ export async function getAccountEmail(accountId: string): Promise<string | null>
   );
   return rows[0]?.email ?? null;
 }
+
+/** The account's creation date (ISO-8601), or null. 002-app-v2: "membro desde"
+ *  on the Conta view (/portal/me.created_at). */
+export async function getAccountCreatedAt(accountId: string): Promise<string | null> {
+  const p = getPool();
+  const { rows } = await p.query<{ created_at: Date | string | null }>(
+    `SELECT created_at FROM account WHERE id=$1`,
+    [accountId],
+  );
+  const v = rows[0]?.created_at ?? null;
+  if (v == null) return null;
+  return v instanceof Date ? v.toISOString() : String(v);
+}

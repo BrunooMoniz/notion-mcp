@@ -340,6 +340,7 @@ app.use("/mcp", async (req, res, next) => {
         scopes: ws as unknown as RequestContext["scopes"],
         accountId: info.accountId,
         ip,
+        tokenLabel: "Claude.ai", // 002-app-v2: ai_search_log client
       };
     } else {
       // No accountId: operator OR a legacy/ambiguous token. Owner is decided by a
@@ -351,6 +352,7 @@ app.use("/mcp", async (req, res, next) => {
         clientId: info.client_id,
         ip,
         isOperator: isOperatorToken(info, ALL_WORKSPACES),
+        tokenLabel: "Claude.ai", // 002-app-v2: ai_search_log client
       };
     }
     requestContext.run(ctx, () => next());
@@ -369,6 +371,9 @@ app.use("/mcp", async (req, res, next) => {
       scopes: acct.workspaces as unknown as RequestContext["scopes"],
       accountId: acct.accountId,
       ip,
+      // 002-app-v2: ai_search_log client — the label given at issue time, or a
+      // generic "Assistente" for unlabeled tokens.
+      tokenLabel: acct.label ?? "Assistente",
     };
     requestContext.run(ctx, () => next());
     return;

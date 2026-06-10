@@ -12,8 +12,9 @@ import {
 } from "./rerank.js";
 import type { Chunk, SearchFilters, SearchHit, SearchMode, Workspace } from "./types.js";
 import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedWorkspaces.js";
-import { getAccountId } from "../context.js";
+import { getAccountId, getContext } from "../context.js";
 import { recordUsage } from "./usage.js";
+import { recordSearchEvent } from "./search-log.js";
 import { assertSearchWithinLimit, assertCreditsWithinLimit } from "../billing/usage.js";
 import { applyFinalScore, getUtilityAlpha, computeEffectiveUtility } from "./utility.js";
 
@@ -422,6 +423,16 @@ export async function brainSearch(
   // ranking/diversification so it can only reorder within the already-diversified
   // topK set, not expand it. Zero cost when RECENCY_BOOST=0 or unset.
   hits = applyRecencyBoost(hits);
+
+  // 002-app-v2 — AI search transparency log. Companion to the recordUsage
+  // metering above, but appended AFTER the hits are computed so the row carries
+  // the real result count. Only in-request searches are logged (cron/eval have
+  // no RequestContext); best-effort — recordSearchEvent swallows every error,
+  // so the search can never fail because of the log.
+  const ctx = getContext();
+  if (ctx) {
+    await recordSearchEvent(accountId, query, hits.length, ctx.tokenLabel);
+  }
 
   if (opts.includeNeighbors) {
     for (const hit of hits) {

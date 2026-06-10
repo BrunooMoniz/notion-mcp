@@ -7,11 +7,13 @@
 // dev server without booting clients.ts.
 import express from "express";
 import rateLimit from "express-rate-limit";
+import type { Workspace } from "../clients.js"; // type-only: erased at runtime
 import { randomUUID, randomBytes } from "node:crypto";
 import {
   createSession,
   resolveSession,
   destroySession,
+  hashSession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
 } from "./session.js";
@@ -24,6 +26,7 @@ import {
   redeemInviteAndCreateAccount,
   generateFriendAccountId,
   getAccountEmail,
+  getAccountCreatedAt,
   hasNotionWorkspace,
   normalizeEmail,
   isLikelyEmail,
@@ -181,7 +184,9 @@ export function createPortalRouter(): express.Router {
       res.redirect("/?error=link");
       return;
     }
-    const sid = await createSession(accountId);
+    // 002-app-v2: keep the sign-in browser's User-Agent so "Sessões ativas" is
+    // recognizable (truncated inside createSession).
+    const sid = await createSession(accountId, new Date(), SESSION_TTL_MS, req.get("user-agent"));
     setSessionCookie(req, res, sid);
     res.redirect("/app.html");
   });
@@ -207,9 +212,10 @@ export function createPortalRouter(): express.Router {
 
   router.get("/portal/me", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
-    const out: any = { account_id: accountId, email: null, sources: {}, mcp: { url: `${MCP_BASE}/mcp`, configured: false } };
+    const out: any = { account_id: accountId, email: null, created_at: null, sources: {}, mcp: { url: `${MCP_BASE}/mcp`, configured: false } };
     try {
       out.email = await getAccountEmail(accountId);
+      out.created_at = await getAccountCreatedAt(accountId); // 002-app-v2: "membro desde"
       out.sources = await sourcesSummary(accountId);
       out.mcp.configured = await accountHasBearer(accountId);
     } catch (err: any) {
@@ -943,6 +949,108 @@ export function createPortalRouter(): express.Router {
     }
     const { revokeMcpToken } = await import("./mcp-tokens.js");
     const ok = await revokeMcpToken(res.locals.accountId, id);
+    res.sendStatus(ok ? 204 : 404);
+  });
+
+  // --- 002-app-v2: app v2 cards + session management -------------------------
+  // All behind requireSession; account_id ALWAYS from the session, never input.
+
+  // GET /portal/ai-searches — "O que sua IA buscou": last 7 days, max 50, desc.
+  router.get("/portal/ai-searches", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { listSearchEvents } = await import("../rag/search-log.js");
+      res.json({ searches: await listSearchEvents(accountId, { days: 7, limit: 50 }) });
+    } catch (err: any) {
+      console.warn(`[portal] ai-searches unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "histórico indisponível", searches: [] });
+    }
+  });
+
+  // GET /portal/week — "Sua semana": 7-day window over the account's brain.
+  router.get("/portal/week", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { getWeekSummary } = await import("./week.js");
+      res.json(await getWeekSummary(accountId));
+    } catch (err: any) {
+      console.warn(`[portal] week unavailable: ${err?.message ?? err}`);
+      res.status(503).json({ error: "resumo indisponível", documents: 0, meetings: 0, by_source: [], recent: [] });
+    }
+  });
+
+  // GET /portal/next-meeting — next FUTURE calendar event from indexed chunks.
+  router.get("/portal/next-meeting", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { getNextMeeting } = await import("./next-meeting.js");
+      res.json(await getNextMeeting(accountId));
+    } catch (err: any) {
+      console.warn(`[portal] next-meeting unavailable: ${err?.message ?? err}`);
+      res.json({ found: false });
+    }
+  });
+
+  // POST /portal/index-web {url} — index a pasted URL into the account's brain.
+  // Same core path (URL fetch + SSRF guard + index_pages quota) as the
+  // brain_index_web MCP tool, with the SESSION account passed explicitly.
+  // Rate-limited per account like /portal/ask (own window — indexing pages must
+  // not consume the chat budget).
+  const indexWebLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req, res) => (res as any).locals?.accountId ?? req.ip ?? "anon",
+    validate: { keyGeneratorIpFallback: false },
+    message: { error: "Too many requests, try again later" },
+    skip: () => false,
+  });
+  router.post("/portal/index-web", requireSession, indexWebLimiter, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const { parseHttpUrl } = await import("./index-web.js");
+    const url = parseHttpUrl(req.body?.url);
+    if (!url) {
+      res.status(400).json({ error: "invalid_url", message: "Cole uma URL http(s) válida." });
+      return;
+    }
+    try {
+      const { indexWebForAccount } = await import("../rag/brain-index-web-tool.js");
+      // Tag the page with the account's first workspace (same default the MCP
+      // tool applies for a friend token) so their scoped bearer can read it.
+      const { accountWorkspaces } = await import("../account-bearer.js");
+      const ws = await accountWorkspaces(accountId).catch(() => [] as string[]);
+      const workspaceTag = (ws[0] ?? "personal") as Workspace;
+      const out = await indexWebForAccount(accountId, url, workspaceTag);
+      res.json({ ok: true, title: out.title ?? undefined });
+    } catch (err: any) {
+      if (err instanceof QuotaExceededError) {
+        res.status(402).json({ error: "quota", message: err.message });
+        return;
+      }
+      console.warn(`[portal] index-web ${accountId}: ${err?.message ?? err}`);
+      res.status(422).json({ error: "index_failed", message: "Não consegui indexar essa página agora." });
+    }
+  });
+
+  // GET /portal/sessions — active sessions for the account (id = session_hash).
+  router.get("/portal/sessions", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const sid = readCookie(req, SESSION_COOKIE);
+    const { listSessions } = await import("./sessions.js");
+    res.json({ sessions: await listSessions(accountId, sid ? hashSession(sid) : "") });
+  });
+
+  // POST /portal/sessions/revoke {id} — 204; 404 if not this account's session.
+  // Revoking the CURRENT session is allowed (front redirects to login).
+  router.post("/portal/sessions/revoke", requireSession, async (req, res) => {
+    const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+    if (!id) {
+      res.status(400).json({ error: "id obrigatório" });
+      return;
+    }
+    const { revokeSession } = await import("./sessions.js");
+    const ok = await revokeSession(res.locals.accountId, id);
     res.sendStatus(ok ? 204 : 404);
   });
 

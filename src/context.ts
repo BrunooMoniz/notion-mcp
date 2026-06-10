@@ -21,6 +21,13 @@ export interface RequestContext {
    * is fail-open: a friend token without accountId would inherit the owner tools).
    */
   isOperator?: boolean;
+  /**
+   * 002-app-v2 — human label of the credential behind this request, used as the
+   * `client` column of ai_search_log ("O que sua IA buscou"). Set by the auth
+   * layer: account bearer → its token label (or "Assistente"); OAuth →
+   * "Claude.ai"; /portal/ask → "Consultar". Absent out of request (cron/eval).
+   */
+  tokenLabel?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();
