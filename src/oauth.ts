@@ -26,6 +26,7 @@ import {
   isRegistrationOpen,
   openRegistrationWindow,
   closeRegistrationWindow,
+  getWindowAccountId,
 } from "./oauth-registration-window.js";
 
 // Re-export so existing importers of `isRegistrationOpen` from this module keep
@@ -469,7 +470,35 @@ function renderFriendConsent(clientLabel: string, p: OAuthParams, csrf: string, 
       ${hiddenParams(p)}
       <input type="hidden" name="_csrf" value="${csrf}">
       <button type="submit">Autorizar</button>
-    </form>`);
+    </form>
+    <p style="margin-top:18px;font-size:13px;color:#888;text-align:center">
+      Não é você? <a href="/portal/logout" style="color:#888">Trocar de conta</a>
+    </p>`);
+}
+
+/** Shown when the browser session belongs to a different account than the one
+ *  that opened the connection window. Prevents silent wrong-account consent. */
+function renderWindowMismatch(
+  clientLabel: string,
+  windowEmail: string,
+  sessionEmail: string,
+): string {
+  return authShell("Conta errada — Zinom", `
+    <h1>Conta diferente</h1>
+    <p class="subtitle">
+      Você abriu a conexão para <strong>${escapeHtml(windowEmail)}</strong>,
+      mas está logado como <strong>${escapeHtml(sessionEmail)}</strong>.
+    </p>
+    <p class="err">
+      Saia e entre com a conta certa para conectar o
+      <span class="client-name">${escapeHtml(clientLabel)}</span>.
+    </p>
+    <a href="/portal/logout" style="display:inline-block;margin-top:8px;text-decoration:none">
+      <button type="button">Sair (fazer logout)</button>
+    </a>
+    <p style="margin-top:14px;font-size:13px;color:#888">
+      Ou <a href="/login.html" style="color:#888">entre com outra conta</a>.
+    </p>`);
 }
 
 // --- Token lookup ---
@@ -721,6 +750,16 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     // Friend already signed into the portal in this browser → straight to consent.
     const accountId = await resolveSession(readCookie(req, SESSION_COOKIE)).catch(() => null);
     if (accountId) {
+      // Binding guard: if the window was opened for a different account, show a warning.
+      const windowAccountId = getWindowAccountId();
+      if (windowAccountId && windowAccountId !== accountId) {
+        const windowEmail = (await getAccountEmail(windowAccountId).catch(() => null)) ?? windowAccountId;
+        const sessionEmail = (await getAccountEmail(accountId).catch(() => null)) ?? accountId;
+        res.header("Content-Security-Policy", csp).type("html").send(
+          renderWindowMismatch(clientLabel, windowEmail, sessionEmail),
+        );
+        return;
+      }
       const email = (await getAccountEmail(accountId).catch(() => null)) ?? "sua conta";
       res.header("Content-Security-Policy", csp).type("html").send(renderFriendConsent(clientLabel, p, csrf, email));
       return;
@@ -731,6 +770,12 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
   // Issue a FRIEND (per-account) auth code and redirect back to the client.
   // Re-validates the client + redirect_uri (never trusts hidden form fields).
   const issueFriendAuthCode = async (res: any, p: OAuthParams, accountId: string): Promise<void> => {
+    // Hard binding guard: if the window was opened for a different account, refuse.
+    const windowAccountId = getWindowAccountId();
+    if (windowAccountId && windowAccountId !== accountId) {
+      res.status(403).json({ error: "conta_divergente", error_description: "A janela de conexão foi aberta por outra conta." });
+      return;
+    }
     const client = clients.get(p.client_id);
     if (!client || !p.redirect_uri || !client.redirect_uris.includes(p.redirect_uri)) {
       res.status(400).json({ error: "invalid_redirect_uri" });
@@ -836,6 +881,16 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       const accountId = await resolveSession(readCookie(req, SESSION_COOKIE)).catch(() => null);
       if (!accountId) {
         res.header("Content-Security-Policy", csp).type("html").send(renderFriendEmail(clientLabel, p, newCsrf(), "Sessão expirada. Entre com seu e-mail."));
+        return;
+      }
+      // Binding guard: if the window was opened for a different account, refuse.
+      const windowAccountId = getWindowAccountId();
+      if (windowAccountId && windowAccountId !== accountId) {
+        const windowEmail = (await getAccountEmail(windowAccountId).catch(() => null)) ?? windowAccountId;
+        const sessionEmail = (await getAccountEmail(accountId).catch(() => null)) ?? accountId;
+        res.header("Content-Security-Policy", csp).type("html").send(
+          renderWindowMismatch(clientLabel, windowEmail, sessionEmail),
+        );
         return;
       }
       await issueFriendAuthCode(res, p, accountId);

@@ -2345,3 +2345,59 @@ document.addEventListener('visibilitychange', function () {
 
 document.addEventListener('DOMContentLoaded', init);
 if (document.readyState !== 'loading') init();
+
+/* ---- Exclusão de conta (Zona de perigo) ---- */
+(function () {
+  var deleteBtn = document.getElementById('delete-account-btn');
+  var dialog = document.getElementById('delete-account-dialog');
+  var cancelBtn = document.getElementById('delete-cancel-btn');
+  var confirmInput = document.getElementById('delete-confirm-input');
+  var confirmBtn = document.getElementById('delete-confirm-btn');
+  var errorMsg = document.getElementById('delete-error-msg');
+
+  if (!deleteBtn || !dialog) return;
+
+  deleteBtn.addEventListener('click', function () {
+    confirmInput.value = '';
+    confirmBtn.disabled = true;
+    errorMsg.textContent = '';
+    dialog.showModal();
+    confirmInput.focus();
+  });
+
+  cancelBtn.addEventListener('click', function () {
+    dialog.close();
+  });
+
+  confirmInput.addEventListener('input', function () {
+    confirmBtn.disabled = confirmInput.value !== 'EXCLUIR';
+  });
+
+  confirmBtn.addEventListener('click', async function () {
+    if (confirmInput.value !== 'EXCLUIR') return;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Excluindo…';
+    errorMsg.textContent = '';
+    try {
+      var r = await apiJSON('/portal/delete-account', 'POST', { confirm: 'EXCLUIR' });
+      if (r.ok) {
+        dialog.close();
+        window.location.href = '/?deleted=1';
+      } else {
+        var body = await r.json().catch(function () { return {}; });
+        errorMsg.textContent = body.error || 'Erro ao excluir conta. Tente novamente.';
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Excluir permanentemente';
+      }
+    } catch (e) {
+      errorMsg.textContent = 'Erro de rede. Tente novamente.';
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Excluir permanentemente';
+    }
+  });
+
+  // Close dialog on backdrop click
+  dialog.addEventListener('click', function (e) {
+    if (e.target === dialog) dialog.close();
+  });
+})();
