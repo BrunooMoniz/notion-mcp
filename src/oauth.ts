@@ -376,30 +376,256 @@ function recordIssue(email: string): void {
   codeIssue.set(email, e);
 }
 
-const AUTH_CSS = `* { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-  .card { background: #16213e; border-radius: 12px; padding: 36px; max-width: 460px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-  h1 { font-size: 1.35em; margin-bottom: 8px; color: #fff; }
-  .subtitle { color: #9aa; margin-bottom: 20px; font-size: 0.92em; }
-  .client-name { color: #64b5f6; font-weight: 600; }
-  label { display: block; margin-bottom: 6px; font-size: 0.88em; color: #aaa; }
-  input[type=email], input[type=text], input[type=password] { width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #333; background: #1a1a2e; color: #fff; font-size: 1em; margin-bottom: 14px; }
-  input[name=code] { letter-spacing: 6px; font-size: 1.4em; text-align: center; }
-  button { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 1em; cursor: pointer; font-weight: 600; background: #4caf50; color: #fff; }
-  button:hover { background: #43a047; }
-  .err { color: #ef5350; font-size: 0.85em; margin: 6px 0; }
-  .perm { background: #0f3460; border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 0.88em; color: #cdd; }
-  details { margin-top: 18px; border-top: 1px solid #2a3a5a; padding-top: 12px; }
-  summary { cursor: pointer; color: #9aa; font-size: 0.85em; }
-  .scopes { background: #0f3460; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
-  label.scope { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.95em; cursor: pointer; }
-  label.scope span { font-family: ui-monospace, monospace; color: #e0e0e0; }`;
+// CSP for OAuth consent screens: allows the Geist font CDN for style-src and
+// font-src. No other external origins are opened. 'unsafe-inline' was already
+// present (required for the <style> block).
+const OAUTH_CSP =
+  "default-src 'self'; " +
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+  "font-src 'self' https://cdn.jsdelivr.net; " +
+  "img-src 'self' data:; " +
+  "script-src 'none'";
 
-function authShell(title: string, body: string): string {
+const AUTH_CSS = `
+  @import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');
+  :root {
+    --bg: #fff;
+    --paper: #f7f6f3;
+    --ink: #26241f;
+    --ink-soft: #4a4740;
+    --muted: #827d73;
+    --line: #eae7df;
+    --line-2: #e0ddd3;
+    --accent: #1f8b4c;
+    --accent-strong: #15633a;
+    --accent-soft: #ecf5ef;
+    --accent-ring: rgba(31,139,76,.18);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Geist Variable", -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(160deg, var(--accent-soft) 0%, var(--bg) 340px);
+    background-color: var(--bg);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 48px 20px 40px;
+  }
+  .card {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 36px 36px 32px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04);
+  }
+  .brand-mark {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 24px;
+    text-decoration: none;
+  }
+  .brand-mark span {
+    font-weight: 650;
+    font-size: 16px;
+    color: var(--ink);
+    letter-spacing: -.02em;
+  }
+  h1 {
+    font-size: 1.25em;
+    font-weight: 650;
+    margin-bottom: 6px;
+    color: var(--ink);
+    letter-spacing: -.015em;
+  }
+  .subtitle {
+    color: var(--ink-soft);
+    margin-bottom: 20px;
+    font-size: 0.91em;
+    line-height: 1.55;
+  }
+  .client-name { color: var(--accent); font-weight: 600; }
+  label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.85em;
+    font-weight: 520;
+    color: var(--ink-soft);
+  }
+  input[type=email], input[type=text], input[type=password] {
+    width: 100%;
+    padding: 10px 13px;
+    border-radius: 8px;
+    border: 1px solid var(--line-2);
+    background: var(--bg);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 0.975em;
+    margin-bottom: 14px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input[type=email]:focus, input[type=text]:focus, input[type=password]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3.5px var(--accent-ring);
+  }
+  input[name=code] {
+    letter-spacing: 6px;
+    font-size: 1.4em;
+    text-align: center;
+    font-family: "Geist Mono Variable", ui-monospace, monospace;
+  }
+  button {
+    width: 100%;
+    padding: 11px;
+    border-radius: 11px;
+    border: none;
+    font-family: inherit;
+    font-size: 0.975em;
+    cursor: pointer;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    transition: background .15s;
+    letter-spacing: -.01em;
+  }
+  button:hover { background: var(--accent-strong); }
+  .err {
+    color: #b84040;
+    font-size: 0.84em;
+    margin: 4px 0 12px;
+    padding: 8px 12px;
+    background: #fdf3f3;
+    border: 1px solid #f0d0d0;
+    border-radius: 8px;
+  }
+  .perm {
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 15px;
+    margin: 14px 0;
+    font-size: 0.875em;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .perm code {
+    font-family: "Geist Mono Variable", ui-monospace, monospace;
+    font-size: 0.9em;
+    color: var(--accent-strong);
+    background: rgba(31,139,76,.1);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  details {
+    margin-top: 20px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.84em;
+    user-select: none;
+  }
+  .scopes {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0;
+  }
+  label.scope {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+    font-size: 0.93em;
+    cursor: pointer;
+    font-weight: 400;
+    color: var(--ink);
+    margin-bottom: 0;
+  }
+  label.scope span {
+    font-family: "Geist Mono Variable", ui-monospace, monospace;
+    font-size: 0.9em;
+    color: var(--ink-soft);
+  }
+  details label {
+    font-weight: 400;
+    color: var(--ink-soft);
+  }
+  details input[type=password] { margin-top: 6px; }
+  details button {
+    background: var(--ink-soft);
+    margin-top: 4px;
+  }
+  details button:hover { background: var(--ink); }
+  .switch-link {
+    margin-top: 20px;
+    font-size: 12.5px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .switch-link a {
+    color: var(--muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .switch-link a:hover { color: var(--ink-soft); }
+  .warn-card {
+    background: #fff8e6;
+    border: 1px solid #e8d9a0;
+    border-radius: 16px;
+    padding: 36px 36px 32px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  .warn-title {
+    font-size: 1.1em;
+    font-weight: 650;
+    color: #7a5a00;
+    margin-bottom: 8px;
+    letter-spacing: -.01em;
+  }
+  .warn-text { font-size: 0.9em; color: #5a4200; line-height: 1.55; margin-bottom: 14px; }
+  .warn-card button { background: #c8860a; }
+  .warn-card button:hover { background: #a06800; }
+  .err-icon {
+    font-size: 1.8em;
+    margin-bottom: 10px;
+  }
+  .err-title {
+    font-size: 1.1em;
+    font-weight: 650;
+    color: var(--ink);
+    margin-bottom: 6px;
+    letter-spacing: -.01em;
+  }
+  .err-msg { font-size: 0.9em; color: var(--ink-soft); line-height: 1.55; }
+`;
+
+// Zinom logo mark (matches portal/index.html .brand .mark SVG)
+const LOGO_SVG = `<svg width="28" height="28" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+  <rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/>
+  <path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="8" r="1.7" fill="#fff"/>
+  <circle cx="18" cy="8" r="1.7" fill="#fff"/>
+  <circle cx="8" cy="18" r="1.7" fill="#fff"/>
+  <circle cx="18" cy="18" r="1.7" fill="#fff"/>
+</svg>`;
+
+function authShell(title: string, body: string, cardClass = "card"): string {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
-<style>${AUTH_CSS}</style></head><body><div class="card">${body}</div></body></html>`;
+<style>${AUTH_CSS}</style></head><body><div class="${cardClass}">
+<a href="/" class="brand-mark" tabindex="-1">${LOGO_SVG}<span>Zinom</span></a>
+${body}</div></body></html>`;
 }
 
 function hiddenParams(p: OAuthParams): string {
@@ -428,15 +654,15 @@ function operatorFormBody(clientLabel: string, p: OAuthParams, csrf: string): st
 
 function renderFriendEmail(clientLabel: string, p: OAuthParams, csrf: string, err = ""): string {
   return authShell("Conectar — Zinom", `
-    <h1>🧠 Conectar ${escapeHtml(clientLabel)}</h1>
+    <h1>Conectar ${escapeHtml(clientLabel)}</h1>
     <p class="subtitle">Entre com seu e-mail para autorizar o acesso ao <span class="client-name">seu Zinom</span>.</p>
-    ${err ? `<p class="err">${escapeHtml(err)}</p>` : ""}
+    ${err ? `<div class="err">${escapeHtml(err)}</div>` : ""}
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="flow" value="friend_email">
       ${hiddenParams(p)}
       <input type="hidden" name="_csrf" value="${csrf}">
       <label for="email">Seu e-mail</label>
-      <input type="email" id="email" name="email" required placeholder="voce@email.com">
+      <input type="email" id="email" name="email" required placeholder="voce@email.com" autofocus>
       <button type="submit">Enviar código</button>
     </form>
     <details><summary>Sou o operador (senha de admin)</summary>
@@ -448,13 +674,13 @@ function renderFriendCode(clientLabel: string, p: OAuthParams, csrf: string, ema
   return authShell("Código — Zinom", `
     <h1>Digite o código</h1>
     <p class="subtitle">Enviamos um código de 6 dígitos para <span class="client-name">${escapeHtml(email)}</span> (se houver uma conta). Vale 10 minutos.</p>
-    ${msg ? `<p class="err">${escapeHtml(msg)}</p>` : ""}
+    ${msg ? `<div class="err">${escapeHtml(msg)}</div>` : ""}
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="flow" value="friend_code">
       ${hiddenParams(p)}
       <input type="hidden" name="_csrf" value="${csrf}">
       <input type="hidden" name="email" value="${escapeHtml(email)}">
-      <label for="code">Código</label>
+      <label for="code">Código de verificação</label>
       <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autofocus>
       <button type="submit">Verificar</button>
     </form>`);
@@ -471,8 +697,8 @@ function renderFriendConsent(clientLabel: string, p: OAuthParams, csrf: string, 
       <input type="hidden" name="_csrf" value="${csrf}">
       <button type="submit">Autorizar</button>
     </form>
-    <p style="margin-top:18px;font-size:13px;color:#888;text-align:center">
-      Não é você? <a href="/portal/logout" style="color:#888">Trocar de conta</a>
+    <p class="switch-link">
+      Não é você? <a href="/portal/logout">Trocar de conta</a>
     </p>`);
 }
 
@@ -484,21 +710,19 @@ function renderWindowMismatch(
   sessionEmail: string,
 ): string {
   return authShell("Conta errada — Zinom", `
-    <h1>Conta diferente</h1>
-    <p class="subtitle">
+    <p class="warn-title">Conta diferente</p>
+    <p class="warn-text">
       Você abriu a conexão para <strong>${escapeHtml(windowEmail)}</strong>,
       mas está logado como <strong>${escapeHtml(sessionEmail)}</strong>.
-    </p>
-    <p class="err">
       Saia e entre com a conta certa para conectar o
-      <span class="client-name">${escapeHtml(clientLabel)}</span>.
+      <span style="font-weight:600">${escapeHtml(clientLabel)}</span>.
     </p>
-    <a href="/portal/logout" style="display:inline-block;margin-top:8px;text-decoration:none">
-      <button type="button">Sair (fazer logout)</button>
+    <a href="/portal/logout" style="display:block;text-decoration:none">
+      <button type="button">Sair e trocar de conta</button>
     </a>
-    <p style="margin-top:14px;font-size:13px;color:#888">
-      Ou <a href="/login.html" style="color:#888">entre com outra conta</a>.
-    </p>`);
+    <p class="switch-link" style="margin-top:14px">
+      Ou <a href="/login.html">entre com outra conta</a>.
+    </p>`, "warn-card");
 }
 
 // --- Token lookup ---
@@ -745,7 +969,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     const csrf = generateToken();
     csrfTokens.set(csrf, Date.now() + CSRF_TTL_MS);
     const clientLabel = client.client_name || client_id;
-    const csp = "default-src 'self'; style-src 'unsafe-inline'";
+    const csp = OAUTH_CSP;
 
     // Friend already signed into the portal in this browser → straight to consent.
     const accountId = await resolveSession(readCookie(req, SESSION_COOKIE)).catch(() => null);
@@ -815,7 +1039,7 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
       state: state || "",
     };
     const ip = req.ip || req.socket.remoteAddress || "unknown";
-    const csp = "default-src 'self'; style-src 'unsafe-inline'";
+    const csp = OAUTH_CSP;
     const newCsrf = () => {
       const c = generateToken();
       csrfTokens.set(c, Date.now() + CSRF_TTL_MS);
@@ -900,20 +1124,24 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     // OPERATOR — admin password + workspace scopes (unchanged behavior).
     if (isBlocked(ip)) {
       console.warn(`[${new Date().toISOString()}] OAuth: blocked login attempt from ${ip} (too many failures)`);
-      res.status(429).type("html").send(`<!DOCTYPE html>
-<html><head><title>Blocked</title>
-<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
-</head><body><h2>Too many failed attempts. Try again in 5 minutes.</h2></body></html>`);
+      res.status(429).header("Content-Security-Policy", csp).type("html").send(
+        authShell("Bloqueado — Zinom", `
+          <div class="err-icon">&#x26A0;&#xFE0F;</div>
+          <p class="err-title">Muitas tentativas</p>
+          <p class="err-msg">Acesso temporariamente bloqueado. Tente novamente em 5 minutos.</p>`),
+      );
       return;
     }
     const { password, scope } = req.body;
     if (!password || typeof password !== "string" || !verifyPassword(password)) {
       recordFailedAttempt(ip);
       console.warn(`[${new Date().toISOString()}] OAuth: failed password attempt from ${ip}`);
-      res.status(403).type("html").send(`<!DOCTYPE html>
-<html><head><title>Error</title>
-<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
-</head><body><h2>Invalid password. Close this tab and try again.</h2></body></html>`);
+      res.status(403).header("Content-Security-Policy", csp).type("html").send(
+        authShell("Senha inválida — Zinom", `
+          <div class="err-icon">&#x1F512;</div>
+          <p class="err-title">Senha inválida</p>
+          <p class="err-msg">Senha incorreta. Feche esta aba e tente novamente.</p>`),
+      );
       return;
     }
     clearFailedAttempts(ip);
@@ -928,10 +1156,12 @@ export function createOAuthRouter(baseUrl: string, bearerToken?: string): Router
     }
     const scopes = normalizeWorkspaces(scope);
     if (scopes.length === 0) {
-      res.status(400).type("html").send(`<!DOCTYPE html>
-<html><head><title>No scope selected</title>
-<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a2e;color:#ef5350;}</style>
-</head><body><h2>Select at least one workspace to authorize.</h2></body></html>`);
+      res.status(400).header("Content-Security-Policy", csp).type("html").send(
+        authShell("Nenhum escopo — Zinom", `
+          <div class="err-icon">&#x26A0;&#xFE0F;</div>
+          <p class="err-title">Nenhum workspace selecionado</p>
+          <p class="err-msg">Selecione ao menos um workspace para autorizar.</p>`),
+      );
       return;
     }
     const code = generateToken();
