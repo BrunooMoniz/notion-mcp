@@ -77,6 +77,128 @@ export interface CostEstimate {
 }
 
 // ---------------------------------------------------------------------------
+// LLM cost estimation (F2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for LLM cost estimation.
+ * Tokens are raw counts read from usage_log metrics
+ * llm_input_tokens / llm_output_tokens.
+ */
+export interface LlmUsageInput {
+  llm_input_tokens: number;
+  llm_output_tokens: number;
+}
+
+/**
+ * Env vars for LLM cost estimation (injected for testability).
+ *
+ * Defaults (when env vars absent):
+ *   COST_LLM_IN_PER_MTOK  = 1.00   (Claude Haiku 4.5 input, USD/MTok)
+ *   COST_LLM_OUT_PER_MTOK = 5.00   (Claude Haiku 4.5 output, USD/MTok)
+ *
+ * Source: https://platform.claude.com/docs/en/docs/about-claude/models/overview
+ * Fetched: 2026-06-09
+ * Model in use: claude-haiku-4-5-20251001 (see src/classifier/anthropic.ts and
+ * src/portal/ask.ts for CLASSIFIER_MODEL / ASK_MODEL env vars).
+ */
+export interface LlmCostEnv {
+  COST_LLM_IN_PER_MTOK?: string;
+  COST_LLM_OUT_PER_MTOK?: string;
+}
+
+/** Default prices for Claude Haiku 4.5 (USD per million tokens). */
+export const DEFAULT_LLM_IN_PER_MTOK = 1.0;
+export const DEFAULT_LLM_OUT_PER_MTOK = 5.0;
+
+/** Per-account LLM cost estimate. */
+export interface LlmCostEstimate {
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+}
+
+/**
+ * Estimate LLM cost for a single account (current month).
+ * Uses env vars with defaults from Claude Haiku 4.5 pricing.
+ */
+export function estimateLlmCost(usage: LlmUsageInput, env: LlmCostEnv): LlmCostEstimate {
+  const inRate =
+    env.COST_LLM_IN_PER_MTOK !== undefined
+      ? parseFloat(env.COST_LLM_IN_PER_MTOK)
+      : DEFAULT_LLM_IN_PER_MTOK;
+  const outRate =
+    env.COST_LLM_OUT_PER_MTOK !== undefined
+      ? parseFloat(env.COST_LLM_OUT_PER_MTOK)
+      : DEFAULT_LLM_OUT_PER_MTOK;
+
+  const inputCost = (usage.llm_input_tokens / 1_000_000) * inRate;
+  const outputCost = (usage.llm_output_tokens / 1_000_000) * outRate;
+  return { inputCost, outputCost, totalCost: inputCost + outputCost };
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic Admin API cost report (F2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One time bucket from GET /v1/organizations/cost_report.
+ * Source: https://platform.claude.com/docs/en/api/admin/cost_report/retrieve
+ * Fetched: 2026-06-09
+ */
+export interface CostReportBucket {
+  starting_at: string; // RFC 3339
+  ending_at: string;   // RFC 3339
+  results: CostReportResult[];
+}
+
+export interface CostReportResult {
+  amount: string; // decimal string, in lowest currency units (cents)
+  currency: string; // always "USD"
+  cost_type: string | null;
+  model: string | null;
+  token_type: string | null;
+  service_tier: string | null;
+  context_window: string | null;
+  workspace_id: string | null;
+  description: string | null;
+  inference_geo: string | null;
+}
+
+/**
+ * Raw response from GET /v1/organizations/cost_report.
+ */
+export interface CostReportResponse {
+  data: CostReportBucket[];
+  has_more: boolean;
+  next_page: string | null;
+}
+
+/**
+ * Summarised org-level cost for a period: total USD cents summed across all
+ * buckets and result items.
+ */
+export interface OrgCostSummary {
+  totalUsdCents: number;
+  buckets: number;
+}
+
+/**
+ * Sum all `amount` values in a cost report response (USD cents as decimal
+ * strings → total cents as a number). Pure — no I/O.
+ */
+export function summariseCostReport(report: CostReportResponse): OrgCostSummary {
+  let total = 0;
+  for (const bucket of report.data) {
+    for (const result of bucket.results) {
+      const v = parseFloat(result.amount);
+      if (Number.isFinite(v)) total += v;
+    }
+  }
+  return { totalUsdCents: total, buckets: report.data.length };
+}
+
+// ---------------------------------------------------------------------------
 // buildFunnel
 // ---------------------------------------------------------------------------
 
