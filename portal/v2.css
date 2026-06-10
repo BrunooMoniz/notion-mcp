@@ -1,0 +1,168 @@
+/* =====================================================================
+   Zinom v2 — extensões sobre styles.css (mesmos tokens)
+   Novos componentes: painel vivo do Início, saúde do cérebro, feed da IA,
+   receitas, diagnóstico, histórico do Consultar, página Conta.
+   ===================================================================== */
+
+/* ---- alternância de estado (usuário novo vs ativado) ---- */
+body[data-zstate="ativado"] .z-novo { display: none; }
+body[data-zstate="novo"] .z-ativo { display: none; }
+/* antes de derivar o estado, esconde ambos (evita flash do estado errado) */
+body:not([data-zstate]) .z-ativo, body:not([data-zstate]) .z-novo { display: none; }
+
+/* ---- saudação ---- */
+.hello-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: calc(18px * var(--d)); }
+.hello-row h1 { font-size: clamp(22px, 3.4vw, 30px); letter-spacing: -.025em; margin: 4px 0 6px; }
+.hello-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.hello-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+
+/* ---- grid do painel ---- */
+.panel-grid { display: grid; gap: 12px; margin-bottom: 12px; }
+@media (min-width: 880px) { .panel-grid { grid-template-columns: 1fr 1fr; } .panel-grid .span2 { grid-column: span 2; } }
+.panel-grid .card { margin-bottom: 0; }
+
+/* ---- saúde do cérebro ---- */
+.health-top { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.health-ring { position: relative; width: 64px; height: 64px; flex: 0 0 auto; }
+.health-ring svg { transform: rotate(-90deg); display: block; }
+.health-ring .n { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--accent-strong); }
+.health-word { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.health-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.health-list { display: flex; flex-direction: column; gap: 8px; }
+.health-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--bg); font-size: 13px; line-height: 1.45; }
+.health-item.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.health-item .hi { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; font-size: 11px; }
+.health-item.warn .hi { background: var(--warn); color: #fff; }
+.health-item.ok .hi { background: var(--accent-soft); color: var(--accent-strong); }
+.health-item .grow { flex: 1; min-width: 0; }
+.health-item .act { font-family: var(--mono); font-size: 11px; white-space: nowrap; align-self: center; }
+
+/* ---- sua semana ---- */
+.week-nums { display: flex; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
+.week-nums .wn { display: flex; flex-direction: column; }
+.week-nums .wn strong { font-family: var(--mono); font-size: 21px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+.week-nums .wn span { font-size: 11.5px; color: var(--muted); }
+.week-list { display: flex; flex-direction: column; }
+.week-item { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.week-item:last-child { border-bottom: none; }
+.week-item .si { width: 15px; height: 15px; flex: 0 0 auto; display: inline-flex; }
+.week-item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+.week-item .m { font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+
+/* ---- feed: o que sua IA buscou ---- */
+.feed-list { display: flex; flex-direction: column; }
+.feed-row { display: flex; align-items: baseline; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.feed-row:last-child { border-bottom: none; }
+.feed-row .who { font-family: var(--mono); font-size: 11px; color: var(--accent-strong); background: var(--accent-soft); border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
+.feed-row .q { flex: 1; min-width: 0; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-row .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.feed-empty { padding: 18px 4px; font-size: 13px; color: var(--muted); }
+
+/* ---- próxima reunião / receita destacada ---- */
+.next-meeting { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.next-meeting .nm-when { font-family: var(--mono); font-size: 11px; color: var(--accent-strong); background: var(--accent-soft); border: 1px solid #cfe6d8; border-radius: 7px; padding: 6px 10px; text-align: center; line-height: 1.5; white-space: nowrap; }
+.next-meeting .grow { flex: 1; min-width: 180px; }
+.next-meeting .nm-title { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; }
+.next-meeting .nm-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+/* ---- assistentes (chips compactos) ---- */
+.assist-rows { display: flex; flex-direction: column; }
+.assist-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.assist-row:last-child { border-bottom: none; }
+.assist-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.assist-row .dot.idle { background: var(--line-2); }
+.assist-row .nm { font-weight: 560; }
+.assist-row .meta { flex: 1; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.assist-row .link-quiet { font-size: 12px; }
+
+/* ---- onboarding (estado novo) ---- */
+.onb-hero { text-align: left; margin-bottom: calc(18px * var(--d)); }
+.onb-steps { display: flex; flex-direction: column; gap: 0; }
+.onb-step { display: flex; gap: 14px; padding: calc(13px * var(--d)) 2px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.onb-step:last-child { border-bottom: none; }
+.onb-step .num { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; border: 1.6px solid var(--line-2); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 1px; }
+.onb-step.done .num { background: var(--accent); border-color: var(--accent); color: #fff; }
+.onb-step.now .num { border-color: var(--accent); color: var(--accent-strong); }
+.onb-step .grow { flex: 1; min-width: 0; }
+.onb-step .st { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; }
+.onb-step.done .st { color: var(--muted); font-weight: 500; }
+.onb-step .sd { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.onb-step .cta { margin-top: 9px; }
+
+/* ---- receitas (Guia) ---- */
+.recipe-grid { display: grid; gap: 12px; }
+@media (min-width: 880px) { .recipe-grid { grid-template-columns: 1fr 1fr; } }
+.recipe-card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; display: flex; flex-direction: column; gap: 9px; }
+.recipe-card.locked { opacity: .72; }
+.recipe-card h3 { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; margin: 0; }
+.recipe-card .rc-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0; }
+.recipe-card .code-block { margin-top: 2px; white-space: pre-wrap; }
+.recipe-head { display: flex; align-items: center; gap: 8px; }
+.recipe-head .tag { font-size: 10.5px; }
+.recipe-lock { font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 6px; }
+
+/* ---- diagnóstico ---- */
+.diag-list { display: flex; flex-direction: column; margin-top: 12px; }
+.diag-row { display: flex; align-items: center; gap: 11px; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.diag-row:last-child { border-bottom: none; }
+.diag-row .ds { flex: 0 0 auto; width: 19px; height: 19px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; border: 1.6px solid var(--line-2); color: transparent; }
+.diag-row.pend .ds { border-color: var(--line-2); }
+.diag-row.run .ds { border-color: var(--accent); border-top-color: transparent; animation: rot .7s linear infinite; }
+.diag-row.ok .ds { background: var(--accent); border-color: var(--accent); color: #fff; }
+.diag-row.warn .ds { background: var(--warn); border-color: var(--warn); color: #fff; }
+.diag-row .grow { flex: 1; min-width: 0; }
+.diag-row .dm { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.diag-row.pend, .diag-row.pend .dm { color: var(--muted); }
+@keyframes rot { to { transform: rotate(360deg); } }
+
+/* ---- troubleshooting (accordion) ---- */
+.faq { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); margin-bottom: 9px; }
+.faq summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 13px 16px; font-size: 14px; font-weight: 560; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary .chev { margin-left: auto; color: var(--muted); transition: transform .18s; flex: 0 0 auto; }
+.faq[open] summary .chev { transform: rotate(180deg); }
+.faq .faq-body { padding: 0 16px 14px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+.faq .faq-body ol { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; }
+.faq .faq-body code { font-family: var(--mono); font-size: 12px; background: var(--paper-2); border-radius: 5px; padding: 1px 5px; }
+
+/* ---- Consultar: histórico ---- */
+.consult-layout { display: flex; gap: 18px; align-items: flex-start; }
+.conv-rail { display: none; }
+@media (min-width: 980px) { .conv-rail { display: flex; flex-direction: column; gap: 4px; flex: 0 0 215px; position: sticky; top: 24px; } }
+.conv-rail .rail-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 0 10px 6px; }
+.conv-item { text-align: left; background: none; border: none; cursor: pointer; padding: 8px 10px; border-radius: var(--r-xs); font-size: 13px; color: var(--ink-soft); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background .12s; }
+.conv-item:hover { background: var(--paper); }
+.conv-item.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 560; }
+.conv-item .cm { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); font-weight: 400; }
+.conv-new { margin: 0 0 8px; }
+.consult-main { flex: 1; min-width: 0; }
+
+/* ---- captura de URL ---- */
+.capture-card { display: flex; align-items: center; gap: 12px; background: var(--accent-soft); border: 1px solid #cfe6d8; border-radius: var(--r-sm); padding: 12px 15px; font-size: 13.5px; margin: 8px 0; }
+.capture-card .si { width: 17px; height: 17px; color: var(--accent-strong); flex: 0 0 auto; }
+.capture-card .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-card.err { background: var(--warn-soft); border-color: var(--warn-line); }
+.capture-card.err .si { color: var(--warn); }
+
+/* ---- Conta ---- */
+.kv-rows { display: flex; flex-direction: column; }
+.kv-row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.kv-row:last-child { border-bottom: none; }
+.kv-row .k { flex: 0 0 150px; color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; }
+.kv-row .k .si { width: 15px; height: 15px; flex: 0 0 auto; display: inline-flex; }
+.kv-row .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-row .link-quiet { font-size: 12px; }
+
+/* ---- divisor de nav ---- */
+.nav-sep { height: 1px; background: var(--line); margin: 8px 12px; }
+
+/* ---- empty teaser (estado novo) ---- */
+.teaser { border-style: dashed; }
+.teaser .card-sub { max-width: 52ch; }
+
+/* ajustes finos */
+.card-foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.link-quiet { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
+.link-quiet:hover { color: var(--ink); }
+.guia-eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 26px 0 10px; }
+.guia-eyebrow:first-child { margin-top: 0; }

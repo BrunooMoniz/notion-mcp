@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin="anonymous">
 <link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/v2.css">
 </head>
 <body data-density="confortavel">
 <div class="shell">
@@ -32,13 +33,18 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Atividade
       </button>
-      <button class="nav-item" data-nav="chat" type="button">
+      <button class="nav-item" data-nav="consultar" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.6a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.7-.8L3 20l1-5a8 8 0 0 1-.9-3.6A8.4 8.4 0 0 1 11.6 3a8.4 8.4 0 0 1 9.4 8.6z" stroke-linejoin="round"/></svg>
-        Chat de teste
+        Consultar
       </button>
       <button class="nav-item" data-nav="guia" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke-linejoin="round"/></svg>
         Guia
+      </button>
+      <div class="nav-sep" role="separator"></div>
+      <button class="nav-item" data-nav="conta" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.4 3.6-5.2 7-5.2s6.2 1.8 7 5.2" stroke-linecap="round"/></svg>
+        Conta
       </button>
       <a class="nav-item" href="/plano.html">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13.5" rx="3"/><path d="M3 10h18M7 15h4" stroke-linecap="round"/></svg>
@@ -65,269 +71,131 @@
   <!-- ===================== CONTEÚDO ===================== -->
   <main class="main" id="main">
 
-    <!-- ============ INÍCIO (herói: cérebro + MCP) ============ -->
+    <!-- ============ INÍCIO ============ -->
     <section class="view active" id="view-inicio" data-screen-label="Início">
       <div class="view-inner">
-        <div class="page-head">
-          <p class="eyebrow">meu cérebro</p>
-          <h1>Seu cérebro, plugado nas suas IAs</h1>
-          <p class="lead">O Zinom indexa suas fontes e entrega esse contexto ao Claude, ao ChatGPT e a qualquer assistente — sempre citando o dado original.</p>
-        </div>
 
-        <details class="activation" id="activation" open>
-          <summary>
-            <span id="activation-logo" aria-hidden="true"></span>
-            Ative seu Zinom
-            <span class="prog" id="activation-prog">0/4</span>
-            <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </summary>
-          <div class="activation-steps" id="activation-steps"></div>
-        </details>
-
-        <!-- pipeline: fontes → zinom → assistentes -->
-        <div class="pipeline" data-comment-anchor="pipeline">
-          <button class="pl-col" type="button" data-nav="fontes">
-            <span class="pl-k">fontes</span>
-            <span class="pl-icons" id="pl-sources">
-              <span class="pl-icon-notion" style="color:#26241f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 3.5h8.5L19 8v12.5H6z" stroke-linejoin="round"/><path d="M14 3.5V8h4.5" stroke-linejoin="round"/><path d="M9 12.5h7M9 15.8h7" stroke-linecap="round"/></svg></span>
-              <span class="pl-icon-granola" style="color:#a07b13"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4.5v15M16 7v10M20 10v4"/></svg></span>
-              <span class="pl-icon-cal" style="color:#3a6fb0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 9.8h17M8 2.8v4M16 2.8v4" stroke-linecap="round"/></svg></span>
-            </span>
-            <span class="pl-v" id="pl-sources-n">—</span>
-            <span class="pl-sub">Notion · reuniões · agendas · web</span>
-          </button>
-          <span class="pl-arrow" aria-hidden="true"></span>
-          <button class="pl-col hero" type="button" data-nav="atividade">
-            <span class="pl-k">zinom</span>
-            <span id="pl-logo"></span>
-            <span class="pl-v" id="pl-chunks">—</span>
-            <span class="pl-sub" id="pl-sync">trechos pesquisáveis</span>
-          </button>
-          <span class="pl-arrow" aria-hidden="true"></span>
-          <div class="pl-col">
-            <span class="pl-k">assistentes</span>
-            <span class="pl-icons" id="pl-assistants">
-              <span style="color:#7a5f3c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.3 6.7L21 12l-6.7 2.3L12 21l-2.3-6.7L3 12l6.7-2.3z"/></svg></span>
-            </span>
-            <span class="pl-v" id="pl-assistants-n">—</span>
-            <span class="pl-sub">via MCP, com citações</span>
-          </div>
-        </div>
-
-        <!-- conexões ativas -->
-        <div class="card">
-          <div class="card-head">
+        <!-- ····· estado ATIVADO: painel vivo ····· -->
+        <div class="z-ativo">
+          <div class="hello-row">
             <div>
-              <h2 class="card-title">Assistentes conectados <span class="tag mono" id="assistants-tag">0</span></h2>
-              <p class="card-sub">Quem já pode buscar no seu cérebro. Revogue quando quiser.</p>
+              <p class="eyebrow">início</p>
+              <h1 id="hello-title">Seu cérebro está em dia</h1>
+              <span class="hello-status"><span class="dot" id="hello-dot"></span><span id="hello-status-text">—</span></span>
             </div>
+            <button class="btn btn-ghost btn-sm" type="button" data-nav="consultar">Consultar o cérebro →</button>
           </div>
-          <div id="assistant-list"><p class="muted">Nenhum assistente conectado ainda — siga um dos caminhos abaixo.</p></div>
-        </div>
 
-        <!-- ===== CONECTAR SUA IA (guiado) ===== -->
-        <div class="card" id="connect-guided">
-          <div class="card-head">
-            <div>
-              <h2 class="card-title">Conectar sua IA</h2>
-              <p class="card-sub">Escolha seu assistente e siga o passo a passo — leva menos de 5 minutos.</p>
+          <!-- checklist de ativação (aparece enquanto incompleto e não dispensado) -->
+          <details class="activation hidden" id="activation" open>
+            <summary>
+              <span id="activation-logo" aria-hidden="true"></span>
+              Ative seu Zinom
+              <span class="prog" id="activation-prog">0/4</span>
+              <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="activation-steps" id="activation-steps"></div>
+          </details>
+
+          <div class="panel-grid">
+
+            <!-- Saúde do cérebro -->
+            <div class="card" id="card-health">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">Saúde do cérebro</h2>
+                  <p class="card-sub">O que pode estar limitando as respostas da sua IA.</p>
+                </div>
+              </div>
+              <div class="health-top">
+                <div class="health-ring" aria-hidden="true">
+                  <svg width="64" height="64" viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="27" fill="none" stroke="var(--paper-2)" stroke-width="6"></circle>
+                    <circle id="health-ring-fg" cx="32" cy="32" r="27" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round" stroke-dasharray="169.6" stroke-dashoffset="169.6"></circle>
+                  </svg>
+                  <span class="n" id="health-score">—</span>
+                </div>
+                <div>
+                  <div class="health-word" id="health-word">Calculando…</div>
+                  <div class="health-sub" id="health-sub"></div>
+                </div>
+              </div>
+              <div class="health-list" id="health-list"></div>
             </div>
-          </div>
 
-          <!-- Selo de conexão ativa -->
-          <div class="connect-active-badge hidden" id="connect-active-badge">
-            <span class="tag ok">Sua IA já está conectada e usando o cérebro ✓</span>
-          </div>
-
-          <!-- Seletor de assistente (tabs) -->
-          <div class="ai-tabs" role="tablist" aria-label="Escolha seu assistente">
-            <button class="ai-tab active" type="button" role="tab" aria-selected="true" data-ai="claudeai">
-              <span class="ai-tab-icon">✦</span> Claude.ai
-            </button>
-            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="claudecode">
-              <span class="ai-tab-icon">⌨</span> Claude Code
-            </button>
-            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="chatgpt">
-              <span class="ai-tab-icon">💬</span> ChatGPT
-            </button>
-            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="outra">
-              <span class="ai-tab-icon">⚙</span> Outra IA
-            </button>
-          </div>
-
-          <!-- Painel: Claude.ai -->
-          <div class="ai-panel active" id="ai-panel-claudeai" role="tabpanel">
-            <p class="ai-panel-desc">Para quem usa o Claude no navegador ou no app de desktop.</p>
-            <div class="step-list">
-              <div class="step-item">
-                <div class="sc">
-                  Clique em <strong>Liberar conexão</strong> — abre uma janela de 5 minutos para autorizar.
-                  <div class="flex wrap mt-sm">
-                    <button class="btn btn-primary btn-sm" type="button" id="connect-window-btn">Liberar conexão ao Claude.ai (5 min)</button>
-                    <span class="muted" id="connect-window-status"></span>
-                  </div>
+            <!-- Sua semana -->
+            <div class="card" id="card-week">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">Sua semana no cérebro</h2>
+                  <p class="card-sub">O que entrou nos últimos 7 dias.</p>
                 </div>
               </div>
-              <div class="step-item">
-                <div class="sc">
-                  No Claude.ai, vá em <strong>Configurações → Conectores → Adicionar conector personalizado</strong> e cole o endereço do seu Zinom:
-                  <div class="code-block mt-sm" id="endpoint-claudeai">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
-                </div>
-              </div>
-              <div class="step-item">
-                <div class="sc">Autorize com seu e-mail e o código de 6 dígitos exibido na tela do Zinom.</div>
-              </div>
-              <div class="step-item step-item-test">
-                <div class="sc">
-                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
-                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
-                </div>
-              </div>
+              <div class="week-nums" id="week-nums"></div>
+              <div class="week-list" id="week-list"></div>
+              <div class="card-foot"><a href="#atividade" data-nav="atividade">Ver tudo em Atividade →</a></div>
             </div>
-          </div>
 
-          <!-- Painel: Claude Code -->
-          <div class="ai-panel" id="ai-panel-claudecode" role="tabpanel" hidden>
-            <p class="ai-panel-desc">Para quem usa o Claude Code no terminal (ou Cursor / Windsurf).</p>
-            <div class="step-list">
-              <div class="step-item">
-                <div class="sc">
-                  Gere seu token pessoal — ele aparece <strong>uma única vez</strong> (se perder, gere outro):
-                  <div class="flex wrap mt-sm">
-                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn">Gerar token pessoal</button>
-                  </div>
-                  <div id="token-area" class="mt-sm">
-                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
-                  </div>
+            <!-- O que sua IA buscou -->
+            <div class="card span2" id="card-ai-feed">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">O que sua IA buscou <span class="tag mono">últimos 7 dias</span></h2>
+                  <p class="card-sub">Toda busca que seus assistentes fazem no cérebro via MCP aparece aqui — transparência total.</p>
                 </div>
               </div>
-              <div class="step-item">
-                <div class="sc">Cole o comando no terminal (gerado automaticamente após o passo anterior).</div>
-              </div>
-              <div class="step-item step-item-test">
-                <div class="sc">
-                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
-                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
-                </div>
-              </div>
+              <div class="feed-list" id="feed-list"></div>
             </div>
-          </div>
 
-          <!-- Painel: ChatGPT -->
-          <div class="ai-panel" id="ai-panel-chatgpt" role="tabpanel" hidden>
-            <p class="ai-panel-desc">Para quem usa o ChatGPT com suporte a conectores MCP.</p>
-            <div class="step-list">
-              <div class="step-item">
-                <div class="sc">
-                  Gere um token pessoal para autenticar o ChatGPT:
-                  <div class="flex wrap mt-sm">
-                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-chatgpt">Gerar token pessoal</button>
-                  </div>
-                  <div id="token-area-chatgpt" class="mt-sm">
-                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
-                  </div>
+            <!-- Próxima reunião -->
+            <div class="card" id="card-meeting">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">Próxima reunião</h2>
+                  <p class="card-sub">Chegue preparado — o briefing usa tudo que o cérebro sabe.</p>
                 </div>
               </div>
-              <div class="step-item">
-                <div class="sc">
-                  No ChatGPT, vá em <strong>Configurações → Conectores → Adicionar</strong> (o caminho pode variar conforme a versão). Cole o endereço do seu Zinom:
-                  <div class="code-block mt-sm" id="endpoint-chatgpt">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
-                  <p class="muted mt-sm" style="font-size:12.5px">Adicione também o cabeçalho de autenticação: <code>Authorization: Bearer &lt;seu-token&gt;</code></p>
-                </div>
-              </div>
-              <div class="step-item">
-                <div class="sc">
-                  <span class="tag warn" style="font-size:11px">Nota</span> O caminho exato varia conforme a versão do ChatGPT. Procure por "Conectores MCP" ou "Custom connectors" nas configurações.
-                </div>
-              </div>
-              <div class="step-item step-item-test">
-                <div class="sc">
-                  <strong>Teste:</strong> pergunte ao ChatGPT — <em>"O que tem no meu cérebro?"</em>
-                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
-                </div>
-              </div>
+              <div id="next-meeting-body"><p class="muted" style="font-size:13px">carregando…</p></div>
             </div>
-          </div>
 
-          <!-- Painel: Outra IA -->
-          <div class="ai-panel" id="ai-panel-outra" role="tabpanel" hidden>
-            <p class="ai-panel-desc">Qualquer cliente MCP (Cursor, Windsurf, Continue, etc.) funciona com o Zinom.</p>
-            <div class="step-list">
-              <div class="step-item">
-                <div class="sc">
-                  Endereço MCP do seu Zinom:
-                  <div class="code-block mt-sm" id="endpoint-outra">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+            <!-- Assistentes conectados -->
+            <div class="card" id="card-assist">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">Assistentes conectados <span class="tag mono" id="assistants-tag">0</span></h2>
+                  <p class="card-sub">Quem pode buscar no seu cérebro.</p>
                 </div>
+                <button class="btn btn-ghost btn-sm" type="button" data-nav="guia" data-guia="conectar">Conectar outra IA</button>
               </div>
-              <div class="step-item">
-                <div class="sc">
-                  Gere um token pessoal e use-o no cabeçalho <code>Authorization: Bearer &lt;token&gt;</code>:
-                  <div class="flex wrap mt-sm">
-                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-outra">Gerar token pessoal</button>
-                  </div>
-                  <div id="token-area-outra" class="mt-sm">
-                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
-                  </div>
-                </div>
-              </div>
-              <div class="step-item">
-                <div class="sc">Configure o transporte como <code>HTTP streamable</code> (ou <code>SSE</code> para clientes mais antigos). O Zinom suporta o protocolo MCP padrão.</div>
-              </div>
-              <div class="step-item step-item-test">
-                <div class="sc">
-                  <strong>Teste:</strong> pergunte à sua IA — <em>"O que tem no meu cérebro?"</em>
-                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
-                </div>
-              </div>
+              <div class="assist-rows" id="assist-rows"></div>
             </div>
           </div>
         </div>
 
-        <!-- Plano & consumo resumo -->
-        <div class="card" id="billing-card">
-          <div class="card-head">
-            <div>
-              <h2 class="card-title">Plano: <span id="billing-plan" style="font-weight:400">—</span></h2>
-              <p class="muted" id="billing-usage-line"></p>
+        <!-- ····· estado NOVO: onboarding ····· -->
+        <div class="z-novo">
+          <div class="onb-hero">
+            <p class="eyebrow">bem-vindo</p>
+            <h1>Vamos ligar seu segundo cérebro</h1>
+            <p class="lead">Quatro passos, uns 10 minutos. No final, sua IA favorita responde com o contexto das suas notas, reuniões e agenda.</p>
+          </div>
+
+          <div class="card" id="onb-card">
+            <div class="onb-steps" id="onb-steps"></div>
+          </div>
+
+          <div class="panel-grid">
+            <div class="card teaser">
+              <h2 class="card-title">Saúde do cérebro</h2>
+              <p class="card-sub">Assim que você indexar, este painel mostra se tudo está sincronizando — e avisa quando algo limita as respostas da sua IA.</p>
             </div>
-            <a href="/plano.html"><button class="btn btn-ghost btn-sm">Plano &amp; consumo →</button></a>
+            <div class="card teaser">
+              <h2 class="card-title">O que sua IA buscou</h2>
+              <p class="card-sub">Cada busca que seus assistentes fizerem no cérebro aparece aqui, com a pergunta e os trechos usados.</p>
+            </div>
           </div>
         </div>
 
-        <p class="muted" style="text-align:center;padding:4px 0 12px">Quer ver o que seus assistentes encontram? <a href="#chat" data-nav="chat">Teste uma pergunta no chat →</a></p>
-
-        <!-- Zona de perigo -->
-        <div class="card" id="danger-zone" style="border-color:#f5c6c6">
-          <div class="card-head">
-            <div>
-              <h2 class="card-title" style="color:#b3261e">Zona de perigo</h2>
-              <p class="card-sub">Ações irreversíveis relacionadas à sua conta.</p>
-            </div>
-          </div>
-          <p class="muted" style="font-size:13px;margin-bottom:12px">A exclusão apaga sua conta, todas as fontes, o cérebro indexado, sessões e tokens. Esta ação é permanente e não pode ser desfeita.</p>
-          <button class="btn" type="button" id="delete-account-btn" style="background:#fff;color:#b3261e;border-color:#f5c6c6">Excluir minha conta e apagar meu cérebro</button>
-        </div>
-
-        <!-- Dialog de confirmação de exclusão -->
-        <dialog id="delete-account-dialog" style="border:1px solid #f5c6c6;border-radius:16px;padding:28px;max-width:420px;width:92vw">
-          <h2 style="margin:0 0 10px;font-size:18px;color:#b3261e">Excluir conta</h2>
-          <p style="font-size:14px;color:#4a4740;margin:0 0 10px">Esta ação é <strong>irreversível</strong>. Serão apagados:</p>
-          <ul style="font-size:13px;color:#4a4740;margin:0 0 14px;padding-left:20px">
-            <li>Sua conta e e-mail</li>
-            <li>Todo o conteúdo do cérebro (trechos indexados)</li>
-            <li>Tokens de acesso, sessões e links mágicos</li>
-            <li>Fontes (Notion, Granola, iCal, Google)</li>
-            <li>Histórico de uso e eventos de faturamento</li>
-            <li>Assinatura ativa (cancelada no Stripe)</li>
-          </ul>
-          <p style="font-size:14px;margin:0 0 8px">Digite <strong>EXCLUIR</strong> para confirmar:</p>
-          <input type="text" id="delete-confirm-input" placeholder="EXCLUIR" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #e0ddd3;border-radius:10px;font-size:15px;margin-bottom:14px" autocomplete="off">
-          <p id="delete-error-msg" style="color:#b3261e;font-size:13px;min-height:18px;margin:0 0 12px"></p>
-          <div style="display:flex;gap:10px;justify-content:flex-end">
-            <button class="btn btn-ghost" type="button" id="delete-cancel-btn">Cancelar</button>
-            <button class="btn" type="button" id="delete-confirm-btn" style="background:#b3261e;color:#fff;border-color:#b3261e" disabled>Excluir permanentemente</button>
-          </div>
-        </dialog>
       </div>
     </section>
 
@@ -335,13 +203,9 @@
     <section class="view" id="view-fontes" data-screen-label="Fontes">
       <div class="view-inner">
         <div class="page-head">
-          <div class="page-head-row">
-            <div>
-              <p class="eyebrow">fontes <span id="fontes-count"></span></p>
-              <h1>Fontes de conhecimento</h1>
-              <p class="lead">Tudo que o Zinom lê para responder. Conecte, remova e reindexe quando quiser.</p>
-            </div>
-          </div>
+          <p class="eyebrow">fontes <span id="fontes-count"></span></p>
+          <h1>Fontes de conhecimento</h1>
+          <p class="lead">Tudo que o Zinom lê para responder. Conecte, remova e reindexe quando quiser.</p>
         </div>
 
         <div class="notice warn hidden" id="google-unconfigured">Google Calendar ainda não foi configurado pelo operador deste servidor. As agendas continuam funcionando via link iCal, logo abaixo.</div>
@@ -356,7 +220,7 @@
             </div>
             <button class="btn btn-ghost btn-sm" type="button" id="notion-add">Conectar workspace</button>
           </div>
-          <div id="notion-list"></div>
+          <div class="kv-rows" id="notion-list"></div>
           <details class="tutorial">
             <summary>Prefere conectar com um token? (alternativa ao OAuth)</summary>
             <details class="source-help" style="margin-bottom:10px">
@@ -384,19 +248,19 @@
             </div>
             <button class="btn btn-ghost btn-sm" type="button" id="google-add">Conectar conta Google</button>
           </div>
-          <div id="google-list"></div>
+          <div class="kv-rows" id="google-list"></div>
         </div>
 
         <!-- iCal -->
         <div class="card">
           <div class="card-head">
             <div>
-              <h2 class="card-title"><span class="si" data-icon="calendar"></span>Calendários por link (iCal)</h2>
+              <h2 class="card-title"><span class="si" data-icon="calendar"></span>Calendários por link (iCal) <span class="tag" id="ical-tag">0 agendas</span></h2>
               <p class="card-sub">Links secretos, somente leitura. Funcionam com qualquer agenda, sem conta Google.</p>
             </div>
           </div>
-          <div id="ical-list"></div>
-          <details class="source-help" style="margin-bottom:10px">
+          <div class="kv-rows" id="ical-list"></div>
+          <details class="source-help" style="margin:10px 0">
             <summary class="source-help-summary">Onde encontro meu link iCal?</summary>
             <ol class="source-help-steps">
               <li>No Google Calendar (web), passe o mouse sobre a agenda → <strong>Configurações e compartilhamento</strong>.</li>
@@ -424,6 +288,7 @@
               <p class="card-sub">Suas reuniões transcritas entram no cérebro e podem ser citadas nas respostas.</p>
             </div>
           </div>
+          <div class="notice warn hidden" id="granola-notice" style="margin-bottom:10px"></div>
           <div id="granola-state"></div>
           <details class="source-help" style="margin-bottom:10px">
             <summary class="source-help-summary">Onde encontro minha chave do Granola?</summary>
@@ -626,29 +491,41 @@
       </div>
     </section>
 
-    <!-- ============ CHAT (teste do cérebro) ============ -->
-    <section class="view" id="view-chat" data-screen-label="Chat de teste">
-      <div class="view-inner">
-        <div class="chat-stage">
-          <div class="chat-scroll" id="chat-scroll">
-            <div class="chat-empty" id="chat-empty">
-              <div class="mark" id="empty-logo"></div>
-              <h1>Teste seu cérebro</h1>
-              <p class="lead" style="color:var(--muted);font-size:14px;margin-top:8px;max-width:46ch">A mesma busca que seus assistentes usam via MCP — pergunte e veja a resposta com as fontes.</p>
-              <div class="stats" id="empty-stats"></div>
-              <div class="suggestions" id="suggestions"></div>
-            </div>
-            <div class="thread hidden" id="thread"></div>
-          </div>
+    <!-- ============ CONSULTAR ============ -->
+    <section class="view" id="view-consultar" data-screen-label="Consultar">
+      <div class="view-inner wide">
+        <div class="consult-layout">
 
-          <div class="composer-wrap">
-            <div class="composer">
-              <textarea id="composer-input" rows="1" placeholder="Pergunte qualquer coisa sobre suas notas, reuniões e agenda…" aria-label="Sua pergunta"></textarea>
-              <button class="send" id="send-btn" type="button" aria-label="Enviar pergunta">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
+          <!-- histórico (desktop) -->
+          <aside class="conv-rail" aria-label="Conversas anteriores">
+            <button class="btn btn-ghost btn-sm conv-new" type="button" id="conv-new-btn">+ Nova consulta</button>
+            <span class="rail-label">recentes</span>
+            <div id="conv-list"></div>
+          </aside>
+
+          <div class="consult-main">
+            <div class="chat-stage">
+              <div class="chat-scroll" id="chat-scroll">
+                <div class="chat-empty" id="chat-empty">
+                  <div class="mark" id="empty-logo"></div>
+                  <h1>Consultar o cérebro</h1>
+                  <p class="lead" style="color:var(--muted);font-size:14px;margin-top:8px;max-width:48ch">A mesma busca que seus assistentes usam via MCP. Dica: cole uma URL para indexá-la no cérebro.</p>
+                  <div class="stats" id="empty-stats"></div>
+                  <div class="suggestions" id="suggestions"></div>
+                </div>
+                <div class="thread hidden" id="thread"></div>
+              </div>
+
+              <div class="composer-wrap">
+                <div class="composer">
+                  <textarea id="composer-input" rows="1" placeholder="Pergunte qualquer coisa — ou cole uma URL para indexar…" aria-label="Sua pergunta"></textarea>
+                  <button class="send" id="send-btn" type="button" aria-label="Enviar pergunta">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
+                <p class="composer-hint"><kbd>Enter</kbd> envia · <kbd>Shift</kbd>+<kbd>Enter</kbd> quebra linha · respostas sempre citam a fonte</p>
+              </div>
             </div>
-            <p class="composer-hint"><kbd>Enter</kbd> envia · <kbd>Shift</kbd>+<kbd>Enter</kbd> quebra linha · respostas sempre citam a fonte</p>
           </div>
         </div>
       </div>
@@ -658,213 +535,365 @@
     <section class="view" id="view-guia" data-screen-label="Guia">
       <div class="view-inner">
         <div class="page-head">
-          <p class="eyebrow">boas práticas</p>
-          <h1>Guia de uso do Zinom</h1>
-          <p class="lead">Como tirar o máximo do seu segundo cérebro — do setup à rotina diária.</p>
+          <p class="eyebrow">guia</p>
+          <h1>Tire o máximo do seu cérebro</h1>
+          <p class="lead">Receitas prontas para o dia a dia, conexão das suas IAs e soluções para quando algo não funciona.</p>
         </div>
 
-        <!-- Seção 1: Como o Zinom funciona -->
-        <div class="card guia-section" id="guia-s1">
-          <h2 class="card-title">Como o Zinom funciona</h2>
-          <p class="muted">O Zinom é um servidor MCP — ele lê suas fontes (Notion, Granola, agendas, páginas web) e transforma tudo em memória pesquisável. Quando você pede algo no Claude ou no ChatGPT, o assistente consulta esse índice antes de responder. A busca é semântica: você não precisa lembrar a palavra exata. Cada resposta traz a citação da fonte original para você rastrear. O Zinom não gera texto — ele fornece contexto.</p>
-
-          <!-- Diagrama 1: fontes → Zinom → assistentes -->
-          <svg class="guia-diagram" viewBox="0 0 520 130" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: fontes conectam ao Zinom, que conecta aos assistentes">
-            <!-- coluna fontes -->
-            <rect x="2" y="10" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="10" y="27" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">📄 Notion</text>
-            <rect x="2" y="42" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="10" y="59" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">🎙️ Granola</text>
-            <rect x="2" y="74" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="10" y="91" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">📅 Agendas</text>
-            <rect x="2" y="106" width="110" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="10" y="123" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">🌐 Web</text>
-            <!-- setas esquerda → centro -->
-            <line x1="113" y1="23" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
-            <line x1="113" y1="55" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
-            <line x1="113" y1="87" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
-            <line x1="113" y1="119" x2="185" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
-            <!-- nó central Zinom -->
-            <rect x="185" y="38" width="90" height="52" rx="10" fill="var(--accent-soft)" stroke="#cfe6d8" stroke-width="1.4"/>
-            <text x="230" y="62" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">Zinom</text>
-            <text x="230" y="79" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent)">busca + fontes</text>
-            <!-- setas centro → direita -->
-            <line x1="276" y1="55" x2="348" y2="30" stroke="var(--line-2)" stroke-width="1.2"/>
-            <line x1="276" y1="65" x2="348" y2="65" stroke="var(--line-2)" stroke-width="1.2"/>
-            <line x1="276" y1="75" x2="348" y2="100" stroke="var(--line-2)" stroke-width="1.2"/>
-            <!-- coluna assistentes -->
-            <rect x="348" y="16" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="358" y="33" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">✦ Claude.ai</text>
-            <rect x="348" y="52" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="358" y="69" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">⌨ Claude Code</text>
-            <rect x="348" y="88" width="120" height="26" rx="6" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="358" y="105" font-family="var(--mono,monospace)" font-size="10.5" fill="var(--ink-soft)">💬 ChatGPT</text>
-            <!-- pulsos animados -->
-            <circle r="3.5" fill="var(--accent)" opacity="0.85">
-              <animateMotion dur="2s" repeatCount="indefinite" path="M113,23 L185,65"/>
-            </circle>
-            <circle r="3.5" fill="var(--accent)" opacity="0.85">
-              <animateMotion dur="2.4s" repeatCount="indefinite" begin="0.5s" path="M276,65 L348,65"/>
-            </circle>
-          </svg>
-
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver Início →</button></p>
-        </div>
-
-        <!-- Seção 2: Configure suas fontes -->
-        <div class="card guia-section" id="guia-s2">
-          <h2 class="card-title">Configure suas fontes</h2>
-          <p class="muted">Cada fonte que você conecta vira matéria-prima do seu cérebro. O Notion se conecta via OAuth (recomendado — acesso ao workspace inteiro com um clique) ou via Personal Access Token (PAT). Para o Google Calendar, conecte sua conta Google diretamente na aba Fontes. Para calendários sem conta Google (iCal de qualquer serviço), cole o link secreto da agenda. O Granola precisa apenas da chave de API — copie em granola.ai nas configurações.</p>
-
-          <!-- Diagrama 2: passos de configuração -->
-          <svg class="guia-diagram" viewBox="0 0 480 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: passos Notion, Google/iCal, Granola">
-            <!-- Passo Notion -->
-            <rect x="2" y="14" width="130" height="52" rx="8" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="67" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--ink)">📄 Notion</text>
-            <text x="67" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">OAuth ou PAT</text>
-            <!-- seta -->
-            <line x1="134" y1="40" x2="158" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="158,36 166,40 158,44" fill="var(--line-2)"/>
-            <!-- Passo Google/iCal -->
-            <rect x="168" y="14" width="130" height="52" rx="8" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="233" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--ink)">📅 Google / iCal</text>
-            <text x="233" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">conta ou link secreto</text>
-            <!-- seta -->
-            <line x1="300" y1="40" x2="324" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="324,36 332,40 324,44" fill="var(--line-2)"/>
-            <!-- Passo Granola -->
-            <rect x="334" y="14" width="130" height="52" rx="8" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
-            <text x="399" y="36" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="10.5" font-weight="600" fill="var(--accent-strong)">🎙️ Granola</text>
-            <text x="399" y="52" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">chave de API</text>
-          </svg>
-
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Ir para Fontes →</button></p>
-        </div>
-
-        <!-- Seção 3: Use na sua IA favorita -->
-        <div class="card guia-section" id="guia-s3">
-          <h2 class="card-title">Use na sua IA favorita, todo dia</h2>
-          <p class="muted">O Zinom se conecta a qualquer cliente MCP. No <strong>Claude.ai</strong>: clique em "Liberar conexão" na aba Início, depois vá em Configurações → Conectores → Adicionar conector personalizado e cole o endereço MCP — o Claude vai pedir seu e-mail e um código de 6 dígitos para autorizar. No <strong>Claude Code</strong>: rode <code>claude mcp add --transport http zinom &lt;URL&gt;</code> com seu token gerado na aba Início. No <strong>ChatGPT</strong>: adicione como conector MCP nas configurações do GPT.</p>
-
-          <!-- Diagrama 3: fluxo Claude.ai -->
-          <svg class="guia-diagram" viewBox="0 0 480 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: passos para conectar ao Claude.ai">
-            <rect x="2" y="20" width="100" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="52" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Liberar</text>
-            <text x="52" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">conexão</text>
-            <line x1="104" y1="45" x2="124" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="124,41 132,45 124,49" fill="var(--line-2)"/>
-            <rect x="134" y="20" width="110" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="189" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Settings →</text>
-            <text x="189" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Connectors</text>
-            <line x1="246" y1="45" x2="266" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="266,41 274,45 266,49" fill="var(--line-2)"/>
-            <rect x="276" y="20" width="110" height="50" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="331" y="42" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">Colar URL</text>
-            <text x="331" y="56" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">+ autorizar</text>
-            <line x1="388" y1="45" x2="408" y2="45" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="408,41 416,45 408,49" fill="var(--line-2)"/>
-            <rect x="418" y="20" width="60" height="50" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
-            <text x="448" y="48" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent-strong)">✓ Pronto</text>
-          </svg>
-
-          <p class="muted" style="margin-top:12px">Prompts que funcionam bem — clique para copiar:</p>
-          <div class="guia-chips" id="guia-chips-s3">
-            <button class="guia-chip" type="button" data-copy="O que decidimos sobre X?">O que decidimos sobre X?</button>
-            <button class="guia-chip" type="button" data-copy="Prepara meu briefing pra reunião com Y">Prepara meu briefing pra reunião com Y</button>
-            <button class="guia-chip" type="button" data-copy="Cria um evento amanhã 9h sobre Z">Cria um evento amanhã 9h sobre Z</button>
+        <!-- Diagnóstico -->
+        <div class="card" id="diag-card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Verificar minha configuração</h2>
+              <p class="card-sub">Checagem automática de conta, fontes, índice e conexão MCP — em segundos.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" type="button" id="diag-btn">Verificar agora</button>
           </div>
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver Início →</button></p>
+          <div class="diag-list hidden" id="diag-list"></div>
+          <div class="notice warn hidden" id="diag-fix"></div>
         </div>
 
-        <!-- Seção 4: Granola -->
-        <div class="card guia-section" id="guia-s4">
-          <h2 class="card-title">Granola: suas reuniões viram memória</h2>
-          <p class="muted">O <a href="https://granola.ai" target="_blank" rel="noopener">Granola</a> é um app que escuta e transcreve suas reuniões. Funciona tanto em chamadas online (Zoom, Meet, Teams) quanto em conversas presenciais pelo app do celular — basta deixar gravando. Depois de cada reunião o Granola gera um resumo automático. Na próxima sincronização do Zinom esse resumo entra no seu cérebro e fica pesquisável, com data e participantes. Você não precisa fazer nada: conecte a chave da API uma vez e o fluxo é automático.</p>
-
-          <!-- Diagrama 4: reunião → transcript → cérebro -->
-          <svg class="guia-diagram" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: reunião vira transcript no Granola, que entra no cérebro Zinom">
-            <rect x="2" y="18" width="100" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="52" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">🎙️ Reunião</text>
-            <text x="52" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">online / presencial</text>
-            <line x1="104" y1="40" x2="134" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="134,36 142,40 134,44" fill="var(--line-2)"/>
-            <rect x="144" y="18" width="110" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="199" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">📝 Transcript</text>
-            <text x="199" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">Granola auto-resume</text>
-            <line x1="256" y1="40" x2="286" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="286,36 294,40 286,44" fill="var(--line-2)"/>
-            <rect x="296" y="18" width="100" height="44" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
-            <text x="346" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">🧠 Cérebro</text>
-            <text x="346" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">pesquisável</text>
-          </svg>
-
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Conectar Granola →</button></p>
-        </div>
-
-        <!-- Seção 5: Tarefas e blocktime -->
-        <div class="card guia-section" id="guia-s5">
-          <h2 class="card-title">Tarefas e blocktime</h2>
-          <p class="muted">Tenha uma base de Tarefas no Notion — o Zinom detecta ou cria uma para você no checklist de ativação. Com as tarefas indexadas, você pode pedir ao assistente para alocar tempo no seu calendário de forma conversacional. O assistente lê suas tarefas pendentes, vê os buracos na agenda e cria os eventos. Isso fecha o ciclo: do registro de uma decisão até o tempo reservado para executá-la.</p>
-
-          <!-- Diagrama 5: tarefas → assistente → agenda -->
-          <svg class="guia-diagram" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: tarefas no Notion, assistente aloca, evento na agenda">
-            <rect x="2" y="18" width="110" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="57" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">📋 Tarefas</text>
-            <text x="57" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">Notion database</text>
-            <line x1="114" y1="40" x2="144" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="144,36 152,40 144,44" fill="var(--line-2)"/>
-            <rect x="154" y="18" width="90" height="44" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="199" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" fill="var(--ink)">✦ Assistente</text>
-            <text x="199" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--muted)">aloca tempo</text>
-            <line x1="246" y1="40" x2="276" y2="40" stroke="var(--line-2)" stroke-width="1.2"/>
-            <polygon points="276,36 284,40 276,44" fill="var(--line-2)"/>
-            <rect x="286" y="18" width="110" height="44" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
-            <text x="341" y="40" text-anchor="middle" font-family="var(--sans,sans-serif)" font-size="11" font-weight="600" fill="var(--accent-strong)">📅 Evento</text>
-            <text x="341" y="55" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9" fill="var(--accent)">Google Calendar</text>
-          </svg>
-
-          <p class="muted" style="margin-top:12px">Prompts de blocktime — clique para copiar:</p>
-          <div class="guia-chips" id="guia-chips-s5">
-            <button class="guia-chip" type="button" data-copy="Aloca 2h amanhã de manhã para a tarefa X e cria o evento">Aloca 2h amanhã de manhã para a tarefa X e cria o evento</button>
-            <button class="guia-chip" type="button" data-copy="Quais tarefas estão pendentes esta semana?">Quais tarefas estão pendentes esta semana?</button>
-            <button class="guia-chip" type="button" data-copy="Planeja meu dia de amanhã com base nas tarefas abertas">Planeja meu dia de amanhã com base nas tarefas abertas</button>
+        <!-- Conectar sua IA -->
+        <p class="guia-eyebrow" id="guia-conectar">conectar sua ia</p>
+        <div class="card" id="connect-guided">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Plugar o Zinom no seu assistente</h2>
+              <p class="card-sub">Escolha onde você usa IA e siga o passo a passo — leva menos de 5 minutos.</p>
+            </div>
           </div>
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="inicio">Ver ativação →</button></p>
-        </div>
 
-        <!-- Seção 6: Alimente o cérebro -->
-        <div class="card guia-section" id="guia-s6">
-          <h2 class="card-title">Alimente o cérebro do jeito certo</h2>
-          <p class="muted">Registre decisões com contexto — não apenas "decidimos X", mas "decidimos X porque Y, e quem participou". Nomeie pessoas e empresas de forma consistente: o Zinom aprende com a frequência. Crie uma base de conhecimento paralela no Notion — pode ser feita junto com a IA, página por página. Indexe artigos e páginas web importantes pedindo ao assistente para rodar <code>brain_index_web</code> com a URL. Quanto mais estruturado o input, mais preciso o recall.</p>
-
-          <!-- Diagrama 6: qualidade do input -->
-          <svg class="guia-diagram" viewBox="0 0 480 90" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Diagrama: boas práticas de alimentação do cérebro">
-            <rect x="2" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="52" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">📝 Decisões</text>
-            <text x="52" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">com contexto</text>
-            <text x="52" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">quem, por quê</text>
-            <rect x="114" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="164" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">🏷️ Nomes</text>
-            <text x="164" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">consistentes</text>
-            <text x="164" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">pessoas, empresas</text>
-            <rect x="226" y="14" width="100" height="62" rx="7" stroke="var(--line-2)" stroke-width="1.2" fill="var(--bg)"/>
-            <text x="276" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">📚 Base de</text>
-            <text x="276" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--ink-soft)">conhecimento</text>
-            <text x="276" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--muted)">Notion + IA</text>
-            <rect x="338" y="14" width="100" height="62" rx="7" stroke="var(--accent-soft)" stroke-width="1.4" fill="var(--accent-soft)"/>
-            <text x="388" y="36" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent-strong)">🌐 Web index</text>
-            <text x="388" y="51" text-anchor="middle" font-family="var(--mono,monospace)" font-size="9.5" fill="var(--accent)">brain_index_web</text>
-            <text x="388" y="66" text-anchor="middle" font-family="var(--mono,monospace)" font-size="8.5" fill="var(--accent)">via assistente</text>
-          </svg>
-
-          <p class="muted" style="margin-top:12px">Prompt para indexar uma página web — clique para copiar:</p>
-          <div class="guia-chips" id="guia-chips-s6">
-            <button class="guia-chip" type="button" data-copy="Indexa essa URL no meu Zinom: https://...">Indexa essa URL no meu Zinom: https://...</button>
-            <button class="guia-chip" type="button" data-copy="Quais decisões foram registradas sobre o projeto X?">Quais decisões foram registradas sobre o projeto X?</button>
+          <!-- Selo de conexão ativa -->
+          <div class="connect-active-badge hidden" id="connect-active-badge">
+            <span class="tag ok">Sua IA já está conectada e usando o cérebro ✓</span>
           </div>
-          <p class="guia-cta"><button class="btn btn-ghost btn-sm" type="button" data-nav="fontes">Ir para Fontes →</button></p>
+
+          <!-- Seletor de assistente (tabs) -->
+          <div class="ai-tabs" role="tablist" aria-label="Escolha seu assistente">
+            <button class="ai-tab active" type="button" role="tab" aria-selected="true" data-ai="claudeai">Claude.ai</button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="claudecode">Claude Code</button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="chatgpt">ChatGPT</button>
+            <button class="ai-tab" type="button" role="tab" aria-selected="false" data-ai="outra">Outra IA</button>
+          </div>
+
+          <!-- Painel: Claude.ai -->
+          <div class="ai-panel active" id="ai-panel-claudeai" role="tabpanel">
+            <p class="ai-panel-desc">Para quem usa o Claude no navegador ou no app de desktop.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Clique em <strong>Liberar conexão</strong> — abre uma janela de 5 minutos para autorizar.
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-primary btn-sm" type="button" id="connect-window-btn">Liberar conexão ao Claude.ai (5 min)</button>
+                    <span class="muted" id="connect-window-status"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  No Claude.ai, vá em <strong>Configurações → Conectores → Adicionar conector personalizado</strong> e cole o endereço do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-claudeai">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Autorize com seu e-mail e o código de 6 dígitos exibido na tela do Zinom.</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: Claude Code -->
+          <div class="ai-panel" id="ai-panel-claudecode" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Para quem usa o Claude Code no terminal (ou Cursor / Windsurf).</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Gere seu token pessoal — ele aparece <strong>uma única vez</strong> (se perder, gere outro):
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Cole o comando no terminal (gerado automaticamente após o passo anterior).</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: ChatGPT -->
+          <div class="ai-panel" id="ai-panel-chatgpt" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Para quem usa o ChatGPT com suporte a conectores MCP.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Gere um token pessoal para autenticar o ChatGPT:
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-chatgpt">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area-chatgpt" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  No ChatGPT, vá em <strong>Configurações → Conectores → Adicionar</strong> (o caminho pode variar conforme a versão). Cole o endereço do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-chatgpt">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                  <p class="muted mt-sm" style="font-size:12.5px">Adicione também o cabeçalho de autenticação: <code>Authorization: Bearer &lt;seu-token&gt;</code></p>
+                </div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte ao ChatGPT — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Painel: Outra IA -->
+          <div class="ai-panel" id="ai-panel-outra" role="tabpanel" hidden>
+            <p class="ai-panel-desc">Qualquer cliente MCP (Cursor, Windsurf, Continue, etc.) funciona com o Zinom.</p>
+            <div class="step-list">
+              <div class="step-item">
+                <div class="sc">
+                  Endereço MCP do seu Zinom:
+                  <div class="code-block mt-sm" id="endpoint-outra">https://zinom.ai/mcp<button class="copy-btn" type="button" data-copy="https://zinom.ai/mcp">copiar</button></div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  Gere um token pessoal e use-o no cabeçalho <code>Authorization: Bearer &lt;token&gt;</code>:
+                  <div class="flex wrap mt-sm">
+                    <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn-outra">Gerar token pessoal</button>
+                  </div>
+                  <div id="token-area-outra" class="mt-sm">
+                    <p class="muted" style="font-size:13px">Nenhum token ativo ainda.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">Configure o transporte como <code>HTTP streamable</code> (ou <code>SSE</code> para clientes mais antigos). O Zinom suporta o protocolo MCP padrão.</div>
+              </div>
+              <div class="step-item step-item-test">
+                <div class="sc">
+                  <strong>Teste:</strong> pergunte à sua IA — <em>"O que tem no meu cérebro?"</em>
+                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
+        <!-- Receitas -->
+        <p class="guia-eyebrow">receitas para o dia a dia</p>
+        <div class="filters" id="recipe-filters">
+          <button class="fchip active" type="button" data-rcat="todas">Todas</button>
+          <button class="fchip" type="button" data-rcat="reunioes">Reuniões</button>
+          <button class="fchip" type="button" data-rcat="planejamento">Planejamento</button>
+          <button class="fchip" type="button" data-rcat="conhecimento">Conhecimento</button>
+          <button class="fchip" type="button" data-rcat="agenda">Agenda</button>
+        </div>
+        <div class="recipe-grid" id="recipe-grid">
+          <div class="recipe-card" data-rcat="reunioes">
+            <div class="recipe-head"><span class="tag ok">reuniões</span></div>
+            <h3>Briefing da próxima reunião</h3>
+            <p class="rc-desc">Contexto, decisões anteriores e pendências — preenchido com a sua agenda real.</p>
+            <div class="code-block" id="recipe-briefing">Prepara meu briefing para a minha próxima reunião: contexto, decisões anteriores e pendências.<button class="copy-btn" type="button" data-copy="Prepara meu briefing para a minha próxima reunião: contexto, decisões anteriores e pendências.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="reunioes">
+            <div class="recipe-head"><span class="tag ok">reuniões</span></div>
+            <h3>Follow-ups pendentes</h3>
+            <p class="rc-desc">Varre as últimas reuniões e lista o que você prometeu e ainda não fez.</p>
+            <div class="code-block">Liste os follow-ups que assumi nas reuniões das últimas 2 semanas e que ainda não concluí.<button class="copy-btn" type="button" data-copy="Liste os follow-ups que assumi nas reuniões das últimas 2 semanas e que ainda não concluí.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="planejamento">
+            <div class="recipe-head"><span class="tag">planejamento</span></div>
+            <h3>Planejar meu dia</h3>
+            <p class="rc-desc">Cruza tarefas abertas no Notion com os buracos da sua agenda.</p>
+            <div class="code-block">Planeja meu dia de amanhã com base nas tarefas abertas e nos espaços livres da agenda.<button class="copy-btn" type="button" data-copy="Planeja meu dia de amanhã com base nas tarefas abertas e nos espaços livres da agenda.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="planejamento">
+            <div class="recipe-head"><span class="tag">planejamento</span></div>
+            <h3>Blocktime de uma tarefa</h3>
+            <p class="rc-desc">A IA cria o evento direto no seu Google Calendar.</p>
+            <div class="code-block">Aloca 2h amanhã de manhã para a tarefa "Proposta comercial Q3" e cria o evento.<button class="copy-btn" type="button" data-copy="Aloca 2h amanhã de manhã para a tarefa &quot;Proposta comercial Q3&quot; e cria o evento.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="planejamento">
+            <div class="recipe-head"><span class="tag">planejamento</span></div>
+            <h3>Revisão da semana</h3>
+            <p class="rc-desc">Sexta-feira: o que andou, o que travou, o que fica pra próxima.</p>
+            <div class="code-block">Faz minha revisão da semana: decisões registradas, reuniões e tarefas concluídas vs. pendentes.<button class="copy-btn" type="button" data-copy="Faz minha revisão da semana: decisões registradas, reuniões e tarefas concluídas vs. pendentes.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="conhecimento">
+            <div class="recipe-head"><span class="tag warn">conhecimento</span></div>
+            <h3>Registrar uma decisão</h3>
+            <p class="rc-desc">Decisão com contexto vira memória útil — quem, o quê e por quê.</p>
+            <div class="code-block">Registra no Notion a decisão: [o quê], motivada por [por quê], com [quem]. Crie na página de decisões do projeto.<button class="copy-btn" type="button" data-copy="Registra no Notion a decisão: [o quê], motivada por [por quê], com [quem]. Crie na página de decisões do projeto.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="conhecimento">
+            <div class="recipe-head"><span class="tag warn">conhecimento</span></div>
+            <h3>Indexar um artigo da web</h3>
+            <p class="rc-desc">Qualquer página vira memória pesquisável. Também funciona colando a URL no Consultar.</p>
+            <div class="code-block">Indexa essa URL no meu Zinom: https://…<button class="copy-btn" type="button" data-copy="Indexa essa URL no meu Zinom: https://…">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="agenda">
+            <div class="recipe-head"><span class="tag">agenda</span></div>
+            <h3>Criar um evento</h3>
+            <p class="rc-desc">A IA confirma antes de gravar na agenda.</p>
+            <div class="code-block">Cria um evento quinta às 15h: "Revisão de proposta com Pedro", 45 minutos, na minha agenda principal.<button class="copy-btn" type="button" data-copy="Cria um evento quinta às 15h: &quot;Revisão de proposta com Pedro&quot;, 45 minutos, na minha agenda principal.">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="agenda">
+            <div class="recipe-head"><span class="tag">agenda</span></div>
+            <h3>Auditoria do cérebro</h3>
+            <p class="rc-desc">Pergunta clássica para conferir o que sua IA enxerga.</p>
+            <div class="code-block">O que tem no meu cérebro? Resume por fonte e cita os documentos mais recentes.<button class="copy-btn" type="button" data-copy="O que tem no meu cérebro? Resume por fonte e cita os documentos mais recentes.">copiar</button></div>
+          </div>
+        </div>
+
+        <!-- Troubleshooting -->
+        <p class="guia-eyebrow">resolver problemas</p>
+        <details class="faq">
+          <summary>Minha IA não encontra nada no cérebro<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="faq-body">Na maioria das vezes é uma destas três causas:
+            <ol>
+              <li><strong>Índice vazio ou desatualizado</strong> — rode <a href="#fontes" data-nav="fontes">Indexar agora</a> e aguarde concluir.</li>
+              <li><strong>Páginas não compartilhadas</strong> — no Notion, a integração só lê o que foi compartilhado com ela (veja o item abaixo).</li>
+              <li><strong>Conector não autorizado</strong> — refaça a conexão no assistente; use o <strong>Verificar agora</strong> no topo desta página para confirmar.</li>
+            </ol>
+          </div>
+        </details>
+        <details class="faq">
+          <summary>Como compartilhar páginas do Notion com o Zinom<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="faq-body">
+            <ol>
+              <li>Abra a página (ou database) no Notion.</li>
+              <li>Menu <code>···</code> no canto superior direito → <strong>Conexões</strong> → escolha <strong>Zinom</strong>.</li>
+              <li>Subpáginas herdam o acesso — compartilhar a página-mãe basta.</li>
+              <li>Depois, rode <strong>Indexar agora</strong> em Fontes.</li>
+            </ol>
+          </div>
+        </details>
+        <details class="faq">
+          <summary>A conexão com o Claude caiu ou pede autorização de novo<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="faq-body">Tokens podem ser revogados ou expirar. Em <strong>Conectar sua IA</strong> (acima), clique em <strong>Liberar conexão</strong> de novo e re-autorize no Claude com seu e-mail + código de 6 dígitos. Para Claude Code/Cursor, gere um novo token e rode o comando novamente.</div>
+        </details>
+        <details class="faq">
+          <summary>As respostas estão desatualizadas<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="faq-body">O índice sincroniza automaticamente a cada hora. Se você acabou de editar uma página e precisa dela agora, rode <a href="#fontes" data-nav="fontes">Indexar agora</a> — ou peça à sua IA: <code>brain_index_url</code> com o link da página.</div>
+        </details>
+        <details class="faq">
+          <summary>Aparecem pessoas ou projetos duplicados no grafo<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+          <div class="faq-body">Nomes escritos de formas diferentes ("Marina" e "Marina Souza") viram entidades distintas. Em <a href="#atividade" data-nav="atividade">Atividade → Grafo</a>, clique na entidade e use <strong>Mesclar com…</strong>. Dica: nomeie pessoas e empresas de forma consistente nas suas notas.</div>
+        </details>
+
+        <!-- Como funciona -->
+        <p class="guia-eyebrow">como o zinom funciona</p>
+        <div class="card">
+          <p class="muted" style="line-height:1.65">O Zinom lê suas fontes (Notion, Granola, agendas, web) e transforma tudo em memória pesquisável. Quando você pergunta algo no Claude ou no ChatGPT, o assistente consulta esse índice antes de responder — com busca semântica, sem precisar da palavra exata — e cita a fonte original. O Zinom não gera texto: ele entrega o contexto certo para a IA que você já usa.</p>
+          <div class="pipeline" style="margin-top:16px">
+            <div class="pl-col"><span class="pl-k">fontes</span><span class="pl-v" id="guia-pl-fontes">—</span><span class="pl-sub">Notion · reuniões · agendas · web</span></div>
+            <span class="pl-arrow" aria-hidden="true"></span>
+            <div class="pl-col hero"><span class="pl-k">zinom</span><span class="pl-v" id="guia-pl-chunks">—</span><span class="pl-sub">trechos pesquisáveis</span></div>
+            <span class="pl-arrow" aria-hidden="true"></span>
+            <div class="pl-col"><span class="pl-k">assistentes</span><span class="pl-v" id="guia-pl-assist">—</span><span class="pl-sub">via MCP, com citações</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CONTA ============ -->
+    <section class="view" id="view-conta" data-screen-label="Conta">
+      <div class="view-inner">
+        <div class="page-head">
+          <p class="eyebrow">conta</p>
+          <h1>Sua conta</h1>
+          <p class="lead">Acesso, sessões, tokens e plano — tudo num lugar só.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2 class="card-title">Perfil</h2></div>
+          <div class="kv-rows">
+            <div class="kv-row"><span class="k">E-mail</span><span class="v" id="conta-email">—</span></div>
+            <div class="kv-row"><span class="k">Membro desde</span><span class="v" id="conta-member-since">—</span></div>
+            <div class="kv-row"><span class="k">Acesso</span><span class="v muted" style="font-size:13px">Link mágico por e-mail — sem senha.</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Sessões ativas <span class="tag mono" id="sessions-tag">—</span></h2>
+              <p class="card-sub">Onde sua conta está aberta agora.</p>
+            </div>
+          </div>
+          <div class="kv-rows" id="sessions-list"><p class="muted" style="font-size:13px">carregando…</p></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Tokens MCP <span class="tag mono" id="conta-tokens-tag">0</span></h2>
+              <p class="card-sub">Cada token dá acesso de um assistente ao seu cérebro. Revogue o que não usa.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" data-nav="guia" data-guia="conectar">Conectar nova IA</button>
+          </div>
+          <div class="kv-rows" id="conta-token-list"></div>
+        </div>
+
+        <div class="card" id="billing-card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Plano: <span id="billing-plan" style="font-weight:400">—</span></h2>
+              <p class="muted" id="billing-usage-line"></p>
+            </div>
+            <a href="/plano.html"><button class="btn btn-ghost btn-sm">Plano &amp; consumo →</button></a>
+          </div>
+        </div>
+
+        <div class="card" id="danger-zone" style="border-color:var(--bad-line,#f5c6c6)">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title" style="color:#b3261e">Zona de perigo</h2>
+              <p class="card-sub">A exclusão apaga sua conta, todas as fontes, o cérebro indexado, sessões e tokens. Permanente.</p>
+            </div>
+          </div>
+          <button class="btn" type="button" id="delete-account-btn" style="background:#fff;color:#b3261e;border-color:#f5c6c6">Excluir minha conta e apagar meu cérebro</button>
+        </div>
+
+        <dialog id="delete-account-dialog" style="border:1px solid #f5c6c6;border-radius:16px;padding:28px;max-width:420px;width:92vw">
+          <h2 style="margin:0 0 10px;font-size:18px;color:#b3261e">Excluir conta</h2>
+          <p style="font-size:14px;color:#4a4740;margin:0 0 10px">Esta ação é <strong>irreversível</strong>. Serão apagados:</p>
+          <ul style="font-size:13px;color:#4a4740;margin:0 0 14px;padding-left:20px">
+            <li>Sua conta e e-mail</li>
+            <li>Todo o conteúdo do cérebro (trechos indexados)</li>
+            <li>Tokens de acesso, sessões e links mágicos</li>
+            <li>Fontes (Notion, Granola, iCal, Google)</li>
+            <li>Histórico de uso e eventos de faturamento</li>
+            <li>Assinatura ativa (cancelada no Stripe)</li>
+          </ul>
+          <p style="font-size:14px;margin:0 0 8px">Digite <strong>EXCLUIR</strong> para confirmar:</p>
+          <input type="text" id="delete-confirm-input" placeholder="EXCLUIR" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #e0ddd3;border-radius:10px;font-size:15px;margin-bottom:14px" autocomplete="off">
+          <p id="delete-error-msg" style="color:#b3261e;font-size:13px;min-height:18px;margin:0 0 12px"></p>
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn-ghost" type="button" id="delete-cancel-btn">Cancelar</button>
+            <button class="btn" type="button" id="delete-confirm-btn" style="background:#b3261e;color:#fff;border-color:#b3261e" disabled>Excluir permanentemente</button>
+          </div>
+        </dialog>
       </div>
     </section>
 
@@ -880,22 +909,18 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 3.5 7.5 12 12l8.5-4.5z" stroke-linejoin="round"/><path d="M3.5 12.2 12 16.7l8.5-4.5M3.5 16.7 12 21.2l8.5-4.5" stroke-linejoin="round"/></svg>
       Fontes
     </button>
-    <button data-nav="atividade" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Atividade
-    </button>
-    <button data-nav="chat" type="button">
+    <button data-nav="consultar" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.6a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.7-.8L3 20l1-5a8 8 0 0 1-.9-3.6A8.4 8.4 0 0 1 11.6 3a8.4 8.4 0 0 1 9.4 8.6z" stroke-linejoin="round"/></svg>
-      Chat
+      Consultar
     </button>
     <button data-nav="guia" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke-linejoin="round"/></svg>
       Guia
     </button>
-    <a class="tabbar-link" href="/plano.html">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13.5" rx="3"/><path d="M3 10h18M7 15h4" stroke-linecap="round"/></svg>
-      Plano
-    </a>
+    <button data-nav="conta" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.4 3.6-5.2 7-5.2s6.2 1.8 7 5.2" stroke-linecap="round"/></svg>
+      Conta
+    </button>
   </nav>
 
 </div>
