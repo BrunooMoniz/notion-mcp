@@ -171,6 +171,39 @@
         </div>
 
         <p class="muted" style="text-align:center;padding:4px 0 12px">Quer ver o que seus assistentes encontram? <a href="#chat" data-nav="chat">Teste uma pergunta no chat →</a></p>
+
+        <!-- Zona de perigo -->
+        <div class="card" id="danger-zone" style="border-color:#f5c6c6">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title" style="color:#b3261e">Zona de perigo</h2>
+              <p class="card-sub">Ações irreversíveis relacionadas à sua conta.</p>
+            </div>
+          </div>
+          <p class="muted" style="font-size:13px;margin-bottom:12px">A exclusão apaga sua conta, todas as fontes, o cérebro indexado, sessões e tokens. Esta ação é permanente e não pode ser desfeita.</p>
+          <button class="btn" type="button" id="delete-account-btn" style="background:#fff;color:#b3261e;border-color:#f5c6c6">Excluir minha conta e apagar meu cérebro</button>
+        </div>
+
+        <!-- Dialog de confirmação de exclusão -->
+        <dialog id="delete-account-dialog" style="border:1px solid #f5c6c6;border-radius:16px;padding:28px;max-width:420px;width:92vw">
+          <h2 style="margin:0 0 10px;font-size:18px;color:#b3261e">Excluir conta</h2>
+          <p style="font-size:14px;color:#4a4740;margin:0 0 10px">Esta ação é <strong>irreversível</strong>. Serão apagados:</p>
+          <ul style="font-size:13px;color:#4a4740;margin:0 0 14px;padding-left:20px">
+            <li>Sua conta e e-mail</li>
+            <li>Todo o conteúdo do cérebro (trechos indexados)</li>
+            <li>Tokens de acesso, sessões e links mágicos</li>
+            <li>Fontes (Notion, Granola, iCal, Google)</li>
+            <li>Histórico de uso e eventos de faturamento</li>
+            <li>Assinatura ativa (cancelada no Stripe)</li>
+          </ul>
+          <p style="font-size:14px;margin:0 0 8px">Digite <strong>EXCLUIR</strong> para confirmar:</p>
+          <input type="text" id="delete-confirm-input" placeholder="EXCLUIR" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #e0ddd3;border-radius:10px;font-size:15px;margin-bottom:14px" autocomplete="off">
+          <p id="delete-error-msg" style="color:#b3261e;font-size:13px;min-height:18px;margin:0 0 12px"></p>
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn-ghost" type="button" id="delete-cancel-btn">Cancelar</button>
+            <button class="btn" type="button" id="delete-confirm-btn" style="background:#b3261e;color:#fff;border-color:#b3261e" disabled>Excluir permanentemente</button>
+          </div>
+        </dialog>
       </div>
     </section>
 
