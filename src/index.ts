@@ -14,6 +14,10 @@ import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { registerRememberTool, registerRecallTool } from "./rag/remember-tool.js";
 import { registerZinomTaskTool } from "./zinom-task-tool.js";
 import { registerCalendarTools } from "./google/calendar-tool.js";
+import { registerBrainStatusTool, setReindexInFlightSet } from "./rag/brain-status-tool.js";
+import { registerBrainReindexTool, setReindexSet } from "./rag/brain-reindex-tool.js";
+import { registerBrainTodayTool } from "./rag/brain-today-tool.js";
+import { registerBrainListDocumentsTool } from "./rag/brain-list-documents-tool.js";
 import { createOAuthRouter, getAccessTokenInfo } from "./oauth.js";
 import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
@@ -108,11 +112,22 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 
 ## Brain RAG tools
 
-- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom. Each result has title, source_type (notion/granola/calendar/web/conversation), and source_url. CITE YOUR SOURCES (obrigatório): quando você responder a partir do brain_search, cite as fontes por trás de cada afirmação — liste como links markdown [title](source_url), nomeando o source_type de cada hit (página do Notion / reunião do Granola / evento do Calendar / página da web / conversa). Quando source_url for null (eventos de calendário sem link próprio e memórias de conversa), cite pelo title + data (metadata.data). Nunca afirme algo recuperado do Zinom sem dizer de qual fonte veio.
+- **brain_search** — Hybrid semantic+keyword search over the indexed Zinom. Each result has title, source_type (notion/granola/calendar/web/conversation), source_url, and a **presentation_hint** field when results are present. SEMPRE siga o presentation_hint ao citar fontes: ele especifica o formato exato de citação para cada resultado (número, título, link, tipo). CITE YOUR SOURCES (obrigatório): quando você responder a partir do brain_search, cite as fontes por trás de cada afirmação — liste como links markdown [title](source_url), nomeando o source_type de cada hit (página do Notion / reunião do Granola / evento do Calendar / página da web / conversa). Quando source_url for null (eventos de calendário sem link próprio e memórias de conversa), cite pelo title + data (metadata.data). Nunca afirme algo recuperado do Zinom sem dizer de qual fonte veio.
+
+  **REGRA DE PRECEDÊNCIA:** use brain_search PRIMEIRO para qualquer pergunta sobre conteúdo, histórico, reuniões, decisões, pessoas ou projetos. Use notion_search apenas para descobrir IDs de páginas antes de uma escrita, ou quando o usuário pedir explicitamente uma busca no Notion (não no cérebro).
+
 - **remember** — Salve uma nota/resumo desta conversa no Zinom. Use quando a pessoa pedir "lembra disso", "anota isso", "guarda essa decisão", ou quando você quiser persistir uma conclusão importante do diálogo. A nota vira source_type "conversation", pesquisável e citável no brain_search. Passe um title curto: é por ele que a memória será citada depois.
 - **recall** — Atalho do brain_search filtrado por source_type:"conversation": recupera SÓ as memórias de conversa salvas com remember. Use para "o que você anotou sobre...", "lembra o que decidimos...". Para buscar em todas as fontes, use brain_search.
 - **brain_index_url** — On-demand indexing. When the user shares a Notion URL/ID and says "indexa isso", "coloca no Zinom", "quero buscar isso depois", call this with the workspace + the URL. Works for pages, data sources, and databases. Reads via PAT so it sees anything the user has access to, even content not surfaced by /v1/search. For data sources it indexes up to max_pages pages in one call.
 - **brain_index_web** — On-demand indexing of an arbitrary web page/article by URL into the brain. Use for non-Notion links (articles, docs, posts) the user wants queryable in brain_search. Fetches the URL, extracts readable text, chunks/embeds it, and stores it under source_type "web". Re-indexing the same URL refreshes it.
+- **brain_status** — Retorna a saúde e contadores do Zinom (running, fontes, counts). Use para diagnóstico ("por que não encontrou X?", "está atualizado?"). Não usa quota.
+- **brain_reindex** — Dispara reindexação assíncrona de todas as fontes. Use quando brain_status mostrar fontes stale/com erro, ou o usuário pedir "indexar agora".
+- **brain_today** — Retorna os eventos do dia, contexto do cérebro para cada reunião, e as tarefas abertas prioritárias. Use para "agenda do dia", "briefing de hoje".
+- **brain_list_documents** — Lista documentos indexados (um por source_id). Filtros: source_type, q (substring). Não usa quota de busca.
+
+## Calendário
+
+**REGRA:** para criar ou editar eventos, chame list_calendars PRIMEIRO para descobrir o calendar_ref correto da agenda certa. Nunca invente ou assuma um calendar_ref; se não encontrar, pergunte ao usuário.
 `.trim();
 
 const app = express();
@@ -386,6 +401,17 @@ interface ManagedSession {
 
 const sessions = new Map<string, ManagedSession>();
 
+// --- Shared reindex in-flight set (brain_reindex + brain_status + portal /reindex) ---
+// NOTE: the portal /portal/reindex route has its OWN local reindexInFlight Set inside
+// createPortalRouter(). That set guards portal-initiated reindexes; this one guards
+// MCP-initiated ones. Both share the same account-dedup semantics: at most one
+// concurrent reindex per accountId regardless of which surface triggered it.
+// If a future migration wants a single shared set, move it to a shared module and
+// import it here + in portal/routes.ts.
+const mcpReindexInFlight = new Set<string>();
+setReindexInFlightSet(mcpReindexInFlight);
+setReindexSet(mcpReindexInFlight);
+
 /** Serve an existing session ONLY to the account that created it. Returns the
  *  session when the current request's account matches; otherwise responds 404
  *  (forcing the client to re-initialize a session bound to its own account) and
@@ -489,13 +515,22 @@ app.post("/mcp", async (req, res) => {
     registerRememberTool(server);
     registerRecallTool(server);
     registerCalendarTools(server);
+    registerBrainStatusTool(server);
+    registerBrainReindexTool(server);
+    registerBrainTodayTool(server);
+    registerBrainListDocumentsTool(server);
   } else {
     registerBrainSearchTool(server);
+    registerBrainIndexUrlTool(server);
     registerBrainIndexWebTool(server);
     registerRememberTool(server);
     registerRecallTool(server);
     registerZinomTaskTool(server);
     registerCalendarTools(server);
+    registerBrainStatusTool(server);
+    registerBrainReindexTool(server);
+    registerBrainTodayTool(server);
+    registerBrainListDocumentsTool(server);
   }
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
