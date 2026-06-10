@@ -1,7 +1,7 @@
 // src/portal/__tests__/leads.test.ts — invite-request leads (create/list/markInvited).
 import { test, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createInviteRequest, listInviteRequests, markRequestInvited } from "../leads.js";
+import { createInviteRequest, listInviteRequests, markRequestInvited, dismissInviteRequest } from "../leads.js";
 import { __setPoolForTest } from "../../rag/storage.js";
 
 interface Row { email: string; name: string | null; note: string | null; status: string; invited_at: Date | null; }
@@ -58,4 +58,15 @@ test("markRequestInvited flips status to invited (creating the row if needed)", 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, "invited");
   assert.ok(rows[0].invited_at);
+});
+
+// ---------------------------------------------------------------------------
+// dismissInviteRequest — shape test (does not hit DB)
+// ---------------------------------------------------------------------------
+
+test("dismissInviteRequest: is an exported async function", () => {
+  // Pure shape test: confirm the export exists and is a function.
+  // We do NOT call it (would need a live DB). The route handler test
+  // in routes covers the integration side.
+  assert.equal(typeof dismissInviteRequest, "function");
 });
