@@ -10,7 +10,7 @@ import { escapeHtml } from "../rag/status.js";
 import { safeEqual } from "../crypto-utils.js";
 import { generateInviteCode, issueInvite, hashInvite } from "../portal/invites.js";
 import { sendInviteEmail } from "../portal/email.js";
-import { listInviteRequests, markRequestInvited, type InviteRequest } from "../portal/leads.js";
+import { listInviteRequests, markRequestInvited, dismissInviteRequest, type InviteRequest } from "../portal/leads.js";
 import { blockAccount, unblockAccount } from "./block.js";
 import { monthStartUTC, checkCostAlert } from "../billing/usage.js";
 import { getPlanLimits } from "../billing/plans.js";
@@ -24,11 +24,16 @@ import {
   engagementOf,
   mrrFromSubscriptions,
   computeFeedbackPct,
+  accountDisplay,
+  formatBytes,
   type FunnelRow,
   type EngagementRow,
   type StripeSub,
   type CostReportResponse,
   type TopUsefulChunkRow,
+  type ChatUsageRow,
+  type StorageRow,
+  type AccountDisplayResult,
 } from "./business.js";
 import { getStripe } from "../billing/stripe.js";
 import { getOrgCostReport } from "./anthropic-cost.js";
@@ -152,6 +157,51 @@ async function gather() {
   ]);
   const leads = await listInviteRequests().catch(() => [] as InviteRequest[]);
 
+  // Chat usage: metric='ask' per account (7d and 30d).
+  // Graceful: returns [] when no 'ask' rows exist yet.
+  const chatUsageRaw = await p.query<{ account_id: string; asks_7d: string; asks_30d: string; last_ask: Date | null }>(`
+    SELECT account_id,
+           sum(CASE WHEN ts >= now() - interval '7 days'  THEN qty ELSE 0 END)::text AS asks_7d,
+           sum(CASE WHEN ts >= now() - interval '30 days' THEN qty ELSE 0 END)::text AS asks_30d,
+           max(ts) AS last_ask
+    FROM usage_log
+    WHERE metric = 'ask'
+    GROUP BY account_id
+  `).catch(() => ({ rows: [] as any[] }));
+
+  // Storage: chunk count and approx byte size per account.
+  const storageRaw = await p.query<{ account_id: string; chunk_count: string; approx_bytes: string }>(`
+    SELECT account_id,
+           count(*)::text AS chunk_count,
+           coalesce(sum(pg_column_size(embedding) + pg_column_size(text) + pg_column_size(metadata)), 0)::text AS approx_bytes
+    FROM brain_chunks
+    GROUP BY account_id
+  `).catch(() => ({ rows: [] as any[] }));
+
+  // Map account_id -> workspace display name (for accountDisplay helper).
+  // account_workspaces.name was added by migration 0010 (nullable; NULL until re-auth).
+  const wsNamesRaw = await p.query<{ account_id: string; name: string | null }>(
+    `SELECT account_id, name FROM account_workspaces WHERE name IS NOT NULL`
+  ).catch(() => ({ rows: [] as any[] }));
+  // One account can have multiple workspace rows; use the first non-null name.
+  const wsNames = new Map<string, string>();
+  for (const r of wsNamesRaw.rows) {
+    if (!wsNames.has(r.account_id) && r.name) wsNames.set(r.account_id, r.name);
+  }
+
+  const chatUsage: ChatUsageRow[] = chatUsageRaw.rows.map((r: any) => ({
+    account_id: r.account_id,
+    asks7d: Number(r.asks_7d ?? 0),
+    asks30d: Number(r.asks_30d ?? 0),
+    last_ask: r.last_ask ? new Date(r.last_ask) : null,
+  }));
+
+  const storageRows: StorageRow[] = storageRaw.rows.map((r: any) => ({
+    account_id: r.account_id,
+    chunk_count: Number(r.chunk_count ?? 0),
+    approx_bytes: Number(r.approx_bytes ?? 0),
+  }));
+
   const { subs, source: stripeSource } = await fetchStripeSubs(p, Date.now());
 
   // Spec 004: memory quality data (graceful: empty on missing tables/migration).
@@ -211,6 +261,10 @@ async function gather() {
     topUsefulChunks,
     feedbackPct,
     staleCount,
+    // Admin v2: new sections
+    chatUsage,
+    storageRows,
+    wsNames,
   };
 }
 
@@ -260,9 +314,19 @@ function renderStripeSection(data: Awaited<ReturnType<typeof gather>>): string {
         ? new Date(s.current_period_end * 1000).toISOString().slice(0, 10)
         : "—";
       const amtFmt = formatBRL(s.amount);
-      const acct = s.account_id ?? escapeHtml(s.customer);
+      // accountDisplay needs a full AccountDisplayRow; Stripe subs only have account_id.
+      // For subs without account_id, show the Stripe customer ID as fallback.
+      const acctId = s.account_id ?? s.customer;
+      // Look up the account in data.accounts to get email + kind.
+      const acctRow = data.accounts.find((a) => a.id === acctId);
+      const disp: AccountDisplayResult = acctRow
+        ? accountDisplay(acctRow, data.wsNames)
+        : { primary: acctId, secondary: acctId };
       return `<tr>
-        <td class="mono xs">${escapeHtml(acct)}</td>
+        <td>
+          <span class="acct-primary">${escapeHtml(disp.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(disp.secondary)}</span>
+        </td>
         <td class="xs">${amtFmt}</td>
         <td><span class="tag ${s.status === "active" ? "ok" : s.status === "canceled" ? "bad" : ""}">${escapeHtml(s.status)}</span></td>
         <td class="xs">${escapeHtml(renewsAt)}</td>
@@ -336,8 +400,12 @@ function renderEngagementSection(data: Awaited<ReturnType<typeof gather>>): stri
         : eng && eng.searches30d > 0
           ? '<span class="tag ok">ativo</span>'
           : '<span class="tag">inativo</span>';
+      const dispE = accountDisplay(a, data.wsNames);
       return `<tr>
-        <td class="mono xs">${escapeHtml(a.id)}</td>
+        <td>
+          <span class="acct-primary">${escapeHtml(dispE.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(dispE.secondary)}</span>
+        </td>
         <td class="xs">${s7}</td>
         <td class="xs">${s30}</td>
         <td class="xs">${escapeHtml(last)}</td>
@@ -416,8 +484,12 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
       const fmtLlmIn = llmInputTokens > 0 ? llmInputTokens.toLocaleString("pt-BR") : "—";
       const fmtLlmOut = llmOutputTokens > 0 ? llmOutputTokens.toLocaleString("pt-BR") : "—";
       const fmtLlmCost = llmCost.totalCost > 0 ? `$${llmCost.totalCost.toFixed(4)}` : "—";
+      const dispC = accountDisplay(a, data.wsNames);
       return `<tr>
-        <td class="mono xs">${escapeHtml(a.id)}</td>
+        <td>
+          <span class="acct-primary">${escapeHtml(dispC.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(dispC.secondary)}</span>
+        </td>
         <td class="xs">${escapeHtml(a.plan ?? "free")}</td>
         <td class="xs">${embedTokens.toLocaleString("pt-BR")}</td>
         <td class="xs">${searches}</td>
@@ -473,9 +545,14 @@ function renderMemoryQualitySection(data: Awaited<ReturnType<typeof gather>>): s
       const url = c.parent_url
         ? `<a href="${escapeHtml(c.parent_url)}" target="_blank" rel="noopener" class="xs">${escapeHtml(c.parent_url.slice(0, 60))}</a>`
         : "—";
+      const acctM = data.accounts.find((a) => a.id === c.account_id);
+      const dispM = acctM ? accountDisplay(acctM, data.wsNames) : { primary: c.account_id, secondary: c.account_id };
       return `<tr>
         <td class="mono xs">${escapeHtml(c.id.slice(0, 16))}&hellip;</td>
-        <td class="mono xs">${escapeHtml(c.account_id)}</td>
+        <td>
+          <span class="acct-primary">${escapeHtml(dispM.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(dispM.secondary)}</span>
+        </td>
         <td class="xs">${escapeHtml(c.source_type)}</td>
         <td class="xs">${c.utility_score.toFixed(2)}</td>
         <td class="xs">${c.feedback_count}</td>
@@ -522,9 +599,95 @@ ${topRows || '<tr><td colspan="7" class="xs muted">Nenhum trecho com feedback po
 </section>`;
 }
 
+function renderChatSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const chatMap = new Map(data.chatUsage.map((c) => [c.account_id, c]));
+  const rows = data.accounts
+    .map((a) => {
+      const disp = accountDisplay(a, data.wsNames);
+      const chat = chatMap.get(a.id);
+      const asks7d = chat?.asks7d ?? 0;
+      const asks30d = chat?.asks30d ?? 0;
+      const lastAsk = chat?.last_ask ? chat.last_ask.toISOString().slice(0, 10) : "—";
+      return `<tr>
+        <td>
+          <span class="acct-primary">${escapeHtml(disp.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(disp.secondary)}</span>
+        </td>
+        <td class="xs">${asks7d}</td>
+        <td class="xs">${asks30d}</td>
+        <td class="xs">${escapeHtml(lastAsk)}</td>
+      </tr>`;
+    })
+    .join("\n");
+  return `<section class="section" id="uso-chat">
+  <div class="section-header">
+    <h2 class="section-title">Uso do chat</h2>
+    <p class="section-desc">Mensagens enviadas ao chat interno (métrica <code>ask</code> no usage_log), por conta, nos últimos 7 e 30 dias. Valores zerados indicam que o recurso ainda não foi usado ou que a métrica foi adicionada recentemente.</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="Conta">Conta</th>
+      <th title="Mensagens no chat nos últimos 7 dias">asks 7d</th>
+      <th title="Mensagens no chat nos últimos 30 dias">asks 30d</th>
+      <th title="Data do último uso do chat">último ask</th>
+    </tr></thead>
+    <tbody>
+${rows || '<tr><td colspan="4" class="xs muted">Nenhuma conta.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
+}
+
+function renderStorageSection(data: Awaited<ReturnType<typeof gather>>): string {
+  const storMap = new Map(data.storageRows.map((s) => [s.account_id, s]));
+  const totalBytes = data.storageRows.reduce((sum, s) => sum + s.approx_bytes, 0);
+  const totalChunks = data.storageRows.reduce((sum, s) => sum + s.chunk_count, 0);
+
+  const rows = data.accounts
+    .map((a) => {
+      const disp = accountDisplay(a, data.wsNames);
+      const stor = storMap.get(a.id);
+      const chunks = stor?.chunk_count ?? 0;
+      const bytes = stor?.approx_bytes ?? 0;
+      const pct = totalBytes > 0 ? ((bytes / totalBytes) * 100).toFixed(1) : "0.0";
+      return `<tr>
+        <td>
+          <span class="acct-primary">${escapeHtml(disp.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(disp.secondary)}</span>
+        </td>
+        <td class="xs">${chunks.toLocaleString("pt-BR")}</td>
+        <td class="xs">${escapeHtml(formatBytes(bytes))}</td>
+        <td class="xs">${pct}%</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  return `<section class="section" id="armazenamento">
+  <div class="section-header">
+    <h2 class="section-title">Armazenamento</h2>
+    <p class="section-desc">Uso de <code>brain_chunks</code> por conta: número de trechos indexados e tamanho aproximado em disco (soma dos bytes das colunas <code>embedding</code>, <code>text</code> e <code>metadata</code>). Total atual: <strong>${escapeHtml(formatBytes(totalBytes))}</strong> em ${totalChunks.toLocaleString("pt-BR")} trechos. O armazenamento é pequeno — o custo real está nos tokens de embedding e LLM.</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th title="Conta">Conta</th>
+      <th title="Número de trechos indexados">trechos</th>
+      <th title="Tamanho aproximado em disco (embedding + text + metadata)">tamanho est.</th>
+      <th title="Percentual do total de armazenamento">% do total</th>
+    </tr></thead>
+    <tbody>
+${rows || '<tr><td colspan="4" class="xs muted">Nenhum dado de armazenamento.</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+</section>`;
+}
+
 function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
   const friends = data.accounts.filter((a) => a.kind === "friend");
-  const pending = data.leads.filter((l) => l.status === "pending").length;
+  const pending = data.leads.filter((l) => l.status === "pending" && !l.dismissed_at).length;
   // Approx MRR: sum of active paid plans, priced from the plan matrix
   // (billing/plans.ts) so it never drifts from a hardcoded cents map.
   const mrrCents = data.accounts.reduce(
@@ -535,6 +698,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
   const action = `/admin/invite?token=${encodeURIComponent(token)}`;
   const blockAction = `/admin/block?token=${encodeURIComponent(token)}`;
   const unblockAction = `/admin/unblock?token=${encodeURIComponent(token)}`;
+  const dismissAction = `/admin/lead/dismiss?token=${encodeURIComponent(token)}`;
 
   const rows = data.accounts
     .map((a) => {
@@ -586,9 +750,12 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         ? new Date(a.current_period_end).toISOString().slice(0, 10)
         : "—";
       const tokenCount = data.tokens.get(a.id);
+      const dispA = accountDisplay(a, data.wsNames);
       return `<tr>
-        <td class="mono xs">${escapeHtml(a.id)}</td>
-        <td class="xs">${escapeHtml(a.email ?? "—")}</td>
+        <td>
+          <span class="acct-primary">${escapeHtml(dispA.primary)}</span>
+          <span class="acct-secondary mono xs muted">${escapeHtml(dispA.secondary)}</span>
+        </td>
         <td class="xs">${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
         <td class="xs">${escapeHtml(a.plan ?? "free")}${a.plan_status && a.plan_status !== "active" ? ` <span class="tag">${escapeHtml(a.plan_status)}</span>` : ""}</td>
@@ -607,13 +774,24 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
 
   const leadRows = data.leads
     .map((l) => {
-      const act =
-        l.status === "pending"
-          ? `<form method="POST" action="${escapeHtml(action)}" style="margin:0">
-               <input type="hidden" name="email" value="${escapeHtml(l.email)}">
-               <button type="submit">Gerar e enviar convite</button>
-             </form>`
-          : `<span class="tag ok">convidado ${l.invited_at ? new Date(l.invited_at).toLocaleString("pt-BR") : ""}</span>`;
+      let act: string;
+      if (l.dismissed_at) {
+        act = `<span class="tag bad">dispensado ${new Date(l.dismissed_at).toLocaleString("pt-BR")}</span>`;
+      } else if (l.status === "pending") {
+        act = `<div style="display:flex;gap:6px;flex-wrap:wrap">
+          <form method="POST" action="${escapeHtml(action)}" style="margin:0">
+            <input type="hidden" name="email" value="${escapeHtml(l.email)}">
+            <button type="submit">Gerar e enviar convite</button>
+          </form>
+          <form method="POST" action="${escapeHtml(dismissAction)}" style="margin:0"
+                onsubmit="return confirm('Dispensar ${escapeHtml(l.email)}? Isso não apaga o lead.')">
+            <input type="hidden" name="email" value="${escapeHtml(l.email)}">
+            <button type="submit" class="secondary">Dispensar</button>
+          </form>
+        </div>`;
+      } else {
+        act = `<span class="tag ok">convidado ${l.invited_at ? new Date(l.invited_at).toLocaleString("pt-BR") : ""}</span>`;
+      }
       return `<tr>
         <td class="xs">${escapeHtml(l.email)}</td>
         <td class="xs">${escapeHtml(l.name ?? "—")}</td>
@@ -624,9 +802,9 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
     })
     .join("\n");
 
-  const banner = msg
-    ? `<div class="banner">${escapeHtml(msg)}</div>`
-    : "";
+  // Banner is now rendered inline in the shell (dismissible via JS).
+  // The old `banner` string variable is kept for backward compat but unused.
+  const _banner = "";
 
   const logoSvg = `<svg width="28" height="28" viewBox="0 0 26 26" fill="none" aria-hidden="true">
     <rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/>
@@ -653,6 +831,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
 :root{
   --bg:#fff;
   --paper:#f7f6f3;
+  --paper-2:#f1efe9;
   --ink:#26241f;
   --ink-soft:#4a4740;
   --muted:#827d73;
@@ -667,7 +846,6 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
   --shadow-sm:0 1px 2px rgba(38,36,31,.05),0 1px 1px rgba(38,36,31,.04);
   --sans:"Geist Variable",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   --mono:"Geist Mono Variable",ui-monospace,"SF Mono",Menlo,monospace;
-  --maxw:1180px;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -693,46 +871,108 @@ code{
   color:var(--accent-strong);
 }
 
-/* --- Layout --- */
-.page{max-width:var(--maxw);margin:0 auto;padding:0 24px 80px}
+/* --- Shell --- */
+.shell{min-height:100vh;display:flex}
 
-/* --- Top nav --- */
-.topbar{
-  position:sticky;top:0;z-index:40;
-  background:rgba(255,255,255,.88);
-  backdrop-filter:saturate(150%) blur(14px);
-  border-bottom:1px solid var(--line);
+/* --- Sidebar (desktop) --- */
+.sidebar{
+  display:none;
 }
-.topbar-inner{
-  max-width:var(--maxw);margin:0 auto;padding:0 24px;
-  display:flex;align-items:center;justify-content:space-between;height:60px;gap:16px;
+@media(min-width:900px){
+  .sidebar{
+    display:flex;flex-direction:column;
+    width:220px;flex:0 0 220px;
+    position:fixed;top:0;left:0;height:100vh;z-index:100;
+    background:var(--paper);
+    border-right:1px solid var(--line);
+  }
+  .main{
+    margin-left:220px;
+    flex:1;min-width:0;
+    padding:28px 40px 80px;
+  }
 }
-.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:17px;letter-spacing:-.02em;color:var(--ink)}
-.brand-sub{font-size:12px;font-weight:400;color:var(--muted);margin-left:2px}
-.timestamp{font-size:12px;color:var(--muted)}
 
-/* --- Anchor nav --- */
-.anav{
-  display:flex;gap:0;flex-wrap:wrap;
-  border-bottom:1px solid var(--line);
-  background:var(--paper);
-  padding:0 24px;
-  max-width:var(--maxw);margin:0 auto;
+/* --- Sidebar brand --- */
+.sidebar-brand{
+  display:flex;align-items:center;gap:10px;
+  padding:20px 16px 14px;
+  font-size:16px;font-weight:650;letter-spacing:-.02em;color:var(--ink);
+  text-decoration:none;
 }
-.anav a{
+.sidebar-sub{font-size:11px;font-weight:400;color:var(--muted);font-family:var(--mono);margin-left:auto}
+.sidebar-nav{flex:1;padding:4px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.nav-item{
+  display:flex;align-items:center;gap:9px;
+  padding:8px 10px;
+  border-radius:var(--r-xs);
   font-size:13px;font-weight:500;color:var(--ink-soft);
-  padding:10px 14px;
-  border-bottom:2px solid transparent;
-  transition:color .15s,border-color .15s;
+  background:none;border:none;cursor:pointer;text-align:left;width:100%;
+  text-decoration:none;
+  transition:background .12s,color .12s;
 }
-.anav a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.nav-item:hover{background:var(--paper-2);color:var(--ink);text-decoration:none}
+.nav-item.active{background:var(--accent-soft);color:var(--accent-strong);font-weight:600}
+.sidebar-footer{
+  padding:12px 16px 16px;
+  border-top:1px solid var(--line);
+  font-size:11.5px;color:var(--muted);
+}
 
-/* --- Banner / alert --- */
-.banner{
-  background:var(--accent-soft);border:1px solid rgba(31,139,76,.25);
-  color:var(--accent-strong);border-radius:var(--r-xs);
-  padding:10px 16px;margin-bottom:20px;font-size:13px;
+/* --- Mobile topbar --- */
+.mobile-top{
+  position:sticky;top:0;z-index:60;
+  display:flex;align-items:center;gap:9px;
+  padding:11px 16px;
+  background:rgba(255,255,255,.92);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
 }
+@media(min-width:900px){.mobile-top{display:none}}
+.mobile-top .brand-name{font-weight:650;font-size:16px;letter-spacing:-.02em}
+.mobile-top .view-name{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+/* --- Mobile tabbar (collapsed nav) --- */
+.tabbar-mobile{
+  position:fixed;bottom:0;left:0;right:0;z-index:70;
+  display:flex;overflow-x:auto;
+  background:rgba(255,255,255,.96);
+  backdrop-filter:blur(8px);
+  border-top:1px solid var(--line);
+  gap:0;
+  padding-bottom:env(safe-area-inset-bottom,0);
+}
+@media(min-width:900px){.tabbar-mobile{display:none}}
+.tabbar-mobile a{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:8px 10px 9px;
+  min-width:60px;
+  font-size:9.5px;font-weight:540;color:var(--muted);
+  text-decoration:none;white-space:nowrap;
+}
+.tabbar-mobile a.active{color:var(--accent-strong)}
+
+/* --- Main content area (mobile default) --- */
+.main{
+  flex:1;min-width:0;
+  padding:0 16px calc(72px + env(safe-area-inset-bottom,0));
+}
+
+/* --- Banner (dismissible, sticky) --- */
+.banner-fixed{
+  position:sticky;top:0;z-index:50;
+  background:var(--accent-soft);border-bottom:1px solid rgba(31,139,76,.25);
+  color:var(--accent-strong);
+  padding:10px 20px;font-size:13px;
+  display:flex;align-items:center;gap:12px;
+}
+.banner-fixed .banner-msg{flex:1}
+.banner-close{
+  background:none;border:none;cursor:pointer;
+  color:var(--accent-strong);font-size:18px;line-height:1;padding:0 4px;
+  font-weight:300;
+}
+.banner-close:hover{color:var(--accent)}
 .alert{
   background:#fff8e1;border:1px solid #f9a825;
   color:#5d4037;border-radius:var(--r-xs);
@@ -799,6 +1039,10 @@ td.mono{font-family:var(--mono);font-size:12px;color:var(--accent-strong)}
 .muted{color:var(--muted)}
 .trunc{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* --- Account display cells (two-line) --- */
+.acct-primary{display:block;font-size:13px;color:var(--ink);font-weight:500}
+.acct-secondary{display:block;font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:1px}
+
 /* --- Buttons --- */
 button{
   font-family:var(--sans);
@@ -811,6 +1055,8 @@ button{
 button:hover{background:var(--accent-strong)}
 button.danger{background:#b3261e}
 button.danger:hover{background:#9a1f18}
+button.secondary{background:var(--paper);color:var(--ink-soft);border:1px solid var(--line-2)}
+button.secondary:hover{background:var(--paper-2);color:var(--ink)}
 
 /* --- Inputs --- */
 input[type=email],input[type=text]{
@@ -844,37 +1090,69 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 .top5-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
 .top-item{font-size:13px;color:var(--ink-soft);display:flex;justify-content:space-between;align-items:center;gap:12px}
 .top-count{font-weight:600;color:var(--accent-strong);white-space:nowrap}
+
+/* --- Timestamp (sidebar footer) --- */
+.timestamp{font-size:11.5px;color:var(--muted)}
 </style>
 </head>
 <body>
 
-<!-- Top bar -->
-<div class="topbar">
-  <div class="topbar-inner">
-    <div class="brand">
-      ${logoSvg}
-      Zinom <span class="brand-sub">Admin</span>
-    </div>
+${msg ? `
+<!-- Dismissible banner (sticky at top of content) -->
+<div class="banner-fixed" id="admin-banner" role="alert">
+  <span class="banner-msg">${escapeHtml(msg)}</span>
+  <button class="banner-close" onclick="document.getElementById('admin-banner').remove()" aria-label="Fechar">&times;</button>
+</div>
+` : ""}
+
+<div class="shell">
+
+<!-- Sidebar (desktop) -->
+<aside class="sidebar">
+  <a class="sidebar-brand" href="/admin?token=${encodeURIComponent(token)}">
+    ${logoSvg}
+    Zinom <span class="sidebar-sub">Admin</span>
+  </a>
+  <nav class="sidebar-nav" aria-label="Seções do admin">
+    <a class="nav-item" href="#resumo" data-section="resumo">Resumo</a>
+    <a class="nav-item" href="#receita" data-section="receita">Receita</a>
+    <a class="nav-item" href="#funil" data-section="funil">Funil</a>
+    <a class="nav-item" href="#engajamento" data-section="engajamento">Engajamento</a>
+    <a class="nav-item" href="#custo" data-section="custo">Custo</a>
+    <a class="nav-item" href="#qualidade-memoria" data-section="qualidade-memoria">Memória</a>
+    <a class="nav-item" href="#uso-chat" data-section="uso-chat">Chat</a>
+    <a class="nav-item" href="#armazenamento" data-section="armazenamento">Armazenamento</a>
+    <a class="nav-item" href="#leads" data-section="leads">Leads</a>
+    <a class="nav-item" href="#contas" data-section="contas">Contas</a>
+  </nav>
+  <div class="sidebar-footer">
     <span class="timestamp">${escapeHtml(now)}</span>
   </div>
+</aside>
+
+<!-- Mobile topbar -->
+<div class="mobile-top">
+  ${logoSvg}
+  <span class="brand-name">Zinom Admin</span>
+  <span class="view-name">${escapeHtml(now.slice(0, 10))}</span>
 </div>
 
-<!-- Anchor navigation -->
-<div style="background:var(--paper);border-bottom:1px solid var(--line)">
-  <nav class="anav" aria-label="Seções">
-    <a href="#resumo">Resumo</a>
-    <a href="#receita">Receita</a>
-    <a href="#funil">Funil</a>
-    <a href="#engajamento">Engajamento</a>
-    <a href="#custo">Custo</a>
-    <a href="#qualidade-memoria">Memoria</a>
-    <a href="#leads">Leads</a>
-    <a href="#contas">Contas</a>
-  </nav>
-</div>
+<!-- Mobile tabbar -->
+<nav class="tabbar-mobile" aria-label="Seções">
+  <a href="#resumo">Resumo</a>
+  <a href="#receita">Receita</a>
+  <a href="#funil">Funil</a>
+  <a href="#engajamento">Engaj.</a>
+  <a href="#custo">Custo</a>
+  <a href="#qualidade-memoria">Memória</a>
+  <a href="#uso-chat">Chat</a>
+  <a href="#armazenamento">Storage</a>
+  <a href="#leads">Leads</a>
+  <a href="#contas">Contas</a>
+</nav>
 
-<div class="page">
-${banner}
+<!-- Main content -->
+<main class="main">
 
 <!-- ============================== RESUMO ============================== -->
 <section class="section" id="resumo">
@@ -931,6 +1209,12 @@ ${renderCostSection(data)}
 <!-- ============================== QUALIDADE MEMORIA ============================== -->
 ${renderMemoryQualitySection(data)}
 
+<!-- ============================== USO DO CHAT ============================== -->
+${renderChatSection(data)}
+
+<!-- ============================== ARMAZENAMENTO ============================== -->
+${renderStorageSection(data)}
+
 <!-- ============================== LEADS ============================== -->
 <section class="section" id="leads">
   <div class="section-header">
@@ -966,8 +1250,7 @@ ${leadRows || '<tr><td colspan="5" class="xs muted">Nenhuma solicitacao ainda.</
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th title="Identificador unico da conta no Zinom">ID da conta</th>
-      <th title="E-mail de acesso ao portal">E-mail</th>
+      <th title="Identificador unico da conta no Zinom">Conta</th>
       <th title="Tipo: owner (operador), friend (convidado)">Tipo</th>
       <th title="Estado atual: active ou suspended">Status</th>
       <th title="Plano contratado e status da assinatura">Plano</th>
@@ -988,7 +1271,30 @@ ${rows}
   </div>
 </section>
 
-</div><!-- /page -->
+</main>
+</div><!-- /shell -->
+
+<script>
+/* Scrollspy: mark nav-item active when its section scrolls into view */
+(function() {
+  var items = document.querySelectorAll('.nav-item[data-section]');
+  var sections = Array.from(items).map(function(el) {
+    return document.getElementById(el.getAttribute('data-section'));
+  }).filter(Boolean);
+  if (!sections.length || !window.IntersectionObserver) return;
+  var obs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        var id = e.target.id;
+        items.forEach(function(el) {
+          el.classList.toggle('active', el.getAttribute('data-section') === id);
+        });
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(function(s) { obs.observe(s); });
+})();
+</script>
 </body>
 </html>`;
 }
@@ -1088,6 +1394,25 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     } catch (err: any) {
       console.error(`[admin] unblock failed: ${err?.message ?? err}`);
       res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao reativar: ${err?.message ?? "erro"}`)}`);
+    }
+  });
+
+  // Dismiss a lead: marks dismissed_at=now() without sending invite or deleting the row.
+  router.post("/admin/lead/dismiss", async (req, res) => {
+    const token = gate(req, res);
+    if (!token) return;
+    const back = `/admin?token=${encodeURIComponent(token)}`;
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    if (!email) {
+      res.redirect(`${back}&msg=${encodeURIComponent("E-mail obrigatório.")}`);
+      return;
+    }
+    try {
+      await dismissInviteRequest(email);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Lead ${email} dispensado.`)}`);
+    } catch (err: any) {
+      console.error(`[admin] dismiss failed: ${err?.message ?? err}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao dispensar: ${err?.message ?? "erro"}`)}`);
     }
   });
 

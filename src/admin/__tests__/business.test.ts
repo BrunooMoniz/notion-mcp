@@ -388,3 +388,77 @@ test("computeFeedbackPct: more feedback chunks than searches → capped at 100%"
 test("computeFeedbackPct: 0 feedback chunks → 0%", () => {
   assert.equal(computeFeedbackPct(0, 500), 0);
 });
+
+// ---------------------------------------------------------------------------
+// accountDisplay
+// ---------------------------------------------------------------------------
+
+import {
+  accountDisplay,
+  formatBytes,
+  type AccountDisplayRow,
+} from "../business.js";
+
+test("accountDisplay: uses email when present", () => {
+  const acct: AccountDisplayRow = { id: "abc123", kind: "friend", email: "foo@bar.com" };
+  const result = accountDisplay(acct, new Map());
+  assert.equal(result.primary, "foo@bar.com");
+  assert.equal(result.secondary, "abc123");
+});
+
+test("accountDisplay: owner kind shows 'Operador (você)' when no email", () => {
+  const acct: AccountDisplayRow = { id: "owner-1", kind: "owner", email: null };
+  const result = accountDisplay(acct, new Map());
+  assert.equal(result.primary, "Operador (você)");
+  assert.equal(result.secondary, "owner-1");
+});
+
+test("accountDisplay: notion kind shows workspace name from map", () => {
+  const acct: AccountDisplayRow = { id: "notion:ws1", kind: "notion_user", email: null };
+  const wsNames = new Map([["notion:ws1", "Meu Workspace"]]);
+  const result = accountDisplay(acct, wsNames);
+  assert.equal(result.primary, "Notion: Meu Workspace");
+  assert.equal(result.secondary, "notion:ws1");
+});
+
+test("accountDisplay: notion kind with no workspace name falls back to id", () => {
+  const acct: AccountDisplayRow = { id: "notion:ws2", kind: "notion_user", email: null };
+  const result = accountDisplay(acct, new Map());
+  assert.equal(result.primary, "notion:ws2");
+  assert.equal(result.secondary, "notion:ws2");
+});
+
+test("accountDisplay: unknown kind with no email shows id as primary", () => {
+  const acct: AccountDisplayRow = { id: "xyz", kind: "friend", email: null };
+  const result = accountDisplay(acct, new Map());
+  assert.equal(result.primary, "xyz");
+  assert.equal(result.secondary, "xyz");
+});
+
+// ---------------------------------------------------------------------------
+// formatBytes
+// ---------------------------------------------------------------------------
+
+test("formatBytes: 0 returns '0 B'", () => {
+  assert.equal(formatBytes(0), "0 B");
+});
+
+test("formatBytes: 500 returns '500 B'", () => {
+  assert.equal(formatBytes(500), "500 B");
+});
+
+test("formatBytes: 1024 returns '1.0 KB'", () => {
+  assert.equal(formatBytes(1024), "1.0 KB");
+});
+
+test("formatBytes: 1536 returns '1.5 KB'", () => {
+  assert.equal(formatBytes(1536), "1.5 KB");
+});
+
+test("formatBytes: 1048576 returns '1.0 MB'", () => {
+  assert.equal(formatBytes(1_048_576), "1.0 MB");
+});
+
+test("formatBytes: 1073741824 returns '1.0 GB'", () => {
+  assert.equal(formatBytes(1_073_741_824), "1.0 GB");
+});
