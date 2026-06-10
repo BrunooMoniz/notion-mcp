@@ -14,7 +14,7 @@ import type { Chunk, SearchFilters, SearchHit, SearchMode, Workspace } from "./t
 import { getAllowedWorkspaces as getAllowedWorkspacesImpl } from "../getAllowedWorkspaces.js";
 import { getAccountId } from "../context.js";
 import { recordUsage } from "./usage.js";
-import { assertSearchWithinLimit } from "../billing/usage.js";
+import { assertSearchWithinLimit, assertCreditsWithinLimit } from "../billing/usage.js";
 import { applyFinalScore, getUtilityAlpha, computeEffectiveUtility } from "./utility.js";
 
 export interface RankedChunk {
@@ -329,6 +329,11 @@ export async function brainSearch(
   // QuotaExceededError (surfaced by the brain_search tool as a friendly message).
   // Owner/default account is exempt (no DB hit) so cron/eval/tests are unchanged.
   await assertSearchWithinLimit(accountId);
+
+  // F7 — credit gate. Respects PLAN_ENFORCEMENT mode (off/soft/hard). In soft
+  // (default), never blocks; in hard, throws QuotaExceededError when credits
+  // exhausted. ilimitado and owner are never hard-blocked.
+  await assertCreditsWithinLimit(accountId, "search", 1);
 
   // F3.0 — passive metering (best-effort, never blocks the search).
   await recordUsage(accountId, "search", 1);

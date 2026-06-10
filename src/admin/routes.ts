@@ -12,8 +12,9 @@ import { generateInviteCode, issueInvite, hashInvite } from "../portal/invites.j
 import { sendInviteEmail } from "../portal/email.js";
 import { listInviteRequests, markRequestInvited, type InviteRequest } from "../portal/leads.js";
 import { blockAccount, unblockAccount } from "./block.js";
-import { monthStartUTC } from "../billing/usage.js";
+import { monthStartUTC, checkCostAlert } from "../billing/usage.js";
 import { getPlanLimits } from "../billing/plans.js";
+import { creditsFor } from "../billing/credits.js";
 import { ACTIVE_STATUS } from "../account-status.js";
 import {
   buildFunnel,
@@ -404,6 +405,10 @@ function renderCostSection(data: Awaited<ReturnType<typeof gather>>): string {
       const llmOutputTokens = Number(usageRows.find((u) => u.metric === "llm_output_tokens")?.total ?? 0);
       const cost = estimateCost({ embed_tokens: embedTokens, searches }, costEnv);
       const llmCost = estimateLlmCost({ llm_input_tokens: llmInputTokens, llm_output_tokens: llmOutputTokens }, llmCostEnv);
+      // F7: cost alert guard-rail — fire best-effort notify when LLM cost exceeds threshold.
+      if (llmCost.totalCost > 0) {
+        checkCostAlert(a.id, llmCost.totalCost).catch(() => {/* swallowed */});
+      }
       const planPrice = getPlanLimits(a.plan).priceBRLCents / 100;
       const margin = hasCostConfig ? planPrice - cost.totalCost : null;
       const fmtCost = hasCostConfig ? `$${cost.totalCost.toFixed(4)}` : "—";
@@ -533,7 +538,16 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
 
   const rows = data.accounts
     .map((a) => {
-      const usageStr = (data.usage.get(a.id) ?? []).map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
+      const usageRows = data.usage.get(a.id) ?? [];
+      const usageStr = usageRows.map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
+      // F7: compute credits used from usage rows.
+      const creditsUsed = Math.round(usageRows.reduce((sum, u) => sum + creditsFor(u.metric, Number(u.total)), 0));
+      const planLimits = getPlanLimits(a.plan);
+      const creditsLimit = planLimits.monthly_credits;
+      const creditsStr = isFinite(creditsLimit)
+        ? `${creditsUsed}/${creditsLimit}`
+        : `${creditsUsed}/∞`;
+      const creditsOver = isFinite(creditsLimit) && creditsUsed > creditsLimit;
       // Latest failed-run error per source (truncated), shown beneath the ✓/✗ flags
       // so a red source explains itself.
       const errs = (data.errors.get(a.id) ?? [])
@@ -584,6 +598,7 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         <td class="xs trunc">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
         <td class="xs">${runs}</td>
         <td class="xs">${escapeHtml(usageStr)}</td>
+        <td class="xs"${creditsOver ? ' style="color:#d64545;font-weight:600"' : ""}>${escapeHtml(creditsStr)}</td>
         <td class="xs">${new Date(a.created_at).toLocaleString("pt-BR")}</td>
         <td>${actCell}</td>
       </tr>`;
@@ -962,6 +977,7 @@ ${leadRows || '<tr><td colspan="5" class="xs muted">Nenhuma solicitacao ainda.</
       <th title="Workspaces Notion vinculados a conta">Workspaces</th>
       <th title="Resultado do ultimo ciclo de indexacao por fonte — expanda para ver erros">Indices</th>
       <th title="Uso de metricas no mes corrente (embed_tokens, search, etc.)">Uso (mes)</th>
+      <th title="Creditos de IA usados / limite do plano no mes corrente (F7)">Creditos</th>
       <th title="Data de criacao da conta">Criada</th>
       <th title="Bloquear ou reativar a conta">Acao</th>
     </tr></thead>

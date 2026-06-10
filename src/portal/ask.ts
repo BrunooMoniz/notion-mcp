@@ -11,9 +11,10 @@ import type { Request, Response } from "express";
 import { brainSearch } from "../rag/search.js";
 import { toBrainResult, type BrainResult } from "../rag/brain-format.js";
 import { isUntrustedSourceType } from "../rag/brain-tool.js";
-import { QuotaExceededError } from "../billing/usage.js";
+import { QuotaExceededError, assertCreditsWithinLimit } from "../billing/usage.js";
 import { requestContext } from "../context.js";
 import { recordLlmUsage } from "../llm-usage.js";
+import { recordUsage } from "../rag/usage.js";
 
 // ---------------------------------------------------------------------------
 // Model config (env-injectable, analogous to CLASSIFIER_MODEL)
@@ -442,6 +443,21 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
     }
     // Fallthrough to search if action extraction failed
   }
+
+  // F7: credit gate for the ask/search route (2 credits). Respects
+  // PLAN_ENFORCEMENT mode: off/soft = no block; hard = throws QuotaExceededError.
+  try {
+    await assertCreditsWithinLimit(accountId, "ask", 2);
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      res.status(402).json({ error: "quota", message: e.message });
+      return;
+    }
+    throw e;
+  }
+
+  // F7: meter ask credit usage (best-effort, never blocks).
+  recordUsage(accountId, "ask", 1).catch(() => {/* swallowed */});
 
   // --- Search route: brain_search → filter/dedup → LLM with context ---
   let hits: BrainResult[];

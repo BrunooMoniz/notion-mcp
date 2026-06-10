@@ -36,6 +36,23 @@ test("matrix matches the locked spec §3 numbers", () => {
   assert.equal(PLANS.ilimitado.maxChunks, 150000);
 });
 
+test("F7 credit limits match spec §2 table", () => {
+  assert.equal(PLANS.free.monthly_credits, 100);
+  assert.equal(PLANS.free.actions_per_month, 0);
+
+  assert.equal(PLANS.essencial.monthly_credits, 1500);
+  assert.equal(PLANS.essencial.actions_per_month, 30);
+
+  assert.equal(PLANS.pro.monthly_credits, 8000);
+  assert.equal(PLANS.pro.actions_per_month, 200);
+
+  assert.equal(PLANS.ilimitado.monthly_credits, 30000);
+  assert.equal(PLANS.ilimitado.actions_per_month, Number.POSITIVE_INFINITY);
+
+  assert.equal(PLANS.owner.monthly_credits, Number.POSITIVE_INFINITY);
+  assert.equal(PLANS.owner.actions_per_month, Number.POSITIVE_INFINITY);
+});
+
 test("getPlanLimits defaults unknown/missing plan to free", () => {
   assert.equal(getPlanLimits(undefined).id, "free");
   assert.equal(getPlanLimits("bogus").id, "free");

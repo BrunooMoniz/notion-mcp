@@ -41,7 +41,7 @@ import { listNotionWorkspaces, disconnectNotionWorkspace } from "./notion-worksp
 import { authUrl } from "../google/oauth.js";
 import { putPortalGoogleState } from "./google-link.js";
 import { listGoogleAccountsMasked, removeGoogleAccount } from "../google/google-accounts.js";
-import { assertCanAddWorkspace, WorkspaceLimitError, getUsageSnapshot } from "../billing/usage.js";
+import { assertCanAddWorkspace, WorkspaceLimitError, getUsageSnapshot, assertCreditsWithinLimit, QuotaExceededError } from "../billing/usage.js";
 import { PAID_PLANS, priceIdForPlan, getPlanLimits, type PlanId } from "../billing/plans.js";
 import { getBillingRow, setStripeCustomerId } from "../billing/account-plan.js";
 import { getStripe } from "../billing/stripe.js";
@@ -273,6 +273,9 @@ export function createPortalRouter(): express.Router {
             maxWorkspaces: l.maxWorkspaces, maxChunks: l.maxChunks,
             searchesPerMonth: l.searchesPerMonth, onDemandPagesPerDay: l.onDemandPagesPerDay,
             features: l.features,
+            // F7: credit limits
+            monthly_credits: l.monthly_credits,
+            actions_per_month: l.actions_per_month,
           };
         }),
       });
@@ -775,6 +778,9 @@ export function createPortalRouter(): express.Router {
       return;
     }
     try {
+      // F7: credit gate for action execution (2 credits). Respects PLAN_ENFORCEMENT.
+      await assertCreditsWithinLimit(accountId, "action", 2);
+
       const { executeAction } = await import("./ask-actions.js");
       const result = await executeAction(accountId, {
         type: proposed.type,
@@ -782,6 +788,10 @@ export function createPortalRouter(): express.Router {
         resumo: proposed.resumo,
       });
       if (result.ok) {
+        // F7: meter action credit usage (best-effort).
+        const { recordUsage: recordUsageAction } = await import("../rag/usage.js");
+        recordUsageAction(accountId, "action", 1).catch(() => {/* swallowed */});
+
         // Spec 004 §4: implicit_action — chunks cited in the proposal get +1.0
         // when the user confirms the action. The client may send cited_chunk_ids.
         // Best-effort: never blocks the response.
@@ -810,6 +820,10 @@ export function createPortalRouter(): express.Router {
         res.status(422).json({ ok: false, error: result.error, message: result.message });
       }
     } catch (err: any) {
+      if (err instanceof QuotaExceededError) {
+        res.status(402).json({ ok: false, error: "quota", message: err.message });
+        return;
+      }
       console.error(`[portal] ask/execute ${accountId}: ${err?.message ?? err}`);
       res.status(500).json({ ok: false, error: "server_error", message: "Erro interno ao executar a ação." });
     }
