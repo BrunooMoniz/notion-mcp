@@ -334,3 +334,90 @@ export function computeFeedbackPct(
   if (totalSearches === 0) return 0;
   return Math.min(100, Math.round((distinctFeedbackChunks / totalSearches) * 100));
 }
+
+// ---------------------------------------------------------------------------
+// accountDisplay — human-readable label for any account row
+// ---------------------------------------------------------------------------
+
+/** Minimal account shape needed to produce a display label. */
+export interface AccountDisplayRow {
+  id: string;
+  kind: string | null;
+  email: string | null;
+}
+
+/** Result of accountDisplay: primary label + secondary (tech ID). */
+export interface AccountDisplayResult {
+  /** Human-readable label: email, role label, or workspace name. */
+  primary: string;
+  /** Technical ID shown small/mono beneath the primary label. */
+  secondary: string;
+}
+
+/**
+ * Compute a human-readable display label for an account.
+ *
+ * Priority:
+ * 1. email (if present) → primary = email, secondary = id
+ * 2. kind === 'owner'   → primary = "Operador (você)", secondary = id
+ * 3. wsNames has a name for this id → primary = "Notion: <name>", secondary = id
+ * 4. fallback → primary = id, secondary = id
+ *
+ * Pure — no DB, no I/O.
+ */
+export function accountDisplay(
+  acct: AccountDisplayRow,
+  wsNames: Map<string, string>,
+): AccountDisplayResult {
+  const secondary = acct.id;
+
+  if (acct.email) {
+    return { primary: acct.email, secondary };
+  }
+  if (acct.kind === "owner") {
+    return { primary: "Operador (você)", secondary };
+  }
+  const wsName = wsNames.get(acct.id);
+  if (wsName) {
+    return { primary: `Notion: ${wsName}`, secondary };
+  }
+  return { primary: acct.id, secondary };
+}
+
+// ---------------------------------------------------------------------------
+// formatBytes — human-readable byte size
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a byte count as a human-readable string.
+ * Uses binary units (1 KB = 1024 B).
+ * Pure — no I/O.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+}
+
+// ---------------------------------------------------------------------------
+// Types for new sections (Chat Usage, Storage)
+// ---------------------------------------------------------------------------
+
+/** One row from the chat-usage query (per account). */
+export interface ChatUsageRow {
+  account_id: string;
+  asks7d: number;
+  asks30d: number;
+  last_ask: Date | null;
+}
+
+/** One row from the storage query (per account). */
+export interface StorageRow {
+  account_id: string;
+  chunk_count: number;
+  approx_bytes: number;
+}
