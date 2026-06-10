@@ -134,6 +134,7 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 const app = express();
 
 // Trust Tailscale Funnel proxy (localhost)
+// SECURITY (pentest F-4): confirm Cloudflare path before trusting proxy
 app.set("trust proxy", "loopback");
 
 // Security headers
@@ -191,8 +192,9 @@ app.use("/notion", oauthLimiter);
 // per-route express.raw() sees the exact bytes for signature verification.
 app.use(createStripeWebhookRouter());
 
-// Parse JSON for all routes, URL-encoded for OAuth consent form
-app.use(express.json());
+// Parse JSON for all routes, URL-encoded for OAuth consent form.
+// SECURITY (pentest F-7): explicit 32 KB body limit prevents large-payload DoS.
+app.use(express.json({ limit: "32kb" }));
 app.use(express.urlencoded({ extended: false }));
 
 // Request logging
