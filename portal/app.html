@@ -331,15 +331,41 @@
               <h2 class="card-title">Navegar nos documentos</h2>
               <p class="card-sub">Filtre por fonte ou busque por título. Clique para abrir o original.</p>
             </div>
+            <div class="brain-view-toggle" role="group" aria-label="Modo de visualização">
+              <button class="fchip active" id="brain-toggle-lista" type="button">Lista</button>
+              <button class="fchip" id="brain-toggle-grafo" type="button">Grafo</button>
+            </div>
           </div>
-          <div class="filters" id="doc-filters"></div>
-          <input type="text" id="doc-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
-          <div class="doc-list" id="doc-list"></div>
-          <div class="pager hidden" id="doc-pager">
-            <span id="pager-info"></span>
-            <div class="pgbtns">
-              <button class="btn btn-ghost btn-sm" type="button" id="pager-prev">← Anteriores</button>
-              <button class="btn btn-ghost btn-sm" type="button" id="pager-next">Próximos →</button>
+
+          <!-- Lista view -->
+          <div id="brain-lista-view">
+            <div class="filters" id="doc-filters"></div>
+            <input type="text" id="doc-search" placeholder="Buscar por título…" aria-label="Buscar documentos">
+            <div class="doc-list" id="doc-list"></div>
+            <div class="pager hidden" id="doc-pager">
+              <span id="pager-info"></span>
+              <div class="pgbtns">
+                <button class="btn btn-ghost btn-sm" type="button" id="pager-prev">← Anteriores</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="pager-next">Próximos →</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Graph view -->
+          <div id="brain-grafo-view" style="display:none">
+            <div id="brain-graph-empty">
+              <p>Nenhuma entidade extraída ainda.<br>Execute um reindex para visualizar o grafo.</p>
+            </div>
+            <div id="brain-graph-wrap">
+              <canvas id="brain-graph-canvas" aria-label="Grafo do cérebro"></canvas>
+              <div id="graph-panel" role="complementary" aria-label="Detalhes do nó">
+                <button class="panel-close" id="graph-panel-close" type="button" aria-label="Fechar painel">✕</button>
+                <div class="panel-name" id="graph-panel-name">—</div>
+                <div class="panel-meta" id="graph-panel-meta"></div>
+                <div class="panel-action">
+                  <button class="btn btn-ghost btn-sm" id="graph-panel-docs" type="button" style="display:none">Ver documentos →</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
