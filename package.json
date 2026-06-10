@@ -18,6 +18,7 @@
     "doctor": "tsx scripts/doctor.mts",
     "eval": "tsx scripts/eval/run-eval.mts",
     "reindex": "tsx scripts/reindex-all.mts",
+    "backfill-workspace-names": "tsx scripts/backfill-workspace-names.mts",
     "classify": "tsx scripts/run-classifier.mts",
     "revisitar": "tsx scripts/run-revisitar.mts"
   },
