@@ -37,25 +37,37 @@ function shell(title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} — Zinom</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin="anonymous">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.css">
+<style>@import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');</style>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-family:'Geist Sans',ui-sans-serif,system-ui,sans-serif;background:#0f0f0f;color:#e8e8e6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-.card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:16px;padding:40px 36px;max-width:440px;width:100%;text-align:center}
-.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px;font-weight:600;font-size:18px;color:#e8e8e6;letter-spacing:-.02em}
-.icon{font-size:38px;margin-bottom:16px;display:block}
-h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px;color:#e8e8e6}
-.sub{color:#888;font-size:14px;line-height:1.6;margin-bottom:24px}
-.account{display:inline-block;background:#1f8b4c22;border:1px solid #1f8b4c44;border-radius:8px;padding:6px 14px;font-size:14px;color:#4cba7e;margin-bottom:20px;word-break:break-all}
-.hint{color:#555;font-size:13px;margin-top:20px}
-a{color:#4cba7e;text-decoration:none}a:hover{text-decoration:underline}
-.accent{color:#1f8b4c}
+:root{
+  --bg:#ffffff;--paper:#f7f6f3;--ink:#26241f;--ink-soft:#4a4740;--muted:#827d73;
+  --line:#eae7df;--line-2:#e0ddd3;--accent:#1f8b4c;--accent-strong:#15633a;
+  --accent-soft:#ecf5ef;--accent-ring:rgba(31,139,76,.18);
+  --r:16px;--r-sm:11px;--r-xs:8px;
+  --shadow:0 12px 32px -12px rgba(38,36,31,.18),0 4px 10px -6px rgba(38,36,31,.10);
+  --sans:"Geist Variable","Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+}
+html{font-family:var(--sans);background:var(--paper);color:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:40px 36px;max-width:440px;width:100%;text-align:center}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px;font-weight:600;font-size:18px;color:var(--ink);letter-spacing:-.02em;text-decoration:none}
+.status-icon{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;margin:0 auto 18px}
+.status-icon.ok{background:var(--accent-soft);color:var(--accent)}
+.status-icon.err{background:#fdf0ef;color:#c43030}
+h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px;color:var(--ink)}
+.sub{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:20px}
+.account{display:inline-block;background:var(--accent-soft);border:1px solid #d7e9de;border-radius:var(--r-xs);padding:6px 14px;font-size:13.5px;color:var(--accent-strong);font-weight:520;margin-bottom:16px;word-break:break-all}
+.hint{color:var(--muted);font-size:13px;margin-top:18px;line-height:1.5}
+a{color:var(--accent-strong);text-decoration:none;font-weight:520}
+a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="brand">${LOGO_SVG}<span>Zinom</span></div>
+  <a class="brand" href="/">${LOGO_SVG}<span>Zinom</span></a>
   ${body}
 </div>
 </body>
@@ -72,7 +84,9 @@ export function buildSuccessPage(provider: OAuthProvider, accountDisplay: string
   const safeAccount = escapeHtml(accountDisplay);
   const accountKind = provider === "google" ? "Conta" : "Workspace";
   return shell(`${label} conectado`, `
-    <span class="icon">✅</span>
+    <div class="status-icon ok" aria-hidden="true">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+    </div>
     <h1>${label} conectado</h1>
     <div class="account">${accountKind}: ${safeAccount}</div>
     <p class="sub">Pode fechar esta aba e voltar ao portal.</p>
@@ -89,10 +103,12 @@ export function buildErrorPage(provider: OAuthProvider, reason: string, retryUrl
   const safeReason = escapeHtml(reason);
   const safeRetry = escapeHtml(retryUrl);
   return shell(`Erro ao conectar ${label}`, `
-    <span class="icon">❌</span>
+    <div class="status-icon err" aria-hidden="true">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </div>
     <h1>Erro ao conectar ${label}</h1>
     <p class="sub">${safeReason}</p>
-    <a href="${safeRetry}">Tentar de novo →</a>
+    <a href="${safeRetry}">Tentar de novo</a>
     <p class="hint">Se o problema persistir, feche esta aba e tente novamente pelo portal.</p>
   `);
 }
