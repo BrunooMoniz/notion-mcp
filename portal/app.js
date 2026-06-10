@@ -496,299 +496,530 @@ function renderExplorerSelection() {
   });
 }
 
-/* ==================== BRAIN GRAPH (F5) ====================  */
+/* ==================== BRAIN GRAPH (F5, v2 — Cytoscape + fcose) ==================== */
 
-var _graphData = null;          // {nodes, edges} from /portal/brain/graph
-var _graphLoaded = false;
-var _graphSig = '';             // filter signature at last graph load (for change detection)
-var _cyInstance = null;         // Cytoscape instance
+var _cy = null;                  // Cytoscape instance
+var _graphMode = 'overview';     // 'overview' | 'focus'
+var _graphIncludeDocs = false;   // docs toggle (focus mode only)
+var _graphLabelsForced = false;  // toolbar label override
+var _graphFocusEntityIds = [];   // entity IDs currently in focus
+var _graphLoaded = false;        // true once first overview is rendered
+var _graphToolbarWired = false;  // prevent double-wiring
+var _graphCurrentNode = null;    // node data of currently selected node
 
-/**
- * ensureCytoscape — lazy-loads cytoscape.min.js (local vendor) once,
- * resolves when window.cytoscape is available. Subsequent calls are instant.
- */
-var _cytoscapePromise = null;
-function ensureCytoscape() {
-  if (_cytoscapePromise) return _cytoscapePromise;
-  _cytoscapePromise = new Promise(function(resolve, reject) {
-    if (window.cytoscape) { resolve(window.cytoscape); return; }
-    var script = document.createElement('script');
-    script.src = '/vendor/cytoscape.min.js';
-    script.onload = function() { resolve(window.cytoscape); };
-    script.onerror = function() { reject(new Error('Failed to load cytoscape')); };
-    document.head.appendChild(script);
-  });
-  return _cytoscapePromise;
+/* ---- colour tokens ---- */
+var GC = {
+  pessoa:  '#1f8b4c',
+  empresa: '#4a7ebb',
+  projeto: '#d4a017',
+  doc:     '#9e9e9e',
+};
+
+/* ---- register fcose once (scripts loaded by app.html) ---- */
+var _fcoseRegistered = false;
+function ensureFcose() {
+  if (_fcoseRegistered) return;
+  if (window.cytoscape && window.cytoscapeFcose) {
+    try { window.cytoscape.use(window.cytoscapeFcose); } catch (_e) { /* already registered */ }
+    _fcoseRegistered = true;
+  }
 }
 
-/* === REMOVED: ForceGraph class (canvas force-directed layout — unstable divergence) ===
- * The old ForceGraph applied attraction as f = dist * ATTRACT * log(weight) to the raw
- * delta vector without normalizing, causing nodes to diverge off-screen in milliseconds.
- * Replaced by Cytoscape.js with the built-in 'cose' layout (stable spring model).
- */
+/* ---- convert API response to Cytoscape elements ---- */
+function toCyElements(data) {
+  var els = [];
+  (data.nodes || []).forEach(function(n) {
+    var color = n.kind === 'entity' ? (GC[n.type] || '#888') : GC.doc;
+    var r = n.kind === 'entity'
+      ? Math.max(10, Math.min(36, Math.sqrt(n.weight || 1) * 4))
+      : Math.max(7, Math.min(22, Math.sqrt(n.weight || 1) * 2.5));
+    els.push({ data: {
+      id: n.id, kind: n.kind, label: n.label, type: n.type,
+      weight: n.weight || 1, url: n.url || null,
+      color: color, size: r,
+    }});
+  });
+  (data.edges || []).forEach(function(e) {
+    var w = e.weight || 1;
+    els.push({ data: {
+      id: 'edge-' + e.a + '-' + e.b,
+      source: e.a, target: e.b,
+      weight: w,
+      width: Math.max(0.5, Math.min(4, w * 0.4)),
+    }});
+  });
+  return els;
+}
 
-// Sentinel to mark that the ForceGraph stub is gone — used by static checks
-var _FORCEGRAPH_REMOVED = true; void _FORCEGRAPH_REMOVED;
+/* ---- build Cytoscape style array ---- */
+function cyStyle() {
+  return [
+    {
+      selector: 'node',
+      style: {
+        'width': 'data(size)',
+        'height': 'data(size)',
+        'background-color': 'data(color)',
+        'border-width': 1,
+        'border-color': 'rgba(0,0,0,0.12)',
+        'label': '',
+        'font-family': '"Geist Mono Variable","Geist Mono",monospace',
+        'font-size': '10px',
+        'color': '#26241f',
+        'text-valign': 'bottom',
+        'text-halign': 'center',
+        'text-margin-y': 4,
+        'text-max-width': '100px',
+        'text-wrap': 'ellipsis',
+        'min-zoomed-font-size': 8,
+        'transition-property': 'opacity, border-width',
+        'transition-duration': '0.15s',
+        'cursor': 'pointer',
+      }
+    },
+    { selector: 'node.show-label', style: { 'label': 'data(label)' } },
+    { selector: 'node.dimmed', style: { 'opacity': 0.12 } },
+    {
+      selector: 'node:selected',
+      style: { 'border-width': 3, 'border-color': '#26241f', 'label': 'data(label)', 'opacity': 1 }
+    },
+    { selector: 'node.highlighted', style: { 'label': 'data(label)', 'opacity': 1 } },
+    {
+      selector: 'edge',
+      style: {
+        'width': 'data(width)',
+        'line-color': 'rgba(100,90,75,0.18)',
+        'curve-style': 'bezier',
+        'transition-property': 'opacity, line-color',
+        'transition-duration': '0.15s',
+      }
+    },
+    { selector: 'edge.dimmed', style: { 'opacity': 0.05 } },
+    { selector: 'edge.highlighted', style: { 'line-color': 'rgba(31,139,76,0.45)', 'opacity': 1 } },
+  ];
+}
 
-/* ForceGraph class has been fully removed. Cytoscape.js is used instead. */
+/* ---- apply label classes based on zoom level and global toggle ---- */
+function updateLabels() {
+  if (!_cy) return;
+  var zoom = _cy.zoom();
+  _cy.nodes().forEach(function(n) {
+    var big = n.data('weight') >= 5;
+    var show = _graphLabelsForced || big || zoom > 1.4;
+    n.toggleClass('show-label', show && !n.hasClass('dimmed'));
+  });
+}
 
-/**
- * loadGraph — fetches /portal/brain/graph and renders with Cytoscape.js.
- *
- * Change detection: only re-fetches when explorerState filter signature changes.
- * When the signature is the same, returns immediately (no fetch, no re-render).
- * Cytoscape pan/zoom is native; no custom event handlers needed.
- *
- * Polling guard: loadStatus() calls renderBrainMini() which only touches the
- * mini-stat elements, not the graph container. switchBrainView() checks
- * explorerState.view before calling loadGraph, so the polling path (loadStatus
- * → load → renderFontes etc.) never touches the Grafo view.
- */
-async function loadGraph() {
-  var wrap = document.getElementById('brain-graph-wrap');
-  var empty = document.getElementById('brain-graph-empty');
-  if (!wrap || !empty) return;
-
-  // Build a signature of the current filter state to detect changes.
-  var sig = Array.from(explorerState.entityIds).sort().join(',') + '|' + explorerState.sourceType;
-
-  if (_graphLoaded && _graphSig === sig) {
-    // Same filters and Cytoscape instance exists — just call resize in case the
-    // container size changed (e.g. window resize, panel toggle).
-    if (_cyInstance) { _cyInstance.resize(); }
+/* ---- highlight neighbourhood of a node ---- */
+function highlightNode(nodeId) {
+  if (!_cy) return;
+  if (!nodeId) {
+    _cy.elements().removeClass('dimmed highlighted');
+    updateLabels();
     return;
   }
+  var node = _cy.getElementById(nodeId);
+  if (!node || node.empty()) return;
+  var neighbors = node.neighborhood().add(node);
+  _cy.elements().addClass('dimmed').removeClass('highlighted');
+  neighbors.removeClass('dimmed').addClass('highlighted');
+  updateLabels();
+}
+
+/* ---- init or re-init Cytoscape ---- */
+function initCy(data) {
+  ensureFcose();
+  var container = document.getElementById('brain-graph-cy');
+  if (!container) return;
+
+  if (_cy) { _cy.destroy(); _cy = null; }
+
+  var useFcose = _fcoseRegistered;
+  var layoutConfig = useFcose
+    ? {
+        name: 'fcose',
+        quality: 'proof',
+        animate: true,
+        animationDuration: 600,
+        randomize: true,
+        nodeRepulsion: function() { return 12000; },
+        idealEdgeLength: function() { return 90; },
+        edgeElasticity: function() { return 0.45; },
+        numIter: 2500,
+        packComponents: true,
+        componentSpacing: 50,
+        nodeSeparation: 75,
+        gravityRange: 3.8,
+        gravity: 0.25,
+        tile: true,
+        tilingPaddingVertical: 10,
+        tilingPaddingHorizontal: 10,
+        initialEnergyOnIncremental: 0.5,
+        stop: function() { updateLabels(); },
+      }
+    : {
+        name: 'cose',
+        animate: true,
+        animationDuration: 600,
+        nodeRepulsion: function() { return 800000; },
+        idealEdgeLength: function() { return 90; },
+        componentSpacing: 80,
+        gravity: 0.25,
+        numIter: 1500,
+        stop: function() { updateLabels(); },
+      };
+
+  _cy = window.cytoscape({
+    container: container,
+    elements: toCyElements(data),
+    style: cyStyle(),
+    layout: layoutConfig,
+    minZoom: 0.1,
+    maxZoom: 6,
+    wheelSensitivity: 0.3,
+  });
+
+  _cy.on('zoom', updateLabels);
+
+  // Single click: highlight + open panel
+  _cy.on('tap', 'node', function(e) {
+    var node = e.target;
+    var nodeId = node.id();
+    highlightNode(nodeId);
+    _cy.animate({ center: { eles: node }, zoom: Math.max(_cy.zoom(), 0.8), duration: 300 });
+    _graphCurrentNode = node.data();
+    openGraphPanel(node.data());
+  });
+
+  // Double-click on entity: focus mode
+  _cy.on('dbltap', 'node', function(e) {
+    var node = e.target;
+    if (node.data('kind') !== 'entity') return;
+    var rawId = node.id(); // "e:123"
+    var numId = parseInt(rawId.slice(2), 10);
+    if (!isNaN(numId)) {
+      _graphFocusEntityIds = [numId];
+      _graphMode = 'focus';
+      reloadGraph({ mode: 'focus', entity_ids: [numId] });
+    }
+  });
+
+  // Click on background: clear
+  _cy.on('tap', function(e) {
+    if (e.target === _cy) {
+      _cy.elements().removeClass('dimmed highlighted');
+      updateLabels();
+      var panel = document.getElementById('graph-panel');
+      if (panel) panel.classList.remove('open');
+      _graphCurrentNode = null;
+    }
+  });
+
+  _cy.one('layoutstop', function() {
+    _cy.fit(_cy.elements(), 40);
+    updateLabels();
+  });
+}
+
+/* ---- fetch graph data and (re)render ---- */
+async function reloadGraph(overrideParams) {
+  var wrap = document.getElementById('brain-graph-wrap');
+  var empty = document.getElementById('brain-graph-empty');
+  var hint = document.getElementById('graph-hint');
+  if (!wrap || !empty) return;
+
+  var params = new URLSearchParams();
+  var mode = (overrideParams && overrideParams.mode) || _graphMode;
+  params.set('mode', mode);
+  if (overrideParams && overrideParams.entity_ids && overrideParams.entity_ids.length) {
+    params.set('entity_ids', overrideParams.entity_ids.join(','));
+  }
+  if (_graphIncludeDocs && mode === 'focus') params.set('include_docs', 'true');
 
   try {
-    var params = new URLSearchParams();
-    if (explorerState.entityIds.size > 0) {
-      params.set('entity_ids', Array.from(explorerState.entityIds).join(','));
-    }
     var res = await api('/portal/brain/graph?' + params.toString());
     if (!res.ok) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
     var data = await res.json();
-    _graphData = data;
 
     if (!data.nodes || data.nodes.length === 0) {
-      empty.style.display = 'block'; wrap.style.display = 'none';
-      _graphLoaded = true;
-      _graphSig = sig;
-    } else {
-      empty.style.display = 'none'; wrap.style.display = 'block';
-      var container = document.getElementById('brain-graph-canvas');
-      if (!container) return;
-
-      // Destroy previous Cytoscape instance to avoid memory leaks.
-      if (_cyInstance) { _cyInstance.destroy(); _cyInstance = null; }
-
-      // Load Cytoscape lazily (first time only — subsequent calls resolve instantly).
-      var cytoscape;
-      try { cytoscape = await ensureCytoscape(); }
-      catch (loadErr) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
-
-      // Map backend nodes/edges to Cytoscape elements.
-      var TYPE_COLOR = { pessoa: '#1f8b4c', empresa: '#7fb0ee', projeto: '#f6c544' };
-      var elements = [];
-
-      data.nodes.forEach(function(n) {
-        var w = n.weight || 1;
-        var size = n.kind === 'entity'
-          ? Math.max(14, Math.sqrt(w) * 5)
-          : Math.max(8, Math.sqrt(w) * 3);
-        elements.push({
-          group: 'nodes',
-          data: {
-            id: String(n.id),
-            label: n.label || '',
-            kind: n.kind || 'doc',
-            type: n.type || '',
-            weight: w,
-            url: n.url || null,
-            nodeSize: size,
-            nodeColor: n.kind === 'entity' ? (TYPE_COLOR[n.type] || '#999') : '#bbb',
-          },
-        });
-      });
-
-      data.edges.forEach(function(e) {
-        var w = e.weight || 1;
-        elements.push({
-          group: 'edges',
-          data: {
-            id: 'edge-' + e.a + '-' + e.b,
-            source: String(e.a),
-            target: String(e.b),
-            weight: w,
-            edgeWidth: Math.max(1, Math.log(1 + w) * 1.5),
-          },
-        });
-      });
-
-      _cyInstance = cytoscape({
-        container: container,
-        elements: elements,
-        layout: {
-          name: 'cose',
-          animate: true,
-          animationDuration: 800,
-          randomize: true,
-          nodeRepulsion: function() { return 8000; },
-          idealEdgeLength: function() { return 80; },
-          edgeElasticity: function() { return 200; },
-          gravity: 80,
-          numIter: 1000,
-          fit: true,
-          padding: 30,
-        },
-        style: [
-          {
-            selector: 'node[kind = "entity"]',
-            style: {
-              'background-color': 'data(nodeColor)',
-              'width': 'data(nodeSize)',
-              'height': 'data(nodeSize)',
-              'label': 'data(label)',
-              'font-size': '11px',
-              'font-family': '"Geist Mono Variable","Geist Mono",monospace',
-              'color': '#222',
-              'text-valign': 'bottom',
-              'text-halign': 'center',
-              'text-margin-y': 4,
-              'text-max-width': '100px',
-              'text-wrap': 'ellipsis',
-              'cursor': 'pointer',
-            },
-          },
-          {
-            selector: 'node[kind = "doc"]',
-            style: {
-              'background-color': '#bbb',
-              'width': 'data(nodeSize)',
-              'height': 'data(nodeSize)',
-              'label': '',
-              'cursor': 'pointer',
-            },
-          },
-          {
-            selector: 'node:selected',
-            style: {
-              'border-width': 2,
-              'border-color': '#222',
-              'label': 'data(label)',
-            },
-          },
-          {
-            selector: 'node.highlighted',
-            style: {
-              'border-width': 1.5,
-              'border-color': '#444',
-              'opacity': 1,
-              'label': 'data(label)',
-            },
-          },
-          {
-            selector: 'node.dimmed',
-            style: { 'opacity': 0.15 },
-          },
-          {
-            selector: 'edge',
-            style: {
-              'width': 'data(edgeWidth)',
-              'line-color': 'rgba(0,0,0,0.10)',
-              'curve-style': 'bezier',
-            },
-          },
-          {
-            selector: 'edge.highlighted',
-            style: { 'line-color': 'rgba(0,0,0,0.35)', 'opacity': 1 },
-          },
-          {
-            selector: 'edge.dimmed',
-            style: { 'opacity': 0.05 },
-          },
-        ],
-      });
-
-      // Cytoscape requires a container with real dimensions.
-      // wrap is display:block by now; call resize to be safe.
-      _cyInstance.resize();
-
-      // Hover: highlight neighbours, dim others.
-      _cyInstance.on('mouseover', 'node', function(evt) {
-        var node = evt.target;
-        var neighbourhood = node.closedNeighborhood();
-        _cyInstance.elements().not(neighbourhood).addClass('dimmed').removeClass('highlighted');
-        neighbourhood.addClass('highlighted').removeClass('dimmed');
-      });
-      _cyInstance.on('mouseout', 'node', function() {
-        _cyInstance.elements().removeClass('dimmed highlighted');
-      });
-
-      // Click: open side panel; for entity nodes also add to selection.
-      _cyInstance.on('tap', 'node', function(evt) {
-        var node = evt.target;
-        var nd = node.data();
-        openGraphPanel({
-          id: nd.id,
-          label: nd.label,
-          kind: nd.kind,
-          type: nd.type,
-          weight: nd.weight,
-          url: nd.url,
-        });
-      });
-
-      // Click on background: close panel.
-      _cyInstance.on('tap', function(evt) {
-        if (evt.target === _cyInstance) { openGraphPanel(null); }
-      });
-
-      _graphLoaded = true;
-      _graphSig = sig;
+      empty.style.display = 'block'; wrap.style.display = 'none'; return;
     }
+
+    empty.style.display = 'none';
+    wrap.style.display = 'block';
+
+    if (hint) {
+      if (mode === 'overview') {
+        hint.textContent = 'Mostrando as 40 entidades mais conectadas — clique numa para explorar.';
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+
+    var docBtn = document.getElementById('graph-btn-docs');
+    var clearBtn = document.getElementById('graph-btn-clear');
+    var legendDoc = document.getElementById('graph-legend-doc');
+    if (docBtn) docBtn.style.display = mode === 'focus' ? '' : 'none';
+    if (clearBtn) clearBtn.style.display = mode === 'focus' ? '' : 'none';
+    if (legendDoc) legendDoc.style.display = _graphIncludeDocs && mode === 'focus' ? '' : 'none';
+
+    initCy(data);
+    _graphLoaded = true;
   } catch (e) {
     empty.style.display = 'block'; wrap.style.display = 'none';
   }
 }
 
-/** Open the side panel for a selected node (entity click).
- *  Entity click: ADDS the entity to the multi-selection (does not replace). */
-function openGraphPanel(node) {
+/* ---- initial load (called when Grafo tab opens) ---- */
+async function loadGraph() {
+  if (_graphLoaded) {
+    if (_cy) _cy.resize();
+    return;
+  }
+  _graphMode = 'overview';
+  await reloadGraph({ mode: 'overview' });
+}
+
+/* ---- wire toolbar buttons (called once on first Grafo tab open) ---- */
+function wireGraphToolbar() {
+  if (_graphToolbarWired) return;
+  _graphToolbarWired = true;
+
+  var btnFit = document.getElementById('graph-btn-fit');
+  if (btnFit) btnFit.addEventListener('click', function() {
+    if (_cy) _cy.animate({ fit: { eles: _cy.elements(), padding: 40 }, duration: 300 });
+  });
+
+  var btnZoomIn = document.getElementById('graph-btn-zoom-in');
+  if (btnZoomIn) btnZoomIn.addEventListener('click', function() {
+    if (_cy) _cy.animate({ zoom: Math.min(_cy.zoom() * 1.3, 6), duration: 200 });
+  });
+
+  var btnZoomOut = document.getElementById('graph-btn-zoom-out');
+  if (btnZoomOut) btnZoomOut.addEventListener('click', function() {
+    if (_cy) _cy.animate({ zoom: Math.max(_cy.zoom() * 0.77, 0.1), duration: 200 });
+  });
+
+  var btnLabels = document.getElementById('graph-btn-labels');
+  if (btnLabels) btnLabels.addEventListener('click', function() {
+    _graphLabelsForced = !_graphLabelsForced;
+    btnLabels.setAttribute('aria-pressed', String(_graphLabelsForced));
+    updateLabels();
+  });
+
+  var btnDocs = document.getElementById('graph-btn-docs');
+  if (btnDocs) btnDocs.addEventListener('click', function() {
+    _graphIncludeDocs = !_graphIncludeDocs;
+    btnDocs.setAttribute('aria-pressed', String(_graphIncludeDocs));
+    if (_graphMode === 'focus' && _graphFocusEntityIds.length > 0) {
+      reloadGraph({ mode: 'focus', entity_ids: _graphFocusEntityIds });
+    }
+  });
+
+  var btnClear = document.getElementById('graph-btn-clear');
+  if (btnClear) btnClear.addEventListener('click', function() {
+    _graphMode = 'overview';
+    _graphFocusEntityIds = [];
+    _graphIncludeDocs = false;
+    _graphLoaded = false; // force reload
+    var panel = document.getElementById('graph-panel');
+    if (panel) panel.classList.remove('open');
+    reloadGraph({ mode: 'overview' });
+  });
+
+  var panelClose = document.getElementById('graph-panel-close');
+  if (panelClose) panelClose.addEventListener('click', function() {
+    var panel = document.getElementById('graph-panel');
+    if (panel) panel.classList.remove('open');
+    if (_cy) { _cy.elements().removeClass('dimmed highlighted'); updateLabels(); }
+    _graphCurrentNode = null;
+  });
+
+  // Rename button
+  var renameBtn = document.getElementById('graph-panel-rename-btn');
+  var renameForm = document.getElementById('graph-panel-rename-form');
+  var renameInput = document.getElementById('graph-panel-rename-input');
+  var renameSave = document.getElementById('graph-panel-rename-save');
+  var renameCancel = document.getElementById('graph-panel-rename-cancel');
+  if (renameBtn) renameBtn.addEventListener('click', function() {
+    if (!_graphCurrentNode) return;
+    renameForm.style.display = 'block';
+    renameInput.value = _graphCurrentNode.label;
+    renameInput.focus();
+  });
+  if (renameCancel) renameCancel.addEventListener('click', function() {
+    renameForm.style.display = 'none';
+  });
+  if (renameSave) renameSave.addEventListener('click', async function() {
+    if (!_graphCurrentNode) return;
+    var newName = renameInput.value.trim();
+    if (!newName) return;
+    var entityId = parseInt(_graphCurrentNode.id.slice(2), 10);
+    try {
+      var r = await api('/portal/brain/entities/' + entityId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName }),
+      });
+      if (!r.ok) { alert('Erro ao renomear entidade.'); return; }
+      renameForm.style.display = 'none';
+      _graphLoaded = false;
+      reloadGraph({ mode: _graphMode, entity_ids: _graphFocusEntityIds.length ? _graphFocusEntityIds : undefined });
+    } catch(e) { alert('Erro ao renomear entidade.'); }
+  });
+
+  // Merge button
+  var mergeBtn = document.getElementById('graph-panel-merge-btn');
+  var mergeForm = document.getElementById('graph-panel-merge-form');
+  var mergeSearch = document.getElementById('graph-panel-merge-search');
+  var mergeResults = document.getElementById('graph-panel-merge-results');
+  var mergeConfirm = document.getElementById('graph-panel-merge-confirm');
+  var mergeConfirmName = document.getElementById('graph-panel-merge-confirm-name');
+  var mergeConfirmKeep = document.getElementById('graph-panel-merge-confirm-keep');
+  var mergeOk = document.getElementById('graph-panel-merge-ok');
+  var mergeCancel = document.getElementById('graph-panel-merge-cancel');
+  var _mergeTarget = null; // { id, name }
+
+  if (mergeBtn) mergeBtn.addEventListener('click', function() {
+    if (!_graphCurrentNode) return;
+    mergeForm.style.display = 'block';
+    mergeConfirm.style.display = 'none';
+    mergeResults.innerHTML = '';
+    mergeSearch.value = '';
+    mergeSearch.focus();
+  });
+
+  if (mergeSearch) {
+    var _mergeDebounce = null;
+    mergeSearch.addEventListener('input', function() {
+      clearTimeout(_mergeDebounce);
+      _mergeDebounce = setTimeout(async function() {
+        var q = mergeSearch.value.trim();
+        if (!q) { mergeResults.innerHTML = ''; return; }
+        try {
+          var r = await api('/portal/brain/entities?q=' + encodeURIComponent(q) + '&limit=8');
+          if (!r.ok) return;
+          var d = await r.json();
+          mergeResults.innerHTML = '';
+          (d.entities || []).forEach(function(ent) {
+            if (_graphCurrentNode && ent.id === parseInt(_graphCurrentNode.id.slice(2), 10)) return;
+            var item = document.createElement('div');
+            item.className = 'graph-merge-result';
+            item.textContent = ent.name + ' (' + ent.type + ')';
+            item.addEventListener('click', function() {
+              _mergeTarget = ent;
+              mergeConfirmName.textContent = ent.name;
+              mergeConfirmKeep.textContent = _graphCurrentNode ? _graphCurrentNode.label : '';
+              mergeConfirm.style.display = 'block';
+              mergeResults.innerHTML = '';
+            });
+            mergeResults.appendChild(item);
+          });
+        } catch(e) {}
+      }, 300);
+    });
+  }
+
+  if (mergeCancel) mergeCancel.addEventListener('click', function() {
+    mergeForm.style.display = 'none';
+    mergeConfirm.style.display = 'none';
+    _mergeTarget = null;
+  });
+
+  if (mergeOk) mergeOk.addEventListener('click', async function() {
+    if (!_graphCurrentNode || !_mergeTarget) return;
+    var keepId = parseInt(_graphCurrentNode.id.slice(2), 10);
+    var mergeId = _mergeTarget.id;
+    try {
+      var r = await api('/portal/brain/entities/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keep_id: keepId, merge_id: mergeId }),
+      });
+      if (!r.ok) { alert('Erro ao mesclar entidades.'); return; }
+      mergeForm.style.display = 'none';
+      mergeConfirm.style.display = 'none';
+      _mergeTarget = null;
+      var panel = document.getElementById('graph-panel');
+      if (panel) panel.classList.remove('open');
+      _graphCurrentNode = null;
+      _graphLoaded = false;
+      reloadGraph({ mode: _graphMode, entity_ids: _graphFocusEntityIds.length ? _graphFocusEntityIds : undefined });
+    } catch(e) { alert('Erro ao mesclar entidades.'); }
+  });
+}
+
+/* ---- open the side panel for a clicked node ---- */
+function openGraphPanel(nodeData) {
   var panel = document.getElementById('graph-panel');
   var nameEl = document.getElementById('graph-panel-name');
   var metaEl = document.getElementById('graph-panel-meta');
   var docsBtn = document.getElementById('graph-panel-docs');
+  var focusBtn = document.getElementById('graph-panel-focus');
+  var renameBtn = document.getElementById('graph-panel-rename-btn');
+  var mergeBtn = document.getElementById('graph-panel-merge-btn');
+  var renameForm = document.getElementById('graph-panel-rename-form');
+  var mergeForm = document.getElementById('graph-panel-merge-form');
   if (!panel) return;
-  if (!node) { panel.classList.remove('open'); return; }
+  if (!nodeData) { panel.classList.remove('open'); return; }
+
+  // Reset inline forms
+  if (renameForm) renameForm.style.display = 'none';
+  if (mergeForm) mergeForm.style.display = 'none';
 
   panel.classList.add('open');
-  nameEl.textContent = node.label;
+  nameEl.textContent = nodeData.label;
 
-  if (node.kind === 'entity') {
+  if (nodeData.kind === 'entity') {
     var TYPE_PT = { pessoa: 'Pessoa', empresa: 'Empresa', projeto: 'Projeto' };
-    metaEl.textContent = (TYPE_PT[node.type] || node.type) + ' · ' + node.weight + ' menções';
-    docsBtn.style.display = 'inline-block';
-    docsBtn.textContent = 'Adicionar ao filtro →';
-    docsBtn.onclick = function() {
-      // ADD to selection (multi-select), switch to lista view
-      var id = parseInt(node.id.slice(2), 10); // strip "e:"
-      explorerState.entityIds.add(id);
-      explorerState.entityNames[id] = node.label;
-      explorerState.entityTypes[id] = node.type || '';
-      if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
-      renderExplorerSelection();
-      switchBrainView('lista');
-      refreshExplorer(true);
-    };
+    metaEl.textContent = (TYPE_PT[nodeData.type] || nodeData.type) + ' · ' + nodeData.weight + ' menções';
+
+    if (focusBtn) {
+      focusBtn.style.display = '';
+      focusBtn.textContent = 'Explorar vizinhança →';
+      focusBtn.onclick = function() {
+        var numId = parseInt(nodeData.id.slice(2), 10);
+        if (!isNaN(numId)) {
+          _graphMode = 'focus';
+          _graphFocusEntityIds = [numId];
+          reloadGraph({ mode: 'focus', entity_ids: [numId] });
+          panel.classList.remove('open');
+        }
+      };
+    }
+
+    if (docsBtn) {
+      docsBtn.style.display = '';
+      docsBtn.textContent = 'Ver documentos →';
+      docsBtn.onclick = function() {
+        var id = parseInt(nodeData.id.slice(2), 10);
+        explorerState.entityIds = new Set([id]);
+        explorerState.entityNames[id] = nodeData.label;
+        explorerState.entityTypes[id] = nodeData.type || '';
+        if (_entitiesCache) renderEntities(document.getElementById('entities-block'), _entitiesCache);
+        renderExplorerSelection();
+        switchBrainView('lista');
+        refreshExplorer(true);
+      };
+    }
+
+    if (renameBtn) renameBtn.style.display = '';
+    if (mergeBtn) mergeBtn.style.display = '';
   } else {
     // doc node
-    metaEl.textContent = (node.type || '') + ' · ' + node.weight + ' menções';
-    if (node.url) {
-      docsBtn.style.display = 'inline-block';
-      docsBtn.textContent = 'Abrir documento →';
-      docsBtn.onclick = function() { window.open(node.url, '_blank', 'noopener'); };
-    } else {
-      docsBtn.style.display = 'none';
+    metaEl.textContent = (nodeData.type || '') + ' · ' + nodeData.weight + ' menções';
+    if (focusBtn) focusBtn.style.display = 'none';
+    if (renameBtn) renameBtn.style.display = 'none';
+    if (mergeBtn) mergeBtn.style.display = 'none';
+    if (docsBtn) {
+      if (nodeData.url) {
+        docsBtn.style.display = '';
+        docsBtn.textContent = 'Abrir documento →';
+        docsBtn.onclick = function() { window.open(nodeData.url, '_blank', 'noopener'); };
+      } else {
+        docsBtn.style.display = 'none';
+      }
     }
   }
 }
@@ -808,7 +1039,7 @@ function switchBrainView(view) {
     grafoEl.style.display = 'block';
     if (btnLista) btnLista.classList.remove('active');
     if (btnGrafo) btnGrafo.classList.add('active');
-    // Load graph after display:block is set (RAF inside loadGraph handles the rest)
+    wireGraphToolbar(); // idempotent, wires toolbar + panel buttons once
     loadGraph();
   } else {
     grafoEl.style.display = 'none';
@@ -1146,13 +1377,7 @@ function wireAtividade() {
     });
   }
 
-  // Graph side panel close
-  var panelClose = document.getElementById('graph-panel-close');
-  if (panelClose) panelClose.addEventListener('click', function() {
-    var panel = document.getElementById('graph-panel');
-    if (panel) panel.classList.remove('open');
-    // Cytoscape does not need a manual redraw after panel close.
-  });
+  // Graph side panel close is now wired in wireGraphToolbar() (called from switchBrainView).
 
   // Load entities block on Atividade tab open
   loadEntities();

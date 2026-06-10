@@ -389,13 +389,63 @@
               <p>Nenhuma entidade extraída ainda.<br>Execute um reindex para visualizar o grafo.</p>
             </div>
             <div id="brain-graph-wrap">
-              <div id="brain-graph-canvas" aria-label="Grafo do cérebro" role="img"></div>
+              <!-- Toolbar -->
+              <div id="graph-toolbar" aria-label="Controles do grafo">
+                <button class="graph-tb-btn" id="graph-btn-fit" type="button" title="Ajustar à tela">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8V5h3M4 16v3h3M20 8V5h-3M20 16v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="graph-tb-btn" id="graph-btn-zoom-in" type="button" title="Zoom +">+</button>
+                <button class="graph-tb-btn" id="graph-btn-zoom-out" type="button" title="Zoom −">−</button>
+                <div class="graph-tb-sep"></div>
+                <button class="graph-tb-btn" id="graph-btn-labels" type="button" title="Alternar rótulos" aria-pressed="false">Aa</button>
+                <button class="graph-tb-btn" id="graph-btn-docs" type="button" title="Mostrar documentos (modo foco)" aria-pressed="false" style="display:none">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 3.5h8.5L19 8v12.5H6z" stroke-linejoin="round"/><path d="M14 3.5V8h4.5" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="graph-tb-btn" id="graph-btn-clear" type="button" title="Limpar foco" style="display:none">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" stroke-linecap="round"/></svg>
+                </button>
+                <div class="graph-tb-sep"></div>
+                <!-- Legend -->
+                <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#1f8b4c"></span>Pessoa</span>
+                <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#4a7ebb"></span>Empresa</span>
+                <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#d4a017"></span>Projeto</span>
+                <span class="graph-legend-item" id="graph-legend-doc" style="display:none"><span class="graph-legend-dot" style="background:#9e9e9e"></span>Doc</span>
+              </div>
+              <!-- Hint -->
+              <div id="graph-hint" role="status" aria-live="polite">Mostrando as 40 entidades mais conectadas — clique numa para explorar.</div>
+              <!-- Cytoscape container -->
+              <div id="brain-graph-cy" aria-label="Grafo do cérebro" style="width:100%;height:480px"></div>
+              <!-- Side panel -->
               <div id="graph-panel" role="complementary" aria-label="Detalhes do nó">
                 <button class="panel-close" id="graph-panel-close" type="button" aria-label="Fechar painel">✕</button>
                 <div class="panel-name" id="graph-panel-name">—</div>
                 <div class="panel-meta" id="graph-panel-meta"></div>
-                <div class="panel-action">
+                <div class="panel-action" id="graph-panel-actions">
+                  <button class="btn btn-ghost btn-sm" id="graph-panel-focus" type="button" style="display:none">Explorar vizinhança →</button>
                   <button class="btn btn-ghost btn-sm" id="graph-panel-docs" type="button" style="display:none">Ver documentos →</button>
+                  <button class="btn btn-ghost btn-sm" id="graph-panel-rename-btn" type="button" style="display:none">Renomear</button>
+                  <button class="btn btn-ghost btn-sm" id="graph-panel-merge-btn" type="button" style="display:none">Mesclar com…</button>
+                </div>
+                <!-- Inline rename form -->
+                <div id="graph-panel-rename-form" style="display:none; margin-top:8px">
+                  <input type="text" id="graph-panel-rename-input" class="inp" style="width:100%; font-size:13px" placeholder="Novo nome" />
+                  <div style="display:flex; gap:6px; margin-top:6px">
+                    <button class="btn btn-sm btn-primary" id="graph-panel-rename-save" type="button">Salvar</button>
+                    <button class="btn btn-sm btn-ghost" id="graph-panel-rename-cancel" type="button">Cancelar</button>
+                  </div>
+                </div>
+                <!-- Inline merge form -->
+                <div id="graph-panel-merge-form" style="display:none; margin-top:8px">
+                  <p style="font-size:12px; color:var(--muted); margin:0 0 6px">Buscar entidade para absorver:</p>
+                  <input type="text" id="graph-panel-merge-search" class="inp" style="width:100%; font-size:13px" placeholder="Nome da entidade…" autocomplete="off" />
+                  <div id="graph-panel-merge-results" style="margin-top:4px; max-height:120px; overflow-y:auto"></div>
+                  <div id="graph-panel-merge-confirm" style="display:none; margin-top:8px">
+                    <p style="font-size:12px; color:var(--muted); margin:0 0 4px">Confirmar: <strong id="graph-panel-merge-confirm-name"></strong> será absorvida por <strong id="graph-panel-merge-confirm-keep"></strong>. Esta ação é irreversível.</p>
+                    <div style="display:flex; gap:6px">
+                      <button class="btn btn-sm btn-primary" id="graph-panel-merge-ok" type="button">Confirmar</button>
+                      <button class="btn btn-sm btn-ghost" id="graph-panel-merge-cancel" type="button">Cancelar</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -680,6 +730,11 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<!-- Cytoscape + fcose layout (vendorized) -->
+<script src="/vendor/cytoscape.min.js"></script>
+<script src="/vendor/layout-base.js"></script>
+<script src="/vendor/cose-base.js"></script>
+<script src="/vendor/cytoscape-fcose.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

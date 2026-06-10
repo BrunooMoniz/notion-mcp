@@ -135,19 +135,13 @@ test("buildBrainGraph: entity_ids (multi) — selected entities appear in params
   );
 });
 
-test("buildBrainGraph: entity_ids multi returns valid graph shape", async () => {
+test("buildBrainGraph: entity_ids multi returns valid graph shape (focus, no docs)", async () => {
+  // focus mode without include_docs: 2 calls (entity nodes + entity-entity edges)
   __setPoolForTest(makePool([
     // entity nodes — two entities returned
     { rows: [
       { id: 10, type: "pessoa", name: "Ana", mention_count: "5" },
       { id: 20, type: "empresa", name: "Nora", mention_count: "3" },
-    ] },
-    // doc nodes
-    { rows: [{ source_id: "d1", source_type: "granola", title: "Reunião Nora", parent_url: null, doc_mention_count: "2" }] },
-    // entity-doc edges
-    { rows: [
-      { entity_id: 10, source_id: "d1", weight: "1" },
-      { entity_id: 20, source_id: "d1", weight: "1" },
     ] },
     // entity-entity edges
     { rows: [{ entity_a: 10, entity_b: 20, weight: "1" }] },
@@ -158,6 +152,7 @@ test("buildBrainGraph: entity_ids multi returns valid graph shape", async () => 
   assert.ok(Array.isArray(g.nodes), "nodes must be array");
   assert.ok(Array.isArray(g.edges), "edges must be array");
   assert.ok(g.nodes.length > 0, "should have nodes for two entities");
+  assert.equal(g.mode, "focus", "entityIds should trigger focus mode");
   // All edge endpoints must reference existing nodes
   const nodeIds = new Set(g.nodes.map((n) => n.id));
   for (const e of g.edges) {
