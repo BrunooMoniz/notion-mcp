@@ -13,6 +13,9 @@ test("friend saves an iCal link and Granola key; secrets stored masked", async (
 }) => {
   await registerAndSignIn(page, request);
 
+  // v2: sources live in their own view now.
+  await page.click('.sidebar-nav [data-nav="fontes"]');
+
   // Add an iCal link.
   await page.fill("#ical-url", ICAL_URL);
   await page.click("#ical-form button[type=submit]");
@@ -25,15 +28,18 @@ test("friend saves an iCal link and Granola key; secrets stored masked", async (
   await page.reload();
   // After design handoff: #who was replaced by #user-email (shows email directly).
   await expect(page.locator("#user-email")).not.toHaveText("—", { timeout: 10000 });
+  await page.click('.sidebar-nav [data-nav="fontes"]');
 
   // iCal link appears (masked) and the raw secret is NOT in the DOM anywhere.
-  await expect(page.locator("#ical-list .row")).toHaveCount(1);
+  // v2: source list rows render as .kv-row.
+  await expect(page.locator("#ical-list .kv-row")).toHaveCount(1);
   const bodyText = await page.locator("body").innerText();
   expect(bodyText).not.toContain("e2e-secret");
 
-  // Granola tag shows it's set: last-4 mask "1234" (maskToken) -> "chave ••••1234".
+  // Granola is set: the tag turns into a status pill and the masked key
+  // (last-4 "1234", maskToken) moved into the #granola-state row.
   await expect(page.locator("#granola-tag")).toHaveClass(/ok/);
-  await expect(page.locator("#granola-tag")).toContainText("1234");
+  await expect(page.locator("#granola-state")).toContainText("1234");
 
   // Direct API check with the browser's session cookies.
   const res = await page.context().request.get("/portal/sources");

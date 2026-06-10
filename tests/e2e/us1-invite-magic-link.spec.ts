@@ -39,7 +39,7 @@ test.describe("US1 — invite + magic link", () => {
     expect(link).toContain("/portal/verify?token=");
 
     await page.goto(link);
-    await page.waitForURL("**/app.html", { timeout: 10000 });
+    await page.waitForURL("**/app.html**", { timeout: 10000 });
     // After design handoff: #who was replaced by #user-email (email text only, no prefix).
     await expect(page.locator("#user-email")).toHaveText(email, { timeout: 10000 });
   });
@@ -58,7 +58,7 @@ test.describe("US1 — invite + magic link", () => {
 
     // First use: signs in.
     await page.goto(link);
-    await page.waitForURL("**/app.html", { timeout: 10000 });
+    await page.waitForURL("**/app.html**", { timeout: 10000 });
 
     // Clear the session cookie so the second use stands on its own.
     await page.context().clearCookies();

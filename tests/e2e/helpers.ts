@@ -62,9 +62,39 @@ export async function registerAndSignIn(
 
   const link = await getLastMagicLink(request);
   await page.goto(link);
-  await page.waitForURL("**/app.html", { timeout: 10000 });
+  await page.waitForURL("**/app.html**", { timeout: 10000 });
   // After design handoff: #who was replaced by #user-email (shows the email directly, no prefix).
   await expect(page.locator("#user-email")).toHaveText(email, { timeout: 10000 });
 
   return { email, link };
+}
+
+/** v2: flip the signed-in account into the "ativado" home state (a connected
+ *  source + at least one indexed chunk), which is where the activation
+ *  checklist and the live panel render. Adds an iCal link through the real API
+ *  (session cookie) and seeds one brain chunk straight into the test DB. */
+export async function makeActivated(page: Page): Promise<void> {
+  const icalRes = await page.context().request.post("/portal/ical", {
+    data: { url: "https://calendar.example.com/e2e/basic.ics", label: "E2E" },
+  });
+  expect(icalRes.ok()).toBeTruthy();
+
+  const meRes = await page.context().request.get("/portal/me");
+  expect(meRes.ok()).toBeTruthy();
+  const { account_id: accountId } = await meRes.json();
+
+  const pool = new Pool({ connectionString: POSTGRES_URL });
+  try {
+    await pool.query(
+      `INSERT INTO brain_chunks (id, account_id, source_type, source_id, chunk_index, text, indexed_at)
+       VALUES ($1, $2, 'notion', 'e2e-doc-1', 0, '# Doc e2e\n\nconteúdo de teste', now())
+       ON CONFLICT (id) DO NOTHING`,
+      [`${accountId}:e2e-doc-1:0`, accountId],
+    );
+  } finally {
+    await pool.end();
+  }
+
+  await page.reload();
+  await expect(page.locator('body[data-zstate="ativado"]')).toBeAttached({ timeout: 10000 });
 }
