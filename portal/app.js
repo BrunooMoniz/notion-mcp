@@ -778,10 +778,10 @@ function escapeForAttr(s) {
 function renderAskAnswer(answer, sources) {
   /* tool-chip */
   var nSrc = sources ? sources.length : 0;
+  // E3 fix: remove duplicate "N fontes" — keep only the arg "(N fontes)" inside the chip.
   var toolChip = '<div class="tool-chip">' +
     '<span class="fn">brain_search</span>' +
-    '<span class="arg">(' + escapeHtml(nSrc + ' fontes') + ')</span>' +
-    '<span class="n-src">' + nSrc + ' fonte' + (nSrc !== 1 ? 's' : '') + '</span>' +
+    '<span class="arg">(' + escapeHtml(nSrc + (nSrc !== 1 ? ' fontes' : ' fonte')) + ')</span>' +
     '</div>';
 
   /* resposta: converter [n] em botoes de citacao */
