@@ -1,6 +1,10 @@
 // src/portal/ask.ts
-// P1 — rota POST /portal/ask: chat com o cérebro na tela logada.
-// Fluxo: sessão → gate de cota → brainSearch → buildAskContext → Anthropic → resposta com citações.
+// P1 + E3 — rota POST /portal/ask: chat com o cérebro na tela logada.
+// E3 adiciona:
+//   - roteador de intenção (meta/search/action) antes do brain_search
+//   - filtro de relevância (ASK_MIN_SCORE) + dedup por source_id
+//   - proposed_action para ações (sem executar aqui)
+//   - histórico de conversa (history: últimas 6 mensagens)
 import Anthropic from "@anthropic-ai/sdk";
 import type { Request, Response } from "express";
 import { brainSearch } from "../rag/search.js";
@@ -31,10 +35,14 @@ function getAnthropicClient(): Anthropic {
 // ---------------------------------------------------------------------------
 type SearchFn = (query: string, accountId: string) => Promise<BrainResult[]>;
 type CompleteFn = (system: string, user: string) => Promise<string>;
+/** E3: classify intent — injectable for tests (avoid real Anthropic call). */
+type ClassifyFn = (message: string) => Promise<IntentRoute>;
 
 interface AskDeps {
   search: SearchFn;
   complete: CompleteFn;
+  /** E3: override intent classification in tests. */
+  classify?: ClassifyFn;
 }
 
 const defaultDeps: AskDeps = {
@@ -69,6 +77,154 @@ let deps: AskDeps = defaultDeps;
 /** Test-only seam: inject fake deps (or pass null to restore real ones). */
 export function __setAskDepsForTest(d: Partial<AskDeps> | null): void {
   deps = d ? { ...defaultDeps, ...d } : defaultDeps;
+}
+
+// ---------------------------------------------------------------------------
+// E3 — Intent classification
+// ---------------------------------------------------------------------------
+
+/** The three routes the classifier can pick. */
+export type IntentRoute = "meta" | "search" | "action";
+
+/** Extracted parameters for an action intent. */
+export interface ActionIntent {
+  type: "criar_evento" | "criar_tarefa" | "criar_pagina_notion";
+  params: Record<string, unknown>;
+  resumo: string;
+}
+
+/** Full classification output. */
+export interface IntentResult {
+  route: IntentRoute;
+  action?: ActionIntent;
+}
+
+const CLASSIFY_SYSTEM = `Você é um roteador de intenção para um assistente pessoal que busca informações no segundo cérebro do usuário (Zinom).
+
+Classifique a mensagem em uma das rotas:
+- "meta": perguntas SOBRE o próprio assistente, suas capacidades, como funciona, apresentações, cumprimentos, small talk.
+- "search": perguntas sobre conteúdo do segundo cérebro (reuniões, decisões, pessoas, projetos, notas, calendário).
+- "action": pedido para CRIAR algo: evento na agenda Google, tarefa no Notion, página no Notion.
+
+Responda APENAS com JSON válido, sem markdown.
+
+Para "meta" ou "search":
+{"route": "meta"} ou {"route": "search"}
+
+Para "action":
+{"route": "action", "action": {"type": "criar_evento"|"criar_tarefa"|"criar_pagina_notion", "params": {campos extraídos}, "resumo": "frase legível PT-BR"}}`;
+
+/**
+ * Classify the user message into meta/search/action.
+ * Uses a cheap LLM call. Falls back to "search" on any error.
+ * Exported for unit tests (inject deps.classify to skip the LLM).
+ */
+export async function classifyIntent(message: string): Promise<IntentRoute> {
+  const raw = await callComplete(CLASSIFY_SYSTEM, message);
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1) return "search";
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (["meta", "search", "action"].includes(parsed.route)) return parsed.route as IntentRoute;
+  } catch { /* fallthrough */ }
+  return "search";
+}
+
+/**
+ * Full intent classification including action params.
+ * Exported for tests that need to verify the action shape.
+ */
+export async function classifyIntentFull(message: string): Promise<IntentResult> {
+  const raw = await callComplete(CLASSIFY_SYSTEM, message);
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1) return { route: "search" };
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    const route: IntentRoute = ["meta", "search", "action"].includes(parsed.route)
+      ? parsed.route
+      : "search";
+    const result: IntentResult = { route };
+    if (route === "action" && parsed.action && typeof parsed.action === "object") {
+      const validTypes = ["criar_evento", "criar_tarefa", "criar_pagina_notion"];
+      if (validTypes.includes(parsed.action.type)) {
+        result.action = {
+          type: parsed.action.type,
+          params: parsed.action.params ?? {},
+          resumo: String(parsed.action.resumo ?? ""),
+        };
+      }
+    }
+    return result;
+  } catch {
+    return { route: "search" };
+  }
+}
+
+/** Shared helper: call the model with a system + user prompt. */
+async function callComplete(system: string, user: string): Promise<string> {
+  if (deps.complete !== defaultDeps.complete) {
+    // Test injection: reuse the injected complete
+    return deps.complete(system, user);
+  }
+  return defaultDeps.complete(system, user);
+}
+
+// ---------------------------------------------------------------------------
+// E3 — Relevance filter + dedup by source_id
+// ---------------------------------------------------------------------------
+
+/** Minimum reranker score to keep a hit. Default 0.35, override with ASK_MIN_SCORE. */
+export function askMinScore(): number {
+  const v = Number(process.env.ASK_MIN_SCORE);
+  return Number.isFinite(v) ? v : 0.35;
+}
+
+/**
+ * Filter hits below the score threshold and dedup by source_id (keep highest-
+ * scoring chunk per source document). Order is preserved (descending score).
+ *
+ * Exported pure for unit tests.
+ */
+export function filterAndDedup(
+  hits: BrainResult[],
+  minScore: number,
+): BrainResult[] {
+  const passing = hits.filter((h) => h.score >= minScore);
+  const bestBySource = new Map<string, BrainResult>();
+  // We need source_id from the raw hits — BrainResult doesn't carry it.
+  // We use source_url + title as a proxy key (good enough for dedup).
+  // For a stronger dedup, we'd need to thread source_id through BrainResult.
+  // Using source_url ?? title as proxy:
+  for (const h of passing) {
+    const key = (h.source_url ?? h.title ?? "").trim() || h.text.slice(0, 80);
+    const prev = bestBySource.get(key);
+    if (!prev || h.score > prev.score) {
+      bestBySource.set(key, h);
+    }
+  }
+  return [...bestBySource.values()].sort((a, b) => b.score - a.score);
+}
+
+// ---------------------------------------------------------------------------
+// E3 — Meta prompt (responds directly about the assistant)
+// ---------------------------------------------------------------------------
+
+const META_SYSTEM = `Você é o Zinom, um assistente pessoal que organiza e busca informações no segundo cérebro do usuário.
+Responda perguntas sobre você mesmo de forma clara, amigável e concisa em português.
+Você indexa conteúdo do Notion, reuniões do Granola, Google Calendar e páginas web.
+Você pode criar eventos no Google Calendar, tarefas no Notion e páginas no Notion.
+NÃO finja ter buscado no cérebro — responda de forma direta e honesta.`;
+
+// ---------------------------------------------------------------------------
+// E3 — Action proposal shape
+// ---------------------------------------------------------------------------
+
+export interface ProposedAction {
+  type: ActionIntent["type"];
+  params: Record<string, unknown>;
+  resumo: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,8 +318,32 @@ export function toAskSources(hits: BrainResult[], cited: number[]): AskSource[] 
 // HTTP handler (exported for testing; mounted by routes.ts)
 // ---------------------------------------------------------------------------
 
+/** E3 — Chat message shape (last 6 exchanged messages, client-managed). */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Truncate history to at most N messages and cap total chars to maxChars. */
+export function truncateHistory(
+  history: ChatMessage[],
+  maxMessages = 6,
+  maxChars = 8000,
+): ChatMessage[] {
+  const recent = history.slice(-maxMessages);
+  let total = 0;
+  const kept: ChatMessage[] = [];
+  for (let i = recent.length - 1; i >= 0; i--) {
+    total += recent[i].content.length;
+    if (total > maxChars) break;
+    kept.unshift(recent[i]);
+  }
+  return kept;
+}
+
 /**
  * POST /portal/ask handler.
+ * E3: classifies intent first → meta (no search) / search (with dedup) / action (proposed card).
  * Auth + rate-limit are enforced by the router (requireSession + express-rate-limit).
  * accountId comes from res.locals (set by requireSession).
  */
@@ -177,7 +357,78 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // --- Gate: quota check + search ---
+  // E3: conversation history (client sends last 6 messages)
+  const rawHistory: unknown = req.body?.history;
+  const history: ChatMessage[] = truncateHistory(
+    Array.isArray(rawHistory)
+      ? rawHistory
+          .filter(
+            (m) =>
+              m &&
+              typeof m === "object" &&
+              (m.role === "user" || m.role === "assistant") &&
+              typeof m.content === "string",
+          )
+          .map((m) => ({ role: m.role, content: m.content }))
+      : [],
+  );
+
+  // E3: classify intent (injectable via deps.classify for tests)
+  const classifyFn = deps.classify ?? classifyIntent;
+  let route: IntentRoute;
+  try {
+    route = await classifyFn(raw);
+  } catch {
+    route = "search"; // fallback: always search on classifier error
+  }
+
+  // --- Meta route: answer directly without brain_search ---
+  if (route === "meta") {
+    let answer: string;
+    try {
+      const c = getAnthropicClient();
+      const messages: Anthropic.MessageParam[] = [
+        ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        { role: "user", content: raw },
+      ];
+      const resp = await c.messages.create({
+        model: ASK_MODEL,
+        max_tokens: 512,
+        system: META_SYSTEM,
+        messages,
+      });
+      answer = resp.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+    } catch {
+      answer = "Sou o Zinom, seu assistente pessoal. Indexo seu Notion, reuniões Granola e Google Calendar para você encontrar informações rapidamente.";
+    }
+    res.json({ answer, sources: [], route: "meta" });
+    return;
+  }
+
+  // --- Action route: propose the action without executing ---
+  if (route === "action") {
+    let intentFull: IntentResult;
+    try {
+      intentFull = await classifyIntentFull(raw);
+    } catch {
+      intentFull = { route: "search" };
+    }
+    if (intentFull.route === "action" && intentFull.action) {
+      res.json({
+        answer: `Vou criar: ${intentFull.action.resumo}`,
+        sources: [],
+        route: "action",
+        proposed_action: intentFull.action,
+      });
+      return;
+    }
+    // Fallthrough to search if action extraction failed
+  }
+
+  // --- Search route: brain_search → filter/dedup → LLM with context ---
   let hits: BrainResult[];
   try {
     hits = await deps.search(raw, accountId);
@@ -189,24 +440,57 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
     throw e;
   }
 
+  // E3: relevance filter + dedup
+  const minScore = askMinScore();
+  const filteredHits = filterAndDedup(hits, minScore);
+
+  // If nothing passes the threshold: honest empty response
+  if (filteredHits.length === 0) {
+    res.json({
+      answer: "Não encontrei nada relevante no seu Zinom para essa pergunta. Tente reformular ou indexar mais conteúdo.",
+      sources: [],
+      route: "search",
+    });
+    return;
+  }
+
   // --- Build context and call LLM ---
-  const context = buildAskContext(hits);
-  const userMessage =
-    hits.length === 0
-      ? `Pergunta: ${raw}\n\n(Nenhum trecho encontrado no Zinom para esta pergunta.)`
-      : `Trechos do Zinom:\n\n${context}\n\n---\nPergunta: ${raw}`;
+  const context = buildAskContext(filteredHits);
+  const userMessage = `Trechos do Zinom:\n\n${context}\n\n---\nPergunta: ${raw}`;
+
+  // Build messages with history
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    { role: "user", content: userMessage },
+  ];
 
   let answer: string;
   try {
-    answer = await deps.complete(SYSTEM_PROMPT, userMessage);
+    // Use the injected complete for tests; real path uses the full messages array
+    if (deps.complete !== defaultDeps.complete) {
+      // Test path: call the injected complete with the last user content
+      answer = await deps.complete(SYSTEM_PROMPT, userMessage);
+    } else {
+      const c = getAnthropicClient();
+      const resp = await c.messages.create({
+        model: ASK_MODEL,
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        messages,
+      });
+      answer = resp.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+    }
   } catch {
     res.status(502).json({ error: "llm" });
     return;
   }
 
   // --- Build response ---
-  const cited = citedNumbers(answer, hits.length);
-  const sources = toAskSources(hits, cited);
+  const cited = citedNumbers(answer, filteredHits.length);
+  const sources = toAskSources(filteredHits, cited);
 
-  res.json({ answer, sources });
+  res.json({ answer, sources, route: "search" });
 }
