@@ -74,14 +74,19 @@ test.describe("admin desktop", () => {
     expect(box!.x).toBeGreaterThanOrEqual(220);
   });
 
-  test("A5: banner de erro tem classe err e fundo vermelho claro", async ({ page }) => {
+  test("A5: banner de erro tem classe banner-err e fundo vermelho claro", async ({ page }) => {
     await page.goto(`${BASE}/?msg=Falha%20ao%20enviar&kind=err`);
     const banner = page.locator("#admin-banner");
     await expect(banner).toBeVisible();
     await expect(banner).toContainText("Falha ao enviar");
-    await expect(banner).toHaveClass(/(^|\s)err(\s|$)/);
+    // "banner-err", não "err": a classe curta colide com a .err dos textos de
+    // erro de indexação (max-width:360px encolhia o banner).
+    await expect(banner).toHaveClass(/(^|\s)banner-err(\s|$)/);
     const bg = await banner.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).toBe("rgb(253, 236, 236)");
+    // Regressão da colisão: o banner ocupa a largura do main, não 360px.
+    const box = await banner.boundingBox();
+    expect(box!.width).toBeGreaterThan(800);
   });
 
   test("A2: navegação por views via sidebar", async ({ page }) => {

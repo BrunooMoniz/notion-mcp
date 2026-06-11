@@ -912,7 +912,11 @@ code{
 }
 
 /* --- Shell --- */
-.shell{min-height:100vh;display:flex}
+/* Mobile: column, so .mobile-top stacks above .main (in a row they'd sit side
+   by side — the pre-views layout had this latent bug). Desktop: row again;
+   the sidebar is fixed so the row only really holds .main. */
+.shell{min-height:100vh;display:flex;flex-direction:column}
+@media(min-width:900px){.shell{flex-direction:row}}
 
 /* --- Sidebar (desktop) --- */
 .sidebar{
@@ -1017,8 +1021,10 @@ code{
 }
 .banner-close:hover{opacity:.7}
 /* Error variant: POST handlers redirect with &kind=err on failure. Errors must
-   not wear the success green. */
-.banner-fixed.err{
+   not wear the success green. (Named banner-err: a plain "err" class would
+   collide with the index-error text class below, whose max-width:360px shrank
+   the banner.) */
+.banner-fixed.banner-err{
   background:#fdecec;border-color:rgba(154,40,32,.25);color:#9a2820;
 }
 .alert{
@@ -1229,7 +1235,7 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 
 ${msg ? `
 <!-- Dismissible banner (inside .main: the fixed sidebar can never cover it) -->
-<div class="banner-fixed${msgKind === "err" ? " err" : ""}" id="admin-banner" role="alert">
+<div class="banner-fixed${msgKind === "err" ? " banner-err" : ""}" id="admin-banner" role="alert">
   <span class="banner-msg">${escapeHtml(msg)}</span>
   <button class="banner-close" onclick="document.getElementById('admin-banner').remove()" aria-label="Fechar">&times;</button>
 </div>
@@ -1375,12 +1381,13 @@ ${rows}
       el.classList.toggle('active', act);
       if (act) {
         el.setAttribute('aria-current', 'true');
-        if (el.scrollIntoView) el.scrollIntoView({ inline: 'center', block: 'nearest' });
+        if (el.scrollIntoView) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' });
       } else {
         el.removeAttribute('aria-current');
       }
     });
-    window.scrollTo(0, 0);
+    /* instant: o scroll-behavior:smooth global animaria a troca de view */
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }
   window.addEventListener('hashchange', go);
   go();
