@@ -1,5 +1,6 @@
 // src/rag/rerank.ts
-const RERANK_URL = "https://api.voyageai.com/v1/rerank";
+// Overridable p/ rotear por um egress IPv6 (mesmo racional de VOYAGE_EMBEDDINGS_URL).
+const RERANK_URL = process.env.VOYAGE_RERANK_URL ?? "https://api.voyageai.com/v1/rerank";
 const DEFAULT_MODEL = "rerank-2.5-lite";
 
 export interface RerankDoc {

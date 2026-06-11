@@ -12,7 +12,8 @@
 
 import type { IndexableDocument, Workspace } from "./types.js";
 
-const GRANOLA_BASE = "https://public-api.granola.ai/v1";
+// Overridable p/ rotear por um egress IPv6 (mesmo racional de VOYAGE_EMBEDDINGS_URL).
+const GRANOLA_BASE = process.env.GRANOLA_API_BASE ?? "https://public-api.granola.ai/v1";
 const THROTTLE_MS = 220; // ~4.5 rps — under the 5 rps sustained limit
 
 interface GranolaNoteSummary {
