@@ -687,7 +687,11 @@ ${rows || '<tr><td colspan="4" class="xs muted">Nenhum dado de armazenamento.</t
 </section>`;
 }
 
-function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token: string, msg: string): string {
+// Exported for scripts/admin-preview.ts (test harness renders the page with a
+// static fixture, no Postgres) and the Playwright UI spec (tests/e2e/admin-ui.spec.ts).
+export type AdminData = Awaited<ReturnType<typeof gather>>;
+
+export function renderHtml(data: AdminData, now: string, token: string, msg: string, msgKind?: "err" | ""): string {
   const friends = data.accounts.filter((a) => a.kind === "friend");
   const pending = data.leads.filter((l) => l.status === "pending" && !l.dismissed_at).length;
   // Approx MRR: sum of active paid plans, priced from the plan matrix
@@ -705,9 +709,12 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
   const revokeCompAction = `/admin/revoke-unlimited?token=${encodeURIComponent(token)}`;
 
   const rows = data.accounts
-    .map((a) => {
+    .map((a, i) => {
       const usageRows = data.usage.get(a.id) ?? [];
-      const usageStr = usageRows.map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
+      // Usage chips for the detail row: one .tag per metric of the current month.
+      const usageChips = usageRows.length
+        ? usageRows.map((u) => `<span class="tag">${escapeHtml(u.metric)} ${escapeHtml(u.total)}</span>`).join(" ")
+        : "—";
       // F7: compute credits used from usage rows.
       const creditsUsed = Math.round(usageRows.reduce((sum, u) => sum + creditsFor(u.metric, Number(u.total)), 0));
       const planLimits = getPlanLimits(a.plan);
@@ -716,17 +723,17 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
         ? `${creditsUsed}/${creditsLimit}`
         : `${creditsUsed}/∞`;
       const creditsOver = isFinite(creditsLimit) && creditsUsed > creditsLimit;
-      // Latest failed-run error per source (truncated), shown beneath the ✓/✗ flags
-      // so a red source explains itself.
+      // Latest failed-run error per source (full text), shown in the detail row
+      // so a red source explains itself. The main row only carries a count badge.
       const errs = (data.errors.get(a.id) ?? [])
         .filter((e) => e.error)
-        .map((e) => `${escapeHtml(e.source)}: ${escapeHtml(String(e.error).slice(0, 160))}`);
+        .map((e) => `${escapeHtml(e.source)}: ${escapeHtml(String(e.error))}`);
       const runFlags =
         (data.runs.get(a.id) ?? [])
           .map((r) => `${escapeHtml(r.source)}${r.ok ? "&#10003;" : "&#10007;"}`)
           .join(" ") || "—";
       const runs = runFlags + (errs.length
-        ? `<details class="err-details"><summary>${errs.length} erro(s)</summary><div class="err">${errs.join("<br>")}</div></details>`
+        ? ` <span class="tag bad">${errs.length} erro(s)</span>`
         : "");
       const ws = data.workspaces.get(a.id);
       const status = a.status ?? ACTIVE_STATUS;
@@ -774,24 +781,34 @@ function renderHtml(data: Awaited<ReturnType<typeof gather>>, now: string, token
                <button type="submit" style="font-size:11.5px;padding:4px 10px">Liberar ilimitado</button>
              </form>`;
 
-      return `<tr>
+      // Compact main row (8 cols) + hidden detail row toggled by the ▸ button.
+      // Long content (workspaces, usage, comp forms, index errors) lives in the
+      // detail row so the table fits 1440px without horizontal scroll.
+      return `<tr class="acct-row">
         <td>
-          <span class="acct-primary">${escapeHtml(dispA.primary)}</span>
-          <span class="acct-secondary mono xs muted">${escapeHtml(dispA.secondary)}</span>
+          <span class="acct-primary" title="${escapeHtml(dispA.primary)}">${escapeHtml(dispA.primary)}</span>
+          <span class="acct-secondary mono xs muted" title="${escapeHtml(dispA.secondary)}">${escapeHtml(dispA.secondary)}</span>
         </td>
-        <td class="xs">${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
-        <td class="xs">${planLabel}${compCtrl}</td>
-        <td class="xs">${escapeHtml(periodEnd)}</td>
+        <td class="xs">${planLabel}</td>
         <td class="xs">${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
-        <td class="xs">${tokenCount ? `${tokenCount} token(s)` : "—"}</td>
-        <td class="xs trunc">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
         <td class="xs">${runs}</td>
-        <td class="xs">${escapeHtml(usageStr)}</td>
         <td class="xs"${creditsOver ? ' style="color:#d64545;font-weight:600"' : ""}>${escapeHtml(creditsStr)}</td>
-        <td class="xs">${new Date(a.created_at).toLocaleString("pt-BR")}</td>
         <td>${actCell}</td>
-      </tr>`;
+        <td><button type="button" class="acct-toggle" aria-expanded="false" aria-controls="acct-detail-${i}" title="Detalhes">&#9656;</button></td>
+      </tr>
+      <tr class="acct-detail" id="acct-detail-${i}" hidden><td colspan="8">
+        <div class="acct-d-grid">
+          <div class="acct-d-block"><span class="acct-d-label">Tipo</span><span class="acct-d-val">${escapeHtml(a.kind ?? "—")}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Renova em</span><span class="acct-d-val">${escapeHtml(periodEnd)}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">MCP tokens</span><span class="acct-d-val">${tokenCount ? `${tokenCount} token(s)` : "—"}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Criada</span><span class="acct-d-val">${new Date(a.created_at).toLocaleString("pt-BR")}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Workspaces</span><span class="acct-d-val">${ws ? escapeHtml(ws.join(", ")) : "—"}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Uso do mês</span><span class="acct-d-val acct-d-chips">${usageChips}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Cortesia</span>${compCtrl}</div>
+          ${errs.length ? `<div class="acct-d-block acct-d-wide"><span class="acct-d-label">Erros de indexação</span><div class="acct-d-errs">${errs.join("<br>")}</div></div>` : ""}
+        </div>
+      </td></tr>`;
     })
     .join("\n");
 
@@ -895,7 +912,11 @@ code{
 }
 
 /* --- Shell --- */
-.shell{min-height:100vh;display:flex}
+/* Mobile: column, so .mobile-top stacks above .main (in a row they'd sit side
+   by side — the pre-views layout had this latent bug). Desktop: row again;
+   the sidebar is fixed so the row only really holds .main. */
+.shell{min-height:100vh;display:flex;flex-direction:column}
+@media(min-width:900px){.shell{flex-direction:row}}
 
 /* --- Sidebar (desktop) --- */
 .sidebar{
@@ -967,9 +988,9 @@ code{
 }
 @media(min-width:900px){.tabbar-mobile{display:none}}
 .tabbar-mobile a{
-  display:flex;flex-direction:column;align-items:center;gap:2px;
-  padding:8px 10px 9px;
-  min-width:60px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  padding:12px 10px;
+  min-width:60px;min-height:44px; /* touch target >= 44px */
   font-size:9.5px;font-weight:540;color:var(--muted);
   text-decoration:none;white-space:nowrap;
 }
@@ -981,21 +1002,32 @@ code{
   padding:0 16px calc(72px + env(safe-area-inset-bottom,0));
 }
 
-/* --- Banner (dismissible, sticky) --- */
+/* --- Banner (dismissible, sticky; lives INSIDE .main so the fixed sidebar
+       never covers it — z-index fights are solved by construction) --- */
 .banner-fixed{
   position:sticky;top:0;z-index:50;
-  background:var(--accent-soft);border-bottom:1px solid rgba(31,139,76,.25);
+  background:var(--accent-soft);border:1px solid rgba(31,139,76,.25);
+  border-radius:var(--r-xs);
   color:var(--accent-strong);
-  padding:10px 20px;font-size:13px;
+  margin:12px 0 0;
+  padding:10px 16px;font-size:13px;
   display:flex;align-items:center;gap:12px;
 }
 .banner-fixed .banner-msg{flex:1}
+/* Mobile: stick below the sticky topbar (z-60) instead of sliding under it. */
+@media(max-width:899px){.banner-fixed{top:54px}}
 .banner-close{
   background:none;border:none;cursor:pointer;
-  color:var(--accent-strong);font-size:18px;line-height:1;padding:0 4px;
+  color:inherit;font-size:18px;line-height:1;padding:0 4px;
   font-weight:300;
 }
-.banner-close:hover{color:var(--accent)}
+.banner-close:hover{opacity:.7}
+/* Error variant: POST handlers redirect with &kind=err on failure. Errors must
+   not wear the success green. (Named banner-err, not "err", to avoid colliding
+   with other short class names.) */
+.banner-fixed.banner-err{
+  background:#fdecec;border-color:rgba(154,40,32,.25);color:#9a2820;
+}
 .alert{
   background:#fff8e1;border:1px solid #f9a825;
   color:#5d4037;border-radius:var(--r-xs);
@@ -1018,8 +1050,15 @@ code{
 .card-l{font-size:12px;font-weight:500;color:var(--ink-soft);margin-top:2px}
 .card-hint{display:block;font-size:11px;color:var(--muted);margin-top:4px}
 
+/* --- Views (progressive enhancement) ---
+   The router script adds .js-views to <html>; with JS off, every section stays
+   visible and the sidebar anchors degrade to in-page scroll links. */
+html.js-views .section{display:none}
+html.js-views .section.view-active{display:block}
+
 /* --- Sections --- */
 .section{padding:36px 0 0}
+html.js-views .section.view-active{padding-top:20px}
 .section-header{margin-bottom:20px}
 .section-title{font-size:17px;font-weight:650;letter-spacing:-.02em;color:var(--ink);margin-bottom:6px}
 .section-desc{font-size:13px;color:var(--ink-soft);line-height:1.55;max-width:720px}
@@ -1066,6 +1105,29 @@ td.mono{font-family:var(--mono);font-size:12px;color:var(--accent-strong)}
 .acct-primary{display:block;font-size:13px;color:var(--ink);font-weight:500}
 .acct-secondary{display:block;font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:1px}
 
+/* --- Contas: compact rows + expandable detail --- */
+table.acct-table td{white-space:nowrap}        /* keep main rows one line tall */
+table.acct-table td:first-child{white-space:normal} /* Conta cell may wrap */
+/* Long emails/ids must not inflate the row: one truncated line each, full
+   value on the title tooltip (and in the detail row context). */
+table.acct-table .acct-primary,
+table.acct-table .acct-secondary{
+  max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.acct-toggle{
+  background:none;border:1px solid var(--line);color:var(--muted);
+  border-radius:var(--r-xs);padding:2px 8px;font-size:12px;line-height:1.4;
+}
+.acct-toggle:hover{background:var(--paper);color:var(--ink)}
+tbody tr.acct-detail td{background:var(--paper);padding:14px 16px;white-space:normal}
+tbody tr.acct-detail:hover td{background:var(--paper)}
+.acct-d-grid{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-start}
+.acct-d-label{display:block;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
+.acct-d-val{font-size:12.5px;color:var(--ink-soft)}
+.acct-d-chips{display:inline-flex;flex-wrap:wrap;gap:4px}
+.acct-d-wide{flex-basis:100%}
+.acct-d-errs{color:#9a2820;font-size:11.5px;line-height:1.5;word-break:break-word;max-width:720px}
+
 /* --- Buttons --- */
 button{
   font-family:var(--sans);
@@ -1093,10 +1155,6 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 /* --- Inline form row --- */
 .inline-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 
-/* --- Error details (expandable) --- */
-.err-details>summary{font-size:11.5px;color:#9a2820;cursor:pointer}
-.err{margin-top:4px;color:#9a2820;font-size:11px;line-height:1.4;max-width:360px;word-break:break-word}
-
 /* --- Funnel bars --- */
 .funnel-wrap{max-width:540px;display:flex;flex-direction:column;gap:14px}
 .funnel-step{}
@@ -1119,14 +1177,9 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 </style>
 </head>
 <body>
-
-${msg ? `
-<!-- Dismissible banner (sticky at top of content) -->
-<div class="banner-fixed" id="admin-banner" role="alert">
-  <span class="banner-msg">${escapeHtml(msg)}</span>
-  <button class="banner-close" onclick="document.getElementById('admin-banner').remove()" aria-label="Fechar">&times;</button>
-</div>
-` : ""}
+<!-- No-JS fallback: detail rows render with [hidden]; without JS the toggle
+     can't open them, so force them visible (accepted degradation). -->
+<noscript><style>tr.acct-detail[hidden]{display:table-row}</style></noscript>
 
 <div class="shell">
 
@@ -1176,6 +1229,14 @@ ${msg ? `
 
 <!-- Main content -->
 <main class="main">
+
+${msg ? `
+<!-- Dismissible banner (inside .main: the fixed sidebar can never cover it) -->
+<div class="banner-fixed${msgKind === "err" ? " banner-err" : ""}" id="admin-banner" role="alert">
+  <span class="banner-msg">${escapeHtml(msg)}</span>
+  <button class="banner-close" onclick="document.getElementById('admin-banner').remove()" aria-label="Fechar">&times;</button>
+</div>
+` : ""}
 
 <!-- ============================== RESUMO ============================== -->
 <section class="section" id="resumo">
@@ -1268,24 +1329,19 @@ ${leadRows || '<tr><td colspan="5" class="xs muted">Nenhuma solicitacao ainda.</
 <section class="section" id="contas">
   <div class="section-header">
     <h2 class="section-title">Contas</h2>
-    <p class="section-desc">Todas as contas cadastradas. Colunas de uso mostram o mes corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}). Passe o cursor sobre os cabecalhos para ver a descricao de cada coluna. Erros de indexacao ficam expansiveis na coluna "Indices".</p>
+    <p class="section-desc">Todas as contas cadastradas. Uso e creditos mostram o mes corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}). Passe o cursor sobre os cabecalhos para ver a descricao de cada coluna. Detalhes (tipo, workspaces, uso, cortesia e erros de indexacao) ficam no botao &#9656; de cada linha.</p>
   </div>
   <div class="table-wrap">
-  <table>
+  <table class="acct-table">
     <thead><tr>
       <th title="Identificador unico da conta no Zinom">Conta</th>
-      <th title="Tipo: owner (operador), friend (convidado)">Tipo</th>
       <th title="Estado atual: active ou suspended">Status</th>
       <th title="Plano contratado e status da assinatura">Plano</th>
-      <th title="Data de renovacao do plano atual">Renova em</th>
       <th title="Fontes de dados conectadas (Notion, Granola, iCal, Google)">Fontes</th>
-      <th title="Quantidade de tokens MCP emitidos para esta conta">MCP</th>
-      <th title="Workspaces Notion vinculados a conta">Workspaces</th>
-      <th title="Resultado do ultimo ciclo de indexacao por fonte — expanda para ver erros">Indices</th>
-      <th title="Uso de metricas no mes corrente (embed_tokens, search, etc.)">Uso (mes)</th>
+      <th title="Resultado do ultimo ciclo de indexacao por fonte — erros completos no detalhe da linha">Indices</th>
       <th title="Creditos de IA usados / limite do plano no mes corrente (F7)">Creditos</th>
-      <th title="Data de criacao da conta">Criada</th>
       <th title="Bloquear ou reativar a conta">Acao</th>
+      <th title="Expandir detalhes"></th>
     </tr></thead>
     <tbody>
 ${rows}
@@ -1298,24 +1354,55 @@ ${rows}
 </div><!-- /shell -->
 
 <script>
-/* Scrollspy: mark nav-item active when its section scrolls into view */
+/* View router (same pattern as portal/app.js): one section visible at a time,
+   hash-addressable, unknown hash falls back to #resumo. With JS off the
+   .js-views class is never added and the page degrades to the full scroll. */
 (function() {
-  var items = document.querySelectorAll('.nav-item[data-section]');
-  var sections = Array.from(items).map(function(el) {
-    return document.getElementById(el.getAttribute('data-section'));
-  }).filter(Boolean);
-  if (!sections.length || !window.IntersectionObserver) return;
-  var obs = new IntersectionObserver(function(entries) {
-    entries.forEach(function(e) {
-      if (e.isIntersecting) {
-        var id = e.target.id;
-        items.forEach(function(el) {
-          el.classList.toggle('active', el.getAttribute('data-section') === id);
-        });
+  var VIEWS = ['resumo','receita','funil','engajamento','custo','qualidade-memoria','uso-chat','armazenamento','leads','contas'];
+  document.documentElement.classList.add('js-views');
+  function go() {
+    var h = (location.hash || '#resumo').slice(1);
+    if (VIEWS.indexOf(h) === -1) h = 'resumo';
+    VIEWS.forEach(function(id) {
+      var sec = document.getElementById(id);
+      if (sec) sec.classList.toggle('view-active', id === h);
+    });
+    document.querySelectorAll('.nav-item[data-section]').forEach(function(el) {
+      var act = el.getAttribute('data-section') === h;
+      el.classList.toggle('active', act);
+      if (act) el.setAttribute('aria-current', 'true');
+      else el.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('.tabbar-mobile a').forEach(function(el) {
+      var act = el.getAttribute('href') === '#' + h;
+      el.classList.toggle('active', act);
+      if (act) {
+        el.setAttribute('aria-current', 'true');
+        if (el.scrollIntoView) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' });
+      } else {
+        el.removeAttribute('aria-current');
       }
     });
-  }, { rootMargin: '-20% 0px -70% 0px' });
-  sections.forEach(function(s) { obs.observe(s); });
+    /* instant: o scroll-behavior:smooth global animaria a troca de view */
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }
+  window.addEventListener('hashchange', go);
+  go();
+})();
+
+/* Contas: per-row detail toggle. Delegated click on .acct-toggle flips the
+   [hidden] attr of the row named by aria-controls, plus aria-expanded + glyph. */
+(function() {
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target.closest ? ev.target.closest('.acct-toggle') : null;
+    if (!btn) return;
+    var row = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!row) return;
+    var open = row.hidden; // true => we are opening it now
+    row.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '\\u25BE' : '\\u25B8'; /* ▾ / ▸ */
+  });
 })();
 </script>
 </body>
@@ -1345,9 +1432,10 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const token = gate(req, res);
     if (!token) return;
     const msg = typeof req.query.msg === "string" ? req.query.msg : "";
+    const msgKind: "err" | "" = req.query.kind === "err" ? "err" : "";
     try {
       const data = await gather();
-      res.type("html").send(renderHtml(data, new Date().toISOString(), token, msg));
+      res.type("html").send(renderHtml(data, new Date().toISOString(), token, msg, msgKind));
     } catch (err: any) {
       res.status(500).type("html").send(`<!doctype html><meta charset=utf-8><p>500 — ${escapeHtml(err?.message ?? "erro")}</p>`);
     }
@@ -1360,7 +1448,7 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      res.redirect(`${back}&msg=${encodeURIComponent("E-mail inválido.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("E-mail inválido.")}&kind=err#leads`);
       return;
     }
     try {
@@ -1368,10 +1456,10 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       await issueInvite(code, `lead:${email}`);
       await sendInviteEmail(email, code, BASE_URL);
       await markRequestInvited(email, hashInvite(code));
-      res.redirect(`${back}&msg=${encodeURIComponent(`Convite enviado para ${email}.`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Convite enviado para ${email}.`)}#leads`);
     } catch (err: any) {
       console.error(`[admin] invite failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao enviar: ${err?.message ?? "erro"}`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao enviar: ${err?.message ?? "erro"}`)}&kind=err#leads`);
     }
   });
 
@@ -1383,7 +1471,7 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const accountId = typeof req.body?.account_id === "string" ? req.body.account_id.trim() : "";
     if (!accountId) {
-      res.redirect(`${back}&msg=${encodeURIComponent("account_id obrigatório.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("account_id obrigatório.")}&kind=err#contas`);
       return;
     }
     try {
@@ -1391,10 +1479,10 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       const msg = found
         ? `Conta ${accountId} bloqueada (${revoked} token(s) revogado(s)).`
         : `Conta ${accountId} não encontrada.`;
-      res.redirect(`${back}&msg=${encodeURIComponent(msg)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(msg)}${found ? "" : "&kind=err"}#contas`);
     } catch (err: any) {
       console.error(`[admin] block failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao bloquear: ${err?.message ?? "erro"}`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao bloquear: ${err?.message ?? "erro"}`)}&kind=err#contas`);
     }
   });
 
@@ -1405,7 +1493,7 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const accountId = typeof req.body?.account_id === "string" ? req.body.account_id.trim() : "";
     if (!accountId) {
-      res.redirect(`${back}&msg=${encodeURIComponent("account_id obrigatório.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("account_id obrigatório.")}&kind=err#contas`);
       return;
     }
     try {
@@ -1413,10 +1501,10 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       const msg = found
         ? `Conta ${accountId} reativada.`
         : `Conta ${accountId} não encontrada.`;
-      res.redirect(`${back}&msg=${encodeURIComponent(msg)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(msg)}${found ? "" : "&kind=err"}#contas`);
     } catch (err: any) {
       console.error(`[admin] unblock failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao reativar: ${err?.message ?? "erro"}`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao reativar: ${err?.message ?? "erro"}`)}&kind=err#contas`);
     }
   });
 
@@ -1427,15 +1515,15 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
     if (!email) {
-      res.redirect(`${back}&msg=${encodeURIComponent("E-mail obrigatório.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("E-mail obrigatório.")}&kind=err#leads`);
       return;
     }
     try {
       await dismissInviteRequest(email);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Lead ${email} dispensado.`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Lead ${email} dispensado.`)}#leads`);
     } catch (err: any) {
       console.error(`[admin] dismiss failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao dispensar: ${err?.message ?? "erro"}`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao dispensar: ${err?.message ?? "erro"}`)}&kind=err#leads`);
     }
   });
 
@@ -1447,16 +1535,16 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const account = typeof req.body?.account === "string" ? req.body.account.trim() : "";
     if (!account) {
-      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}&kind=err#contas`);
       return;
     }
     try {
       await grantCompPlan(account, "ilimitado");
-      res.redirect(`${back}&msg=${encodeURIComponent(`Plano ilimitado (cortesia) liberado para ${account}.`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Plano ilimitado (cortesia) liberado para ${account}.`)}#contas`);
     } catch (err: any) {
       const label = err instanceof CompGrantError ? err.message : `Falha ao liberar: ${err?.message ?? "erro"}`;
       console.error(`[admin] grant-unlimited failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(label)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(label)}&kind=err#contas`);
     }
   });
 
@@ -1468,7 +1556,7 @@ export function createAdminRouter(bearerToken?: string): express.Router {
     const back = `/admin?token=${encodeURIComponent(token)}`;
     const account = typeof req.body?.account === "string" ? req.body.account.trim() : "";
     if (!account) {
-      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}`);
+      res.redirect(`${back}&msg=${encodeURIComponent("Parâmetro 'account' obrigatório.")}&kind=err#contas`);
       return;
     }
     try {
@@ -1476,10 +1564,10 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       const msg = revoked
         ? `Cortesia removida de ${account}. Plano voltou para free.`
         : `Conta ${account} não está em cortesia — nenhuma ação.`;
-      res.redirect(`${back}&msg=${encodeURIComponent(msg)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(msg)}${revoked ? "" : "&kind=err"}#contas`);
     } catch (err: any) {
       console.error(`[admin] revoke-unlimited failed: ${err?.message ?? err}`);
-      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao remover cortesia: ${err?.message ?? "erro"}`)}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao remover cortesia: ${err?.message ?? "erro"}`)}&kind=err#contas`);
     }
   });
 
