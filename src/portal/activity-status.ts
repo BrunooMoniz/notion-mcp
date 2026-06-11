@@ -22,7 +22,7 @@ export type ActivityState =
 
 /** One entry in the enriched sources list. */
 export interface ActivitySource {
-  /** Canonical source key (e.g. "notion-<ws>", "granola-friend", "calendar", "gcal"). */
+  /** Canonical source key (e.g. "notion-<ws>", "granola-friend", "calendar", "gcal:<email>"). */
   source: string;
   /** Source family: notion | granola | calendar | gcal */
   source_type: "notion" | "granola" | "calendar" | "gcal";
@@ -36,6 +36,17 @@ export interface ActivitySource {
   last_run: string | null;
   /** Truncated error message (max 200 chars). Null when estado !== "erro". */
   error: string | null;
+  /** Live indexed documents for THIS source (from brain_chunks). Null when unknown. */
+  documents: number | null;
+  /** Live indexed chunks for THIS source (from brain_chunks). Null when unknown. */
+  chunks: number | null;
+}
+
+/** Live per-source counts, keyed by the same source key used in the entries
+ *  (notion-<ws> | granola | calendar | gcal:<email>). */
+export interface LiveCountsEntry {
+  documents: number;
+  chunks: number;
 }
 
 // ---------- input shapes (caller provides these) ----------------------------
@@ -67,12 +78,21 @@ export interface ActivityCredentials {
 
 // ---------- helpers ----------------------------------------------------------
 
-/** Resolve ActivityState from a StatusSource (or null if no run exists). */
+/** Resolve ActivityState from a StatusSource (or null if no run exists).
+ *  When a reindex is in flight, a source whose run already FINISHED inside this
+ *  reindex (last_run >= runningSince) shows its real result instead of a
+ *  blanket "indexando" — that's what makes per-source progress honest. */
 function stateFromRun(
   run: StatusSource | null | undefined,
   isRunning: boolean,
+  runningSince?: Date | null,
 ): ActivityState {
-  if (isRunning) return "indexando";
+  const finishedThisRun =
+    isRunning &&
+    runningSince != null &&
+    run?.last_run_at != null &&
+    new Date(run.last_run_at).getTime() >= runningSince.getTime();
+  if (isRunning && !finishedThisRun) return "indexando";
   if (!run) return "aguardando_primeira_indexacao";
   const counts = run.counts as Record<string, unknown> | null | undefined;
   if (counts && typeof counts === "object") {
@@ -96,17 +116,28 @@ function truncateError(msg: string | null | undefined, max = 200): string | null
  * @param credentials  Credential inventory (from vault + account_workspaces).
  * @param runs         Latest status_run per source (from summarizeStatus/getStatus).
  * @param running      Whether a reindex is currently in-flight for this account.
+ * @param opts.liveCounts    Live per-source counts from brain_chunks, keyed by
+ *                           the same source key as each entry.
+ * @param opts.runningSince  When the in-flight reindex started — lets a source
+ *                           that already finished inside this run show "ok"
+ *                           instead of "indexando".
  */
 export function buildActivitySources(
   credentials: ActivityCredentials,
   runs: StatusSource[],
   running: boolean,
+  opts: {
+    liveCounts?: Map<string, LiveCountsEntry>;
+    runningSince?: Date | null;
+  } = {},
 ): ActivitySource[] {
   // Index runs by source key for O(1) lookup.
   const runMap = new Map<string, StatusSource>();
   for (const r of runs) {
     runMap.set(r.source, r);
   }
+  const runningSince = opts.runningSince ?? null;
+  const live = (key: string): LiveCountsEntry | null => opts.liveCounts?.get(key) ?? null;
 
   const out: ActivitySource[] = [];
 
@@ -114,7 +145,8 @@ export function buildActivitySources(
   for (const ws of credentials.notionWorkspaces) {
     const sourceKey = `notion-${ws.workspace}`;
     const run = runMap.get(sourceKey) ?? null;
-    const estado = stateFromRun(run, running);
+    const estado = stateFromRun(run, running, runningSince);
+    const lv = live(sourceKey);
     out.push({
       source: sourceKey,
       source_type: "notion",
@@ -123,6 +155,8 @@ export function buildActivitySources(
       counts: run?.counts ?? null,
       last_run: run?.last_run_at ?? null,
       error: estado === "erro" ? truncateError(run?.error) : null,
+      documents: lv?.documents ?? null,
+      chunks: lv?.chunks ?? null,
     });
   }
 
@@ -132,7 +166,8 @@ export function buildActivitySources(
     // we treat any "granola-*" run as the granola run for this account.
     const run =
       [...runMap.entries()].find(([k]) => k.startsWith("granola"))?.[1] ?? null;
-    const estado = stateFromRun(run, running);
+    const estado = stateFromRun(run, running, runningSince);
+    const lv = live("granola");
     out.push({
       source: run?.source ?? "granola-friend",
       source_type: "granola",
@@ -141,18 +176,21 @@ export function buildActivitySources(
       counts: run?.counts ?? null,
       last_run: run?.last_run_at ?? null,
       error: estado === "erro" ? truncateError(run?.error) : null,
+      documents: lv?.documents ?? null,
+      chunks: lv?.chunks ?? null,
     });
   }
 
   // ---- iCal links ----
   if (credentials.icalLinks.length > 0) {
     const run = runMap.get("calendar") ?? null;
-    const estado = stateFromRun(run, running);
+    const estado = stateFromRun(run, running, runningSince);
     // Label the entry with the first link's label (or count when multiple).
     const label =
       credentials.icalLinks.length === 1
         ? credentials.icalLinks[0].label || "Calendário iCal"
         : `Calendários iCal (${credentials.icalLinks.length})`;
+    const lv = live("calendar");
     out.push({
       source: "calendar",
       source_type: "calendar",
@@ -161,24 +199,30 @@ export function buildActivitySources(
       counts: run?.counts ?? null,
       last_run: run?.last_run_at ?? null,
       error: estado === "erro" ? truncateError(run?.error) : null,
+      documents: lv?.documents ?? null,
+      chunks: lv?.chunks ?? null,
     });
   }
 
   // ---- Google Calendar OAuth ----
+  // One entry PER connected account. They share a single "gcal" run record
+  // (the pass indexes all accounts together), but each gets its own live
+  // counts via the gcal:<email> key.
+  const gcalRun = runMap.get("gcal") ?? null;
   for (const acct of credentials.googleAccounts) {
-    const run = runMap.get("gcal") ?? null;
-    const estado = stateFromRun(run, running);
+    const estado = stateFromRun(gcalRun, running, runningSince);
+    const lv = acct.email ? live(`gcal:${acct.email}`) : null;
     out.push({
-      source: "gcal",
+      source: acct.email ? `gcal:${acct.email}` : "gcal",
       source_type: "gcal",
       display_name: acct.email || "Google Calendar",
       estado,
-      counts: run?.counts ?? null,
-      last_run: run?.last_run_at ?? null,
-      error: estado === "erro" ? truncateError(run?.error) : null,
+      counts: gcalRun?.counts ?? null,
+      last_run: gcalRun?.last_run_at ?? null,
+      error: estado === "erro" ? truncateError(gcalRun?.error) : null,
+      documents: lv?.documents ?? null,
+      chunks: lv?.chunks ?? null,
     });
-    // Only one gcal entry even if multiple accounts share the same run record.
-    break;
   }
 
   return out;
