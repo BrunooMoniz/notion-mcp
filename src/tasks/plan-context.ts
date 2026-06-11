@@ -17,6 +17,8 @@ export interface PlanEvent {
   end: string | null;
   all_day: boolean;
   calendar: string;
+  /** True for brain-index fallback events (no exact duration — iCal index). */
+  approximate?: boolean;
 }
 
 export interface FreeSlot {
@@ -76,6 +78,31 @@ export function zonedTimeToUtc(date: string, time: string, tz: string): Date {
   const first = new Date(naive.getTime() - offset * 60_000);
   offset = tzOffsetMinutes(tz, first);
   return new Date(naive.getTime() - offset * 60_000);
+}
+
+/** Local YYYY-MM-DD of an instant in the IANA timezone `tz` ('en-CA' formats
+ *  as YYYY-MM-DD). "Today" must follow the USER's calendar day, not the
+ *  server's clock: 00:30Z is still the previous day in America/Sao_Paulo. */
+export function localDateInTz(tz: string, d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** ISO local datetime WITH offset of a UTC instant in `tz`
+ *  (e.g. "2026-06-15T22:00:00-03:00"). Used to display brain-indexed event
+ *  starts in the user's wall clock instead of whatever offset was stored. */
+export function isoInTz(utc: Date, tz: string): string {
+  const off = tzOffsetMinutes(tz, utc);
+  const local = new Date(utc.getTime() + off * 60_000);
+  const sign = off < 0 ? "-" : "+";
+  const abs = Math.abs(off);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${local.toISOString().slice(0, 19)}${sign}${hh}:${mm}`;
 }
 
 /** Local "HH:MM" of a UTC instant in `tz`. */
@@ -185,12 +212,23 @@ function slot(startMs: number, endMs: number, tz: string): FreeSlot {
 
 // --- event dedup -----------------------------------------------------------------------
 
+/** Strip the contextual-retrieval bracket header brain-indexed titles carry
+ *  ("[Calendar · personal · 2026-06-15] Reunião X" → "Reunião X"). */
+export function stripBracketPrefix(title: string): string {
+  return title.replace(/^\[[^\]]*\]\s*/, "");
+}
+
 /** PURE: drop duplicate events by (normalized title + start) — the same meeting
- *  often appears on several calendars/accounts. First occurrence wins. */
+ *  often appears on several calendars/accounts. First occurrence wins, so the
+ *  caller must push LIVE events before fallback ones. Title key strips the
+ *  brain bracket header; start key is the epoch when parseable, so the same
+ *  instant in different offsets ("14:00-03:00" vs "17:00Z") deduplicates. */
 export function dedupPlanEvents(events: PlanEvent[]): PlanEvent[] {
   const seen = new Set<string>();
   return events.filter((ev) => {
-    const key = `${normalize(ev.title)}|${ev.start}`;
+    const parsed = Date.parse(ev.start);
+    const startKey = Number.isNaN(parsed) ? ev.start : String(parsed);
+    const key = `${normalize(stripBracketPrefix(ev.title))}|${startKey}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

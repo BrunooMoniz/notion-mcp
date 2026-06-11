@@ -16,6 +16,7 @@ import type { BriefingEvent, EventContext, BriefingTask } from "../briefing/dail
 import type pg from "pg";
 import { getAccountId } from "../context.js";
 import { normalize } from "../tasks/model.js";
+import { stripBracketPrefix } from "../tasks/plan-context.js";
 
 // ---------- dep-injection seam -----------------------------------------------
 
@@ -56,12 +57,14 @@ export async function buildBrainToday(
   return { date: dateStr, events, context, tasks };
 }
 
-/** PURE: drop duplicate events by (normalized title + date + time). Exported
+/** PURE: drop duplicate events by (normalized title + date + time). The title
+ *  key strips the contextual bracket header ("[Calendar · ws · data] T") so the
+ *  same meeting indexed from two workspaces/calendars deduplicates. Exported
  *  for unit tests. */
 export function dedupBriefingEvents(events: BriefingEvent[], dateStr: string): BriefingEvent[] {
   const seen = new Set<string>();
   return events.filter((ev) => {
-    const key = `${normalize(ev.title)}|${dateStr}|${ev.time}`;
+    const key = `${normalize(stripBracketPrefix(ev.title))}|${dateStr}|${ev.time}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -125,7 +128,10 @@ export function registerBrainTodayTool(server: McpServer): void {
       ]);
 
       const deps: BrainTodayDeps = {
-        getTodayEvents,
+        // SECURITY: events scoped to the CALLER's account (friend surface) —
+        // gatherContext/brain_search below are already account-scoped inside
+        // brainSearch (F3.0 tenant guard via getAccountId()).
+        getTodayEvents: (pool, date) => getTodayEvents(pool, date, accountId),
         gatherContext,
         getTopTasks: async (limit) => {
           try {

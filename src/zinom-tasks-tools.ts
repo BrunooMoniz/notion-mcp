@@ -19,6 +19,9 @@ import {
   validatePlanWindow,
   isValidTimezone,
   zonedTimeToUtc,
+  localDateInTz,
+  isoInTz,
+  stripBracketPrefix,
   PLAN_GUIDANCE,
   DEFAULT_TIMEZONE,
   DEFAULT_WORK_START,
@@ -38,7 +41,7 @@ const NO_NOTION_MSG =
 const NO_TRACKER_MSG =
   "Você ainda não tem uma base de tarefas configurada. Duas saídas: (1) peça para eu criar sua primeira tarefa — eu crio a base padrão \"Tarefas\" no seu Notion automaticamente; ou (2) configure uma base existente no portal (zinom.ai → Início → Tarefas).";
 
-function taskError(e: unknown): ReturnType<typeof fail> {
+function taskError(e: unknown, genericCode = "task_failed"): ReturnType<typeof fail> {
   if (e instanceof NoNotionError) return fail("no_notion", NO_NOTION_MSG);
   if (e instanceof NoTrackerError) return fail("no_tracker", NO_TRACKER_MSG);
   if (e instanceof TaskNotFoundError) {
@@ -48,7 +51,7 @@ function taskError(e: unknown): ReturnType<typeof fail> {
     );
   }
   const msg = e instanceof Error ? e.message : String(e);
-  return fail("task_failed", msg);
+  return fail(genericCode, msg);
 }
 
 export function registerZinomTasksTools(server: McpServer): void {
@@ -93,7 +96,10 @@ Responde em português confirmando o que foi criado, com o link da página.`,
         .describe('Canônico (todo, in_progress, done, ...) ou literal ("A fazer")'),
       prioridade: z.string().optional().describe("urgente | alta | media | baixa"),
       tempo_estimado_min: z.number().int().positive().optional().describe("Estimativa em minutos"),
-      tipo: z.enum(["fazer", "cobrar"]).optional().describe("fazer = eu executo; cobrar = cobrar de alguém"),
+      tipo: z
+        .string()
+        .optional()
+        .describe("fazer | cobrar (ou o valor literal da sua base)"),
       quem: z.string().optional().describe("De quem cobrar / responsável (texto)"),
       origem_url: z.string().optional().describe("Link de origem (reunião, página)"),
       projeto: z.string().optional().describe("Projeto/frente"),
@@ -132,7 +138,7 @@ Responde em português confirmando o que foi criado, com o link da página.`,
             : "Tarefa criada no seu Notion.",
         });
       } catch (e) {
-        return taskError(e);
+        return taskError(e, "create_failed");
       }
     },
   );
@@ -151,7 +157,7 @@ Parâmetros:
 - q: busca por substring no título (use para deduplicar antes de criar).
 - limit: máximo de tarefas (default 25, máx 100).
 
-Retorna {tasks, board, tracker_url}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count.`,
+Retorna {tasks, board, tracker_url, truncated}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count. truncated=true significa que a base tem mais linhas do que o scan cobriu — os números do board são um piso.`,
     {
       status: z
         .array(z.string())
@@ -174,7 +180,13 @@ Retorna {tasks, board, tracker_url}: tasks no modelo canônico (id, title, statu
           q,
           limit,
         });
-        return json({ ok: true, tasks: r.tasks, board: r.board, tracker_url: r.tracker_url });
+        return json({
+          ok: true,
+          tasks: r.tasks,
+          board: r.board,
+          tracker_url: r.tracker_url,
+          truncated: r.truncated,
+        });
       } catch (e) {
         return taskError(e);
       }
@@ -194,7 +206,8 @@ Parâmetros:
 - status: canônico (backlog | todo | in_progress | blocked | done | canceled) ou literal da base.
 - prioridade: urgente | alta | media | baixa.
 - prazo: novo prazo ISO 8601 ("" limpa o prazo); prazo_fim: fim do bloco (só com prazo).
-- tempo_estimado_min, tipo (fazer|cobrar), quem, projeto.
+- tempo_estimado_min, tipo (fazer|cobrar ou literal da base), quem.
+- projeto: SUBSTITUI o conjunto de tags do projeto (em base multi_select, passe a lista completa separada por vírgula, ex.: "Zinom, Nora").
 - nota_append: parágrafo adicionado ao corpo da página (histórico/cobranças).`,
     {
       task_id: z.string().min(1).describe("Id da tarefa (de zinom_list_tasks)"),
@@ -204,9 +217,12 @@ Parâmetros:
       prazo: z.string().optional().describe('ISO 8601; "" limpa o prazo'),
       prazo_fim: z.string().optional().describe("Fim do bloco (só com prazo)"),
       tempo_estimado_min: z.number().int().positive().optional(),
-      tipo: z.enum(["fazer", "cobrar"]).optional(),
+      tipo: z.string().optional().describe("fazer | cobrar (ou o valor literal da sua base)"),
       quem: z.string().optional(),
-      projeto: z.string().optional(),
+      projeto: z
+        .string()
+        .optional()
+        .describe('Substitui o conjunto de tags; multi_select: lista separada por vírgula ("Zinom, Nora")'),
       nota_append: z.string().optional().describe("Parágrafo adicionado ao corpo da página"),
     },
     async ({ task_id, ...patch }) => {
@@ -229,7 +245,7 @@ Parâmetros:
   // --- zinom_plan_context --------------------------------------------------------
   server.tool(
     "zinom_plan_context",
-    `Retorna TUDO que você precisa para planejar o dia/semana/mês da pessoa numa chamada só: agenda real (eventos ao vivo de todas as contas Google conectadas, com fallback nos eventos indexados no cérebro), janelas livres por dia, e o board de tarefas abertas agrupado por status.
+    `Retorna TUDO que você precisa para planejar o dia/semana/mês da pessoa numa chamada só: agenda real (eventos ao vivo de todas as contas Google conectadas, em união com os eventos indexados no cérebro — estes marcados approximate, sem duração exata), janelas livres por dia, e o board de tarefas abertas agrupado por status.
 
 Use quando pedirem "planeja meu dia/semana/mês", "o que cabe na minha agenda", "distribui minhas tarefas". Janela máxima: 35 dias. Não usa quota de busca.
 
@@ -283,18 +299,23 @@ Retorna:
         });
 
         // --- open tasks grouped by status (no tracker → empty, never create) -
-        const todayISO = new Date().toISOString().slice(0, 10);
+        // "Today" (overdue cut) in the USER's timezone, not the server clock.
+        const todayISO = localDateInTz(tz);
         let tasksSection: ReturnType<typeof groupOpenTasks> = { by_status: {}, overdue: [] };
         let abertos = 0;
         let estimado_min = 0;
+        let tasks_truncated = false;
         let tracker_note: string | null = null;
         try {
           const r = await listTasks(accountId, { limit: 100 });
           tasksSection = groupOpenTasks(r.tasks, todayISO);
           abertos = r.board.abertos;
           estimado_min = r.board.estimado_min;
+          tasks_truncated = r.truncated;
         } catch (e) {
-          if (e instanceof NoTrackerError || e instanceof NoNotionError) {
+          if (e instanceof NoNotionError) {
+            tracker_note = NO_NOTION_MSG;
+          } else if (e instanceof NoTrackerError) {
             tracker_note = NO_TRACKER_MSG;
           } else {
             throw e;
@@ -302,6 +323,7 @@ Retorna:
         }
 
         const free_min = free_slots.reduce((acc, d) => acc + d.free_min, 0);
+        const hasApproximate = events.some((e) => e.approximate);
         return json({
           ok: true,
           period: { start: period_start, end: period_end, timezone: tz },
@@ -309,7 +331,15 @@ Retorna:
           free_slots,
           tasks: tasksSection.by_status,
           overdue: tasksSection.overdue,
-          totals: { free_min, abertos, estimado_min, overdue: tasksSection.overdue.length },
+          // tasks_truncated=true → abertos/estimado/overdue são um PISO (a base
+          // tem mais linhas do que o scan cobriu).
+          totals: { free_min, abertos, estimado_min, overdue: tasksSection.overdue.length, tasks_truncated },
+          ...(hasApproximate
+            ? {
+                note:
+                  "Parte da agenda veio do índice do cérebro (eventos approximate, sem duração exata). Conecte o Google no portal para horários precisos.",
+              }
+            : {}),
           ...(tracker_note ? { tracker_note } : {}),
           guidance: PLAN_GUIDANCE,
         });
@@ -320,48 +350,186 @@ Retorna:
   );
 }
 
-// --- event gathering (live Google → brain-indexed fallback) -----------------------
+// --- event gathering (live Google ∪ brain-indexed iCal) -----------------------
 
-async function gatherEvents(
+/** Max calendars considered for busy-time per Google account (cost bound). */
+export const MAX_BUSY_CALENDARS = 10;
+
+interface CalendarLite {
+  id: string;
+  summary?: string;
+  accessRole?: string;
+}
+
+interface GoogleEventLite {
+  summary?: string;
+  status?: string;
+  transparency?: string;
+  attendees?: Array<{ self?: boolean; responseStatus?: string }>;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+}
+
+/** PURE: calendars that represent the person's own time — accessRole
+ *  owner/writer only (subscribed/read-only feeds like holidays don't block
+ *  slots), capped at MAX_BUSY_CALENDARS (truncation logged). */
+export function busyCalendars(cals: CalendarLite[], label: string): CalendarLite[] {
+  const own = cals.filter((c) => c.accessRole === "owner" || c.accessRole === "writer");
+  if (own.length > MAX_BUSY_CALENDARS) {
+    console.warn(`[plan-context] ${label}: ${own.length} calendars, using first ${MAX_BUSY_CALENDARS}`);
+    return own.slice(0, MAX_BUSY_CALENDARS);
+  }
+  return own;
+}
+
+/** PURE: true when the event actually blocks a slot — skips cancelled,
+ *  "free"/transparent events and events the person declined. */
+export function eventBlocksBusy(e: GoogleEventLite): boolean {
+  if (e.status === "cancelled") return false;
+  if (e.transparency === "transparent") return false;
+  const self = (e.attendees ?? []).find((a) => a?.self);
+  if (self?.responseStatus === "declined") return false;
+  return true;
+}
+
+export interface BrainCalendarRow {
+  text?: string;
+  data: string | null;
+  calendar_label: string | null;
+}
+
+/** PURE: brain-indexed calendar rows → approximate PlanEvents. Titles lose the
+ *  contextual bracket header; timed starts are re-expressed in the user's tz
+ *  offset and re-cut to the LOCAL-date window (a 22h BRT event stored as
+ *  01:00Z next day must not leak into the following day). */
+export function brainRowsToPlanEvents(
+  rows: BrainCalendarRow[],
+  periodStart: string,
+  periodEnd: string,
+  tz: string,
+): PlanEvent[] {
+  const out: PlanEvent[] = [];
+  for (const r of rows) {
+    if (!r.data) continue;
+    const firstLine = (r.text ?? "").split("\n")[0] ?? "";
+    const title = stripBracketPrefix(firstLine.replace(/^#\s+/, "").trim()) || "(sem título)";
+    const timed = /T/.test(r.data);
+    let start = r.data;
+    let localDate = r.data.slice(0, 10);
+    if (timed) {
+      const parsed = new Date(r.data);
+      if (!Number.isNaN(parsed.getTime())) {
+        start = isoInTz(parsed, tz);
+        localDate = start.slice(0, 10);
+      }
+    }
+    if (localDate < periodStart || localDate > periodEnd) continue;
+    out.push({
+      title,
+      start,
+      end: null,
+      all_day: !timed,
+      calendar: r.calendar_label ?? "",
+      approximate: true,
+    });
+  }
+  return out;
+}
+
+function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Injectable seams for tests (defaults do the real dynamic imports). */
+export interface GatherEventsDeps {
+  getGoogleAccounts?: (accountId: string) => Promise<Array<{ email: string }>>;
+  getAccessToken?: (accountId: string, email: string) => Promise<string>;
+  listCalendars?: (token: string) => Promise<CalendarLite[]>;
+  listEvents?: (
+    token: string,
+    opts: { calendarId: string; timeMin: string; timeMax: string },
+  ) => Promise<GoogleEventLite[]>;
+  queryBrainRows?: (accountId: string, from: string, to: string) => Promise<BrainCalendarRow[]>;
+}
+
+async function defaultQueryBrainRows(
+  accountId: string,
+  from: string,
+  to: string,
+): Promise<BrainCalendarRow[]> {
+  const { getPool } = await import("./rag/storage.js");
+  const { rows } = await getPool().query(
+    `SELECT DISTINCT ON (source_id)
+            source_id,
+            text,
+            metadata->>'data'           AS data,
+            metadata->>'calendar_label' AS calendar_label
+     FROM brain_chunks
+     WHERE source_type = 'calendar'
+       AND account_id = $1
+       AND (metadata->>'data')::date >= $2::date
+       AND (metadata->>'data')::date <= $3::date
+     ORDER BY source_id, chunk_index ASC`,
+    [accountId, from, to],
+  );
+  return rows as BrainCalendarRow[];
+}
+
+export async function gatherEvents(
   accountId: string,
   periodStart: string,
   periodEnd: string,
   tz: string,
+  deps: GatherEventsDeps = {},
 ): Promise<PlanEvent[]> {
   const events: PlanEvent[] = [];
-  let googleOk = false;
 
+  // --- live Google: all accounts, busy calendars in parallel ----------------
   try {
-    const { getGoogleAccounts } = await import("./google/google-accounts.js");
-    const { getGoogleAccessTokenFor } = await import("./google/google-token.js");
-    const { listCalendarsWithToken, listEventsWithToken } = await import("./google/calendar.js");
+    const getAccounts =
+      deps.getGoogleAccounts ?? (await import("./google/google-accounts.js")).getGoogleAccounts;
+    const getToken =
+      deps.getAccessToken ?? (await import("./google/google-token.js")).getGoogleAccessTokenFor;
+    const calendarMod =
+      deps.listCalendars && deps.listEvents ? null : await import("./google/calendar.js");
+    const listCals = deps.listCalendars ?? calendarMod!.listCalendarsWithToken;
+    const listEvs = deps.listEvents ?? calendarMod!.listEventsWithToken;
 
     const timeMin = zonedTimeToUtc(periodStart, "00:00", tz).toISOString();
     // End of the last day = start of the following day in the local timezone.
-    const dayAfter = new Date(new Date(`${periodEnd}T00:00:00Z`).getTime() + 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    const timeMax = zonedTimeToUtc(dayAfter, "00:00", tz).toISOString();
+    const timeMax = zonedTimeToUtc(shiftDate(periodEnd, 1), "00:00", tz).toISOString();
 
-    for (const acc of await getGoogleAccounts(accountId)) {
+    for (const acc of await getAccounts(accountId)) {
       try {
-        const token = await getGoogleAccessTokenFor(accountId, acc.email);
-        for (const cal of await listCalendarsWithToken(token)) {
-          const evs = await listEventsWithToken(token, { calendarId: cal.id, timeMin, timeMax });
-          for (const e of evs) {
-            if (e.status === "cancelled") continue;
-            const start = e.start?.dateTime ?? e.start?.date;
-            if (!start) continue;
-            events.push({
-              title: e.summary ?? "(sem título)",
-              start,
-              end: e.end?.dateTime ?? e.end?.date ?? null,
-              all_day: !!e.start?.date,
-              calendar: cal.summary ?? cal.id,
-            });
-          }
-          googleOk = true;
-        }
+        const token = await getToken(accountId, acc.email);
+        const cals = busyCalendars(await listCals(token), `${accountId}/${acc.email}`);
+        const perCal = await Promise.all(
+          cals.map(async (cal): Promise<PlanEvent[]> => {
+            try {
+              const evs = await listEvs(token, { calendarId: cal.id, timeMin, timeMax });
+              const out: PlanEvent[] = [];
+              for (const e of evs) {
+                if (!eventBlocksBusy(e)) continue;
+                const start = e.start?.dateTime ?? e.start?.date;
+                if (!start) continue;
+                out.push({
+                  title: e.summary ?? "(sem título)",
+                  start,
+                  end: e.end?.dateTime ?? e.end?.date ?? null,
+                  all_day: !!e.start?.date,
+                  calendar: cal.summary ?? cal.id,
+                });
+              }
+              return out;
+            } catch (err: any) {
+              console.warn(
+                `[plan-context] ${accountId}: calendar ${cal.id} failed: ${err?.message ?? err}`,
+              );
+              return [];
+            }
+          }),
+        );
+        for (const list of perCal) events.push(...list);
       } catch (err: any) {
         console.warn(`[plan-context] ${accountId}: Google ${acc.email} failed: ${err?.message ?? err}`);
       }
@@ -370,39 +538,17 @@ async function gatherEvents(
     console.warn(`[plan-context] ${accountId}: Google lookup failed: ${err?.message ?? err}`);
   }
 
-  // Fallback/union: brain-indexed calendar chunks (iCal feeds) cover accounts
-  // without Google OAuth (e.g. the owner's GOOGLE_CAL_ICS pipeline).
-  if (!googleOk || events.length === 0) {
-    try {
-      const { getPool } = await import("./rag/storage.js");
-      const { rows } = await getPool().query(
-        `SELECT DISTINCT ON (source_id)
-                source_id,
-                text,
-                metadata->>'data'           AS data,
-                metadata->>'calendar_label' AS calendar_label
-         FROM brain_chunks
-         WHERE source_type = 'calendar'
-           AND account_id = $1
-           AND (metadata->>'data')::date >= $2::date
-           AND (metadata->>'data')::date <= $3::date
-         ORDER BY source_id, chunk_index ASC`,
-        [accountId, periodStart, periodEnd],
-      );
-      for (const r of rows as Array<{ text?: string; data: string | null; calendar_label: string | null }>) {
-        if (!r.data) continue;
-        const firstLine = (r.text ?? "").split("\n")[0] ?? "";
-        events.push({
-          title: firstLine.replace(/^#\s+/, "").trim() || "(sem título)",
-          start: r.data,
-          end: null,
-          all_day: !/T/.test(r.data),
-          calendar: r.calendar_label ?? "",
-        });
-      }
-    } catch (err: any) {
-      console.warn(`[plan-context] ${accountId}: brain fallback failed: ${err?.message ?? err}`);
-    }
+  // --- brain union (ALWAYS): iCal-indexed events cover calendars/accounts the
+  // Google OAuth path doesn't see; dedupPlanEvents drops the overlap (live
+  // events are pushed first, so they win). SQL window over-fetches ±1 day —
+  // the stored offset may differ from the user's tz; the pure mapper re-cuts
+  // by LOCAL date.
+  try {
+    const queryRows = deps.queryBrainRows ?? defaultQueryBrainRows;
+    const rows = await queryRows(accountId, shiftDate(periodStart, -1), shiftDate(periodEnd, 1));
+    events.push(...brainRowsToPlanEvents(rows, periodStart, periodEnd, tz));
+  } catch (err: any) {
+    console.warn(`[plan-context] ${accountId}: brain calendar union failed: ${err?.message ?? err}`);
   }
 
   return events;

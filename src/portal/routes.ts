@@ -784,7 +784,10 @@ export function createPortalRouter(): express.Router {
     const accountId: string = res.locals.accountId;
     try {
       const { createTaskTracker } = await import("./task-tracker.js");
+      const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
       const { dataSourceId } = await createTaskTracker(accountId);
+      // tasks_db mudou → o profile cacheado (5 min) não pode sobreviver.
+      invalidateTrackerProfile(accountId);
       res.status(201).json({ data_source_id: dataSourceId });
     } catch (err: any) {
       console.error(`[portal] tasks/create ${accountId}: ${err?.message ?? err}`);
@@ -792,9 +795,10 @@ export function createPortalRouter(): express.Router {
     }
   });
 
-  // Usa uma DB existente que a pessoa escolheu: grava o id e valida o schema via
-  // adapter, devolvendo o shape do /info (o que mapeou/faltou). Grava MESMO com
-  // campos missing — o adapter se adapta ao schema; nada é bloqueado.
+  // Usa uma DB existente que a pessoa escolheu: VALIDA a leitura ANTES de
+  // persistir (lê o schema da base candidata via o seam do adapter, sem tocar o
+  // vault). Base legível grava MESMO com campos missing — o adapter se adapta ao
+  // schema; base ilegível → 400 sem gravar nada.
   router.post("/portal/tasks/use", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     const id = typeof req.body?.data_source_id === "string" ? req.body.data_source_id.trim() : "";
@@ -803,17 +807,25 @@ export function createPortalRouter(): express.Router {
       return;
     }
     try {
-      const { useExistingTracker } = await import("./task-tracker.js");
-      await useExistingTracker(accountId, id);
       const { getTasksInfo, invalidateTrackerProfile } = await import("../tasks/adapter.js");
       invalidateTrackerProfile(accountId);
+      let info: Awaited<ReturnType<typeof getTasksInfo>>;
       try {
-        res.json({ ...(await getTasksInfo(accountId)), configured: true });
+        info = await getTasksInfo(accountId, { getTasksDbIdImpl: async () => id });
+        if (!info.configured) throw new Error("base não legível");
       } catch (err: any) {
-        // Gravado; só não deu pra validar o schema agora (ex.: Notion fora).
-        console.warn(`[portal] tasks/use info ${accountId}: ${err?.message ?? err}`);
-        res.json({ configured: true, title: null, url: null, mapped: [], missing: [], is_standard: false });
+        invalidateTrackerProfile(accountId);
+        console.warn(`[portal] tasks/use validate ${accountId}: ${err?.message ?? err}`);
+        res.status(400).json({
+          error: "unreadable",
+          message: "não consegui ler essa base agora — confira o acesso e tente de novo",
+        });
+        return;
       }
+      const { useExistingTracker } = await import("./task-tracker.js");
+      await useExistingTracker(accountId, id);
+      invalidateTrackerProfile(accountId);
+      res.json({ ...info, configured: true });
     } catch (err: any) {
       console.error(`[portal] tasks/use ${accountId}: ${err?.message ?? err}`);
       res.status(400).json({ error: err?.message ?? "não consegui usar essa base" });

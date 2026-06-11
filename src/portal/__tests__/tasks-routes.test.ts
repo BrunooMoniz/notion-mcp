@@ -160,7 +160,7 @@ test("POST /portal/tasks/use grava e devolve o shape do info (mapeado/faltando)"
   assert.equal(await getTasksDbId(ACCOUNT), "ds-old");
 });
 
-test("POST /portal/tasks/use grava mesmo quando a validação falha (não bloqueia)", async () => {
+test("POST /portal/tasks/use: base ilegível → 400 unreadable e NÃO grava o vault", async () => {
   await seedNotion();
   stubNotion(() => ({ status: 503, body: {} })); // Notion fora do ar na validação
   const res = await fetch(`${base}/portal/tasks/use`, {
@@ -168,11 +168,26 @@ test("POST /portal/tasks/use grava mesmo quando a validação falha (não bloque
     headers: { ...cookie, "content-type": "application/json" },
     body: JSON.stringify({ data_source_id: "ds-old" }),
   });
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 400);
   const body = await res.json();
-  assert.equal(body.configured, true); // id salvo; UI segue
+  assert.equal(body.error, "unreadable");
+  assert.match(body.message, /não consegui ler essa base/);
   const { getTasksDbId } = await import("../task-tracker.js");
-  assert.equal(await getTasksDbId(ACCOUNT), "ds-old");
+  assert.equal(await getTasksDbId(ACCOUNT), null, "vault não pode ser gravado");
+});
+
+test("POST /portal/tasks/use: sem Notion conectado → 400 unreadable (nada gravado)", async () => {
+  // Sem seedNotion: a conta não tem token → a leitura de validação falha.
+  const res = await fetch(`${base}/portal/tasks/use`, {
+    method: "POST",
+    headers: { ...cookie, "content-type": "application/json" },
+    body: JSON.stringify({ data_source_id: "ds-old" }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error, "unreadable");
+  const { getTasksDbId } = await import("../task-tracker.js");
+  assert.equal(await getTasksDbId(ACCOUNT), null);
 });
 
 test("POST /portal/tasks/upgrade: base não-padrão → 400 com erro claro; padrão → ok/added", async () => {

@@ -104,12 +104,12 @@ function logoSvg(size) {
 var TASK_PROMPTS = {
   reuniao: 'Pega minha última reunião do Granola, identifica o que EU tenho que fazer e o que eu tenho que COBRAR de alguém, confere o que já existe no board e cria as tarefas que faltam com origem e prazo.',
   reuniao_especifica: 'Pega a reunião "[nome ou tema da reunião]" no Granola, identifica o que EU tenho que fazer e o que eu tenho que COBRAR de alguém, confere o que já existe no board e cria as tarefas que faltam com origem e prazo.',
-  dia: 'Planeja meu dia de amanhã: cruza minha agenda com as tarefas abertas, sugere o que fazer em cada espaço livre e cria os blocktimes que eu aprovar',
-  semana: 'Planeja minha semana: distribui as tarefas abertas pelos dias conforme prazo, prioridade e tempo estimado, respeitando minha agenda',
-  mes: 'Faz o plano do mês: grandes entregas por semana, o que está atrasado e o que dá pra cortar',
-  cobrancas: 'Lista minhas tarefas de cobrar, agrupadas por pessoa, com há quanto tempo estão paradas',
-  revisao_semana: 'Faz minha revisão da semana no board: o que concluí, o que está atrasado, cobranças paradas e o que reprogramar para a semana que vem',
-  fechar_dia: 'Fecha meu dia: confere o que fiz hoje, marca as tarefas concluídas no board e reprograma o que ficou pendente'
+  dia: 'Planeja meu dia de amanhã: cruza minha agenda com as tarefas abertas, sugere o que fazer em cada espaço livre e cria os blocktimes que eu aprovar.',
+  semana: 'Planeja minha semana: distribui as tarefas abertas pelos dias conforme prazo, prioridade e tempo estimado, respeitando minha agenda.',
+  mes: 'Faz o plano do mês: grandes entregas por semana, o que está atrasado e o que dá pra cortar.',
+  cobrancas: 'Lista minhas tarefas de cobrar, agrupadas por pessoa, com há quanto tempo estão paradas.',
+  revisao_semana: 'Faz minha revisão da semana no board: o que concluí, o que está atrasado, cobranças paradas e o que reprogramar para a semana que vem.',
+  fechar_dia: 'Fecha meu dia: confere o que fiz hoje, marca as tarefas concluídas no board e reprograma o que ficou pendente.'
 };
 
 /* preenche os code-blocks do Guia e das Receitas a partir de TASK_PROMPTS */
@@ -3343,7 +3343,7 @@ async function runDetectTasks() {
     return;
   }
   if (det.status === 'none' || det.status === 'error' || !det.candidates || !det.candidates.length) {
-    _tasksMsg('Nao encontrei base de tarefas. Quer que eu crie o Kanban padrão ("Zinom › Tarefas")?');
+    _tasksMsg('Não encontrei base de tarefas. Quer que eu crie o Kanban padrão ("Zinom › Tarefas")?');
     _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>');
     return;
   }
@@ -3381,7 +3381,9 @@ async function runUseTasks(dataSourceId) {
     var res = await apiJSON('/portal/tasks/use', 'POST', { data_source_id: dataSourceId });
     var info = await res.json().catch(function () { return null; });
     if (!res.ok) {
-      _tasksMsg((info && info.error) || 'Nao consegui usar essa base. Tente novamente.');
+      /* 400 {error:'unreadable', message} — backend não conseguiu ler a base */
+      var msg = (info && info.message) || (info && info.error) || 'Não consegui usar essa base. Tente novamente.';
+      _tasksMsg(msg);
       return;
     }
     /* o /use retorna o shape do info: mostra o que mapeou/faltou */
@@ -3389,9 +3391,13 @@ async function runUseTasks(dataSourceId) {
       window._tasksInfo = info;
       var nMapped = (info.mapped || []).length;
       var nMissing = (info.missing || []).length;
-      toast('Base "' + (info.title || 'Tarefas') + '" configurada — ' + nMapped +
-        (nMapped === 1 ? ' campo mapeado' : ' campos mapeados') +
-        (nMissing ? ', ' + nMissing + ' sem correspondência' : ''));
+      if (nMapped === 0) {
+        toast('Base configurada' + (nMissing ? ' — ' + nMissing + ' campo(s) sem correspondência' : '') + '.');
+      } else {
+        toast('Base "' + (info.title || 'Tarefas') + '" configurada — ' + nMapped +
+          (nMapped === 1 ? ' campo mapeado' : ' campos mapeados') +
+          (nMissing ? ', ' + nMissing + ' sem correspondência' : '') + '.');
+      }
     }
     load();
   } catch (e) {

@@ -26,7 +26,7 @@ test("onboarding novo tem o passo de tarefas com escolha dupla; sem Notion orien
 
   // Without Notion connected, detect guides the user to connect it first.
   await page.click("#onb-steps [data-tasks-detect]");
-  await expect(page.locator("#onb-steps .js-tasks-msg")).toContainText("Notion", {
+  await expect(page.locator("#onb-steps .js-tasks-msg")).toContainText("Conecte seu Notion em Fontes", {
     timeout: 10000,
   });
 });

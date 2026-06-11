@@ -21,6 +21,7 @@ import {
   isClosedStatus,
   type Task,
 } from "./model.js";
+import { localDateInTz, DEFAULT_TIMEZONE } from "./plan-context.js";
 
 export interface ListTasksOptions {
   /** Canonical statuses (or literal option names — passthrough). */
@@ -48,6 +49,14 @@ function clampLimit(limit: number | undefined): number {
   if (!Number.isFinite(n) || n < 1) return 25;
   return Math.min(n, 100);
 }
+
+/** Pagination cap: how many rows listTasks accumulates across pages before
+ *  giving up (and flagging `truncated`). Keeps the board summary honest on big
+ *  bases without unbounded scans. */
+export const MAX_SCAN_ROWS = 500;
+/** Notion's max page_size — always scan at full width; `limit` only slices the
+ *  returned tasks, the board summary needs ALL (filtered) rows. */
+const SCAN_PAGE_SIZE = 100;
 
 function statusFilterValue(profile: TrackerProfile, value: string): string | null {
   const sp = profile.props.status;
@@ -99,7 +108,7 @@ export function buildListQuery(profile: TrackerProfile, opts: ListTasksOptions):
     and.push({ property: profile.props.title, title: { contains: opts.q.trim() } });
   }
 
-  const body: Record<string, unknown> = { page_size: clampLimit(opts.limit) };
+  const body: Record<string, unknown> = { page_size: SCAN_PAGE_SIZE };
   if (and.length === 1) body.filter = and[0];
   else if (and.length > 1) body.filter = { and };
   if (profile.props.prazo) {
@@ -116,6 +125,13 @@ function richTextPlain(prop: any): string {
   return arr.map((t: any) => t?.plain_text ?? t?.text?.content ?? "").join("").trim();
 }
 
+/** Hardening: cap free-text fields so a pathological page can't blow up the
+ *  tool payload (titles/quem/projeto/origem are display strings, not docs). */
+const MAX_FIELD_CHARS = 300;
+function capText(s: string): string {
+  return s.length > MAX_FIELD_CHARS ? s.slice(0, MAX_FIELD_CHARS) : s;
+}
+
 /** PURE: convert a Notion page object to the canonical Task via the profile. */
 export function pageToTask(profile: TrackerProfile, page: any): Task {
   const props = page?.properties ?? {};
@@ -124,7 +140,7 @@ export function pageToTask(profile: TrackerProfile, page: any): Task {
   const task: Task = {
     id: page?.id ?? "",
     url: page?.url ?? null,
-    title: richTextPlain(props[p.title]) || "(sem título)",
+    title: capText(richTextPlain(props[p.title])) || "(sem título)",
     status: "",
   };
 
@@ -151,21 +167,21 @@ export function pageToTask(profile: TrackerProfile, page: any): Task {
   }
   if (p.quem) {
     const s = richTextPlain(props[p.quem.name]);
-    if (s) task.quem = s;
+    if (s) task.quem = capText(s);
   }
   if (p.origem) {
     const v = p.origem.kind === "url" ? props[p.origem.name]?.url : richTextPlain(props[p.origem.name]);
-    if (v) task.origem_url = String(v);
+    if (v) task.origem_url = capText(String(v));
   }
   if (p.projeto) {
     if (p.projeto.kind === "multi_select") {
       const arr = props[p.projeto.name]?.multi_select;
       if (Array.isArray(arr) && arr.length) {
-        task.projeto = arr.map((o: any) => o?.name ?? "").filter(Boolean).join(", ");
+        task.projeto = capText(arr.map((o: any) => o?.name ?? "").filter(Boolean).join(", "));
       }
     } else {
       const v = props[p.projeto.name]?.select?.name;
-      if (v) task.projeto = v;
+      if (v) task.projeto = capText(String(v));
     }
   }
   if (p.criada_em) {
@@ -186,13 +202,32 @@ export function pageToTask(profile: TrackerProfile, page: any): Task {
 export function applyClientFilters(tasks: Task[], opts: ListTasksOptions): Task[] {
   let out = tasks;
   if (opts.status?.length) {
-    const wanted = new Set(opts.status.map((s) => normalize(s)));
+    // Canonicalize the REQUEST too: asking "To-do" or "A fazer" must match a
+    // task whose status came back canonical ("todo").
+    const wanted = new Set<string>();
+    for (const s of opts.status) {
+      wanted.add(normalize(s));
+      const c = canonicalStatusFor(s);
+      if (c) wanted.add(c);
+    }
     out = out.filter((t) => {
       const c = canonicalStatusFor(String(t.status));
       return wanted.has(normalize(String(t.status))) || (c !== null && wanted.has(c));
     });
   } else if (!opts.incluir_concluidas) {
     out = out.filter((t) => !isClosedStatus(String(t.status)));
+  }
+  if (opts.prazo_de || opts.prazo_ate) {
+    // Date-only compare on the prazo DAY: a datetime prazo
+    // ("2026-06-11T15:00:00-03:00") still belongs to prazo_ate "2026-06-11".
+    // The server-side date filter stays as a narrowing pre-pass.
+    out = out.filter((t) => {
+      if (!t.prazo) return false;
+      const d = String(t.prazo).slice(0, 10);
+      if (opts.prazo_de && d < opts.prazo_de) return false;
+      if (opts.prazo_ate && d > opts.prazo_ate) return false;
+      return true;
+    });
   }
   return out;
 }
@@ -228,22 +263,21 @@ export function summarizeBoard(tasks: Task[], todayISO: string): TaskBoard {
   return { by_status, abertos, estimado_min: estimado, overdue_count: overdue };
 }
 
-function localDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 export interface ListTasksResult {
   tasks: Task[];
   board: TaskBoard;
   tracker_url: string | null;
+  /** True when the scan stopped at MAX_SCAN_ROWS with Notion still holding
+   *  more pages — board counts (abertos/overdue) are then a FLOOR. */
+  truncated: boolean;
 }
 
 /** Query the account's tracker and return canonical tasks + board summary.
- *  NEVER creates anything (read path). On a 400 (cached profile drifted from
- *  the real schema) the profile is invalidated and the query retried once. */
+ *  Follows has_more/next_cursor up to MAX_SCAN_ROWS so the board summarizes
+ *  the WHOLE (filtered) base, not just the first page; `limit` only slices the
+ *  returned tasks. NEVER creates anything (read path). On a 400 (cached
+ *  profile drifted from the real schema) the profile is invalidated and the
+ *  query retried once. */
 export async function listTasks(
   accountId: string,
   opts: ListTasksOptions = {},
@@ -252,13 +286,16 @@ export async function listTasks(
   const fetchImpl = deps.fetchImpl ?? fetch;
   let ctx = await loadTrackerProfile(accountId, deps);
 
-  const query = (profile: TrackerProfile, token: string) =>
-    rawNotionFetch(
+  const query = (profile: TrackerProfile, token: string, cursor?: string) => {
+    const body = buildListQuery(profile, opts);
+    if (cursor) body.start_cursor = cursor;
+    return rawNotionFetch(
       token,
       `/v1/data_sources/${profile.dataSourceId}/query`,
-      { method: "POST", body: JSON.stringify(buildListQuery(profile, opts)) },
+      { method: "POST", body: JSON.stringify(body) },
       fetchImpl,
     );
+  };
 
   let r = await query(ctx.profile, ctx.token);
   if (!r.ok && r.status === 400) {
@@ -269,12 +306,25 @@ export async function listTasks(
   if (!r.ok) throw new Error(rawErrorMessage("query", r));
 
   const pages: any[] = Array.isArray(r.data?.results) ? r.data.results : [];
-  let tasks = pages.map((p) => pageToTask(ctx.profile, p));
-  tasks = applyClientFilters(tasks, opts);
-  tasks = sortTasks(tasks).slice(0, clampLimit(opts.limit));
+  let hasMore = !!r.data?.has_more;
+  let cursor: string | null = r.data?.next_cursor ?? null;
+  while (hasMore && cursor && pages.length < MAX_SCAN_ROWS) {
+    const rn = await query(ctx.profile, ctx.token, cursor);
+    if (!rn.ok) throw new Error(rawErrorMessage("query", rn));
+    if (Array.isArray(rn.data?.results)) pages.push(...rn.data.results);
+    hasMore = !!rn.data?.has_more;
+    cursor = rn.data?.next_cursor ?? null;
+  }
+  const truncated = hasMore;
 
-  const today = localDateStr(deps.now ?? new Date());
-  return { tasks, board: summarizeBoard(tasks, today), tracker_url: ctx.profile.url };
+  // Client filters over the FULL accumulation; the board summarizes everything
+  // that matched (before the limit slice), so abertos/overdue are real counts.
+  const filtered = applyClientFilters(pages.map((p) => pageToTask(ctx.profile, p)), opts);
+  const today = localDateInTz(DEFAULT_TIMEZONE, deps.now ?? new Date());
+  const board = summarizeBoard(filtered, today);
+  const tasks = sortTasks(filtered).slice(0, clampLimit(opts.limit));
+
+  return { tasks, board, tracker_url: ctx.profile.url, truncated };
 }
 
 // --- briefing/brain_today bridge --------------------------------------------------

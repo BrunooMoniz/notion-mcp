@@ -24,6 +24,7 @@ import {
   type TrackerProfile,
 } from "./adapter.js";
 import { normalize } from "./model.js";
+import { auditWrite } from "../audit.js";
 
 /** The tracker exists but is not the Zinom-standard "Tarefas" base — we never
  *  mutate the schema of a base the user brought themselves. */
@@ -154,6 +155,14 @@ export async function upgradeStandardTracker(
     fetchImpl,
   );
   if (!r.ok) throw new Error(rawErrorMessage(`/v1/data_sources/${ctx.profile.dataSourceId}`, r));
+
+  // Schema mutation = write → audit trail, same convention as the task writes.
+  auditWrite(
+    "upgrade_standard_tracker",
+    "tasks",
+    { account_id: accountId, data_source_id: ctx.profile.dataSourceId },
+    { added },
+  );
 
   invalidateTrackerProfile(accountId);
   return { ok: true, added };

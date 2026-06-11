@@ -50,15 +50,17 @@ test("getTodayEvents filters to current date via SQL param and maps rows", async
     },
   ]);
 
-  const events = await getTodayEvents(pool, NOW);
+  const events = await getTodayEvents(pool, NOW, "bruno");
 
-  // SQL targets calendar source_type and uses the date param.
+  // SQL targets calendar source_type, scopes by account and uses the date param.
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /source_type/);
   assert.match(calls[0].sql, /calendar/);
   assert.match(calls[0].sql, /metadata->>'data'/);
+  assert.match(calls[0].sql, /account_id\s*=\s*\$2/);
   // The current-date param is threaded in (YYYY-MM-DD of NOW, local).
   assert.ok(calls[0].params.includes("2026-06-04"));
+  assert.ok(calls[0].params.includes("bruno"));
 
   assert.equal(events.length, 2);
   assert.equal(events[0].title, "Sync com Parfin");
@@ -73,7 +75,7 @@ test("getTodayEvents dedupes by source_id (keeps first occurrence)", async () =>
     { source_id: "evt-1", title: "Reunião A", data: "2026-06-04", calendar_label: "Pessoal", attendees: [] },
     { source_id: "evt-2", title: "Reunião B", data: "2026-06-04", calendar_label: "Pessoal", attendees: [] },
   ]);
-  const events = await getTodayEvents(pool, NOW);
+  const events = await getTodayEvents(pool, NOW, "bruno");
   assert.equal(events.length, 2);
   assert.deepEqual(events.map((e) => e.title), ["Reunião A", "Reunião B"]);
 });
@@ -82,10 +84,48 @@ test("getTodayEvents handles empty/missing attendees gracefully", async () => {
   const { pool } = fakePool([
     { source_id: "evt-1", title: "Foco", data: "2026-06-04", calendar_label: null, attendees: null },
   ]);
-  const events = await getTodayEvents(pool, NOW);
+  const events = await getTodayEvents(pool, NOW, "bruno");
   assert.equal(events.length, 1);
   assert.deepEqual(events[0].attendees, []);
   assert.equal(events[0].calendar, "");
+});
+
+test("getTodayEvents is scoped per account: conta A não vê eventos da conta B", async () => {
+  // O filtro é aplicado no SQL — o teste garante que o account_id da CHAMADA é
+  // o parâmetro do filtro (o fake pool simula o Postgres honrando-o).
+  const dbRows = [
+    { account_id: "acct-a", source_id: "a1", title: "Evento de A", data: "2026-06-04", calendar_label: "A", attendees: [] },
+    { account_id: "acct-b", source_id: "b1", title: "Evento de B", data: "2026-06-04", calendar_label: "B", attendees: [] },
+  ];
+  const queriedAccounts: string[] = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      assert.match(sql, /account_id\s*=\s*\$2/, "filtro de conta obrigatório no SQL");
+      queriedAccounts.push(String(params[1]));
+      return { rows: dbRows.filter((r) => r.account_id === params[1]) };
+    },
+  } as any;
+
+  const eventsA = await getTodayEvents(pool, NOW, "acct-a");
+  assert.deepEqual(eventsA.map((e) => e.title), ["Evento de A"]);
+  const eventsB = await getTodayEvents(pool, NOW, "acct-b");
+  assert.deepEqual(eventsB.map((e) => e.title), ["Evento de B"]);
+  assert.deepEqual(queriedAccounts, ["acct-a", "acct-b"]);
+});
+
+test("getTodayEvents: título sem coluna title cai no texto e perde o header de colchetes", async () => {
+  const { pool } = fakePool([
+    {
+      source_id: "evt-1",
+      title: null,
+      text: "[Calendar · personal · 2026-06-04] Sync com Parfin\n\n# Sync com Parfin",
+      data: "2026-06-04",
+      calendar_label: "Pessoal",
+      attendees: [],
+    },
+  ]);
+  const events = await getTodayEvents(pool, NOW, "bruno");
+  assert.equal(events[0].title, "Sync com Parfin");
 });
 
 // --- gatherContext ----------------------------------------------------------

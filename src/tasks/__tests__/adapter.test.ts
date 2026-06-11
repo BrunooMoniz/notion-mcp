@@ -14,6 +14,7 @@ import {
   getTasksInfo,
   NoTrackerError,
   NoNotionError,
+  TrackerLookupError,
   OWNER_TASKS_DS_FALLBACK,
 } from "../adapter.js";
 import {
@@ -149,6 +150,55 @@ test("buildTrackerProfile: url derivada do database parent quando o ds não traz
   assert.equal(p.url, "https://www.notion.so/11112222333344445555666677778888");
   const noParent = buildTrackerProfile(SCHEMA_TITLE_ONLY as any);
   assert.equal(noParent.url, null);
+});
+
+test("buildTrackerProfile: Tipo iterado ANTES de Status não rouba o claim do status", () => {
+  // Bug reproduzido no review: a heurística por options pegava o PRIMEIRO
+  // select cuja opção batia /fazer/ — e "Fazer" do campo Tipo batia. Com as
+  // duas passadas, o select CHAMADO "Status" vence independente da ordem.
+  const { Nome, Status, Tipo, ...rest } = SCHEMA_STANDARD_NEW.properties as any;
+  const schema = {
+    id: "ds-ordem",
+    title: [{ plain_text: "Tarefas" }],
+    properties: { Nome, Tipo, ...rest, Status },
+  };
+  const p = buildTrackerProfile(schema as any);
+  assert.equal(p.props.status!.name, "Status");
+  assert.equal(p.props.tipo!.name, "Tipo");
+  assert.equal(p.props.status!.map.todo, "A fazer");
+});
+
+test("buildTrackerProfile: sem select com nome de status, heurística por options ainda acha (passada 2)", () => {
+  const schema = {
+    id: "ds-h",
+    title: [{ plain_text: "Board" }],
+    properties: {
+      Nome: { type: "title", title: {} },
+      // Nome neutro, mas options de status → passada 2 reivindica.
+      Andamento: {
+        type: "select",
+        select: { options: [{ name: "A fazer" }, { name: "Fazendo" }, { name: "Feito" }] },
+      },
+    },
+  };
+  const p = buildTrackerProfile(schema as any);
+  assert.equal(p.props.status!.name, "Andamento");
+});
+
+test("buildTrackerProfile: passada 2 nunca reivindica select nomeado como outro campo canônico", () => {
+  const schema = {
+    id: "ds-t",
+    title: [{ plain_text: "Board" }],
+    properties: {
+      Nome: { type: "title", title: {} },
+      // Só existe o Tipo (Fazer/Cobrar): options batem /fazer/, mas o NOME é de
+      // outro campo canônico → NÃO vira status; mapeia como tipo.
+      Tipo: { type: "select", select: { options: [{ name: "Fazer" }, { name: "Cobrar" }] } },
+    },
+  };
+  const p = buildTrackerProfile(schema as any);
+  assert.equal(p.props.status, undefined);
+  assert.equal(p.props.tipo!.name, "Tipo");
 });
 
 test("buildTrackerProfile: opção sem sinônimo fica passthrough (sem canônico)", () => {
@@ -293,6 +343,64 @@ test("loadTrackerProfile: tenta o próximo workspace quando o primeiro token nã
   const ctx = await loadTrackerProfile("friend:multi", deps);
   assert.equal(ctx.workspace, "ws-good");
   assert.equal(ctx.token, "tok-good");
+});
+
+test("loadTrackerProfile: erro do vault NÃO cai no fallback do owner (TrackerLookupError)", async () => {
+  let fetched = 0;
+  const deps = {
+    fetchImpl: fakeFetch(() => {
+      fetched += 1;
+      return { body: SCHEMA_OWNER };
+    }),
+    getTasksDbIdImpl: async () => {
+      throw new Error("db down");
+    },
+    resolveTokensImpl: async () => [{ workspace: "personal", token: "ntn_env" }],
+  };
+  await assert.rejects(loadTrackerProfile("bruno", deps), TrackerLookupError);
+  assert.equal(fetched, 0, "não pode ler o fallback hardcoded com o vault fora");
+  // Friend: o mesmo erro transiente, nunca NoTrackerError.
+  await assert.rejects(loadTrackerProfile("friend:vault", deps), TrackerLookupError);
+});
+
+test("loadTrackerProfile: 429 no GET do schema → retry 1x e segue", async () => {
+  let gets = 0;
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) {
+        gets += 1;
+        if (gets === 1) return { status: 429, body: { code: "rate_limited" } };
+        return { body: SCHEMA_STANDARD_NEW };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-new",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+  };
+  const ctx = await loadTrackerProfile("friend:retry", deps);
+  assert.equal(gets, 2, "um retry após o 429");
+  assert.equal(ctx.profile.dataSourceId, "ds-new");
+});
+
+test("loadTrackerProfile: 5xx persistente → erro transiente claro (≠ no_tracker)", async () => {
+  let gets = 0;
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) {
+        gets += 1;
+        return { status: 503, body: { message: "notion down" } };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-new",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+  };
+  await assert.rejects(loadTrackerProfile("friend:down", deps), (err: any) => {
+    assert.ok(!(err instanceof NoTrackerError));
+    assert.match(err.message, /tente de novo/);
+    return true;
+  });
+  assert.equal(gets, 2, "1 tentativa + 1 retry");
 });
 
 // --- getTasksInfo -------------------------------------------------------------------

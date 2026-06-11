@@ -11,6 +11,9 @@ import {
   validatePlanWindow,
   isValidTimezone,
   zonedTimeToUtc,
+  localDateInTz,
+  isoInTz,
+  stripBracketPrefix,
   listDates,
   weekdayOf,
   PLAN_GUIDANCE,
@@ -115,6 +118,22 @@ test("zonedTimeToUtc: 09:00 em SP = 12:00Z", () => {
   assert.equal(zonedTimeToUtc("2026-06-10", "09:00", SP).toISOString(), "2026-06-10T12:00:00.000Z");
 });
 
+test("localDateInTz: 00:30Z ainda é o dia ANTERIOR em BRT", () => {
+  const instant = new Date("2026-06-11T00:30:00Z"); // 21:30 de 06-10 em SP
+  assert.equal(localDateInTz(SP, instant), "2026-06-10");
+  assert.equal(localDateInTz("UTC", instant), "2026-06-11");
+});
+
+test("isoInTz: instante UTC re-expresso no offset do tz", () => {
+  assert.equal(isoInTz(new Date("2026-06-16T01:00:00Z"), SP), "2026-06-15T22:00:00-03:00");
+  assert.equal(isoInTz(new Date("2026-06-15T12:00:00Z"), "UTC"), "2026-06-15T12:00:00+00:00");
+});
+
+test("stripBracketPrefix: remove o header de colchetes do índice", () => {
+  assert.equal(stripBracketPrefix("[Calendar · personal · 2026-06-15] Reunião X"), "Reunião X");
+  assert.equal(stripBracketPrefix("Reunião X"), "Reunião X");
+});
+
 test("listDates/weekdayOf: janela inclusiva e dia da semana", () => {
   assert.deepEqual(listDates("2026-06-09", "2026-06-11"), ["2026-06-09", "2026-06-10", "2026-06-11"]);
   assert.equal(weekdayOf("2026-06-13"), 6); // sábado
@@ -133,6 +152,26 @@ test("dedupPlanEvents: título normalizado + start (acentos/caixa não duplicam)
   assert.equal(out[0].calendar, "A"); // primeira ocorrência vence
 });
 
+test("dedupPlanEvents: header de colchetes do brain não impede o dedup com o evento ao vivo", () => {
+  const out = dedupPlanEvents([
+    ev({ title: "Reunião X", calendar: "Google" }), // live primeiro → vence
+    ev({ title: "[Calendar · personal · 2026-06-10] Reunião X", calendar: "iCal" }),
+    ev({ title: "[Calendar · nora · 2026-06-10] Reunião X", calendar: "iCal nora" }),
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].calendar, "Google");
+});
+
+test("dedupPlanEvents: mesmo instante em offsets diferentes deduplica (epoch)", () => {
+  const out = dedupPlanEvents([
+    ev({ start: "2026-06-10T14:00:00-03:00", calendar: "A" }),
+    ev({ start: "2026-06-10T17:00:00Z", calendar: "B" }), // mesmo instante
+    ev({ start: "2026-06-10T18:00:00Z", calendar: "C" }), // outro instante → fica
+  ]);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].calendar, "A");
+});
+
 test("dedupBriefingEvents (brain_today): título normalizado + data + hora", () => {
   const out = dedupBriefingEvents(
     [
@@ -143,6 +182,18 @@ test("dedupBriefingEvents (brain_today): título normalizado + data + hora", () 
     "2026-06-10",
   );
   assert.equal(out.length, 2);
+});
+
+test("dedupBriefingEvents: strip do header de colchetes na chave", () => {
+  const out = dedupBriefingEvents(
+    [
+      { title: "[Calendar · personal · 2026-06-15] Reunião X", time: "14:00", calendar: "A", attendees: [] },
+      { title: "[Calendar · nora · 2026-06-15] Reunião X", time: "14:00", calendar: "B", attendees: [] },
+      { title: "Reunião X", time: "14:00", calendar: "C", attendees: [] },
+    ],
+    "2026-06-15",
+  );
+  assert.equal(out.length, 1);
 });
 
 // --- groupOpenTasks ------------------------------------------------------------------------

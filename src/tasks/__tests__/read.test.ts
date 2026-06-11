@@ -39,7 +39,9 @@ test("buildListQuery: default exclui done/canceled mapeados (select, padrão nov
       { property: "Status", select: { does_not_equal: "Cancelada" } },
     ],
   });
-  assert.equal(q.page_size, 25);
+  // O scan é sempre na largura máxima (100): o board resume a base inteira e o
+  // limit só fatia o retorno.
+  assert.equal(q.page_size, 100);
   assert.deepEqual(q.sorts, [{ property: "Prazo", direction: "ascending" }]);
 });
 
@@ -76,7 +78,7 @@ test("buildListQuery: prazo_de/ate + q + limit", () => {
     q: "fatura",
     limit: 250,
   }) as any;
-  assert.equal(q.page_size, 100, "limit cap 100");
+  assert.equal(q.page_size, 100, "scan sempre a 100 por página");
   const and = q.filter.and as any[];
   assert.ok(and.some((f) => f.date?.on_or_after === "2026-06-01" && f.property === "Prazo"));
   assert.ok(and.some((f) => f.date?.on_or_before === "2026-06-30" && f.property === "Prazo"));
@@ -158,6 +160,24 @@ test("pageToTask: opção passthrough mantém o nome literal", () => {
   assert.equal(t.status, "Em validação");
 });
 
+test("pageToTask: campos de texto livres são limitados a 300 chars (hardening)", () => {
+  const long = "x".repeat(1000);
+  const page = {
+    id: "p-long",
+    properties: {
+      Nome: { type: "title", title: [{ plain_text: long }] },
+      Quem: { type: "rich_text", rich_text: [{ plain_text: long }] },
+      Origem: { type: "url", url: `https://x.test/${long}` },
+      Projeto: { type: "select", select: { name: long } },
+    },
+  };
+  const t = pageToTask(newProfile(), page);
+  assert.equal(t.title.length, 300);
+  assert.equal(t.quem!.length, 300);
+  assert.equal(t.origem_url!.length, 300);
+  assert.equal(t.projeto!.length, 300);
+});
+
 test("pageToTask: title-only lista sem status (graceful)", () => {
   const t = pageToTask(minProfile(), {
     id: "p",
@@ -204,6 +224,29 @@ test("applyClientFilters: status pedido vale para canônico e literal", () => {
   // default: fechadas ficam de fora
   assert.deepEqual(applyClientFilters(tasks, {}).map((t) => t.id), ["1", "2"]);
   assert.equal(applyClientFilters(tasks, { incluir_concluidas: true }).length, 3);
+});
+
+test("applyClientFilters: o PEDIDO também é canonicalizado ('To-do'/'A fazer' acham status 'todo')", () => {
+  const tasks = [mk({ id: "1", status: "todo" }), mk({ id: "2", status: "done" })];
+  assert.deepEqual(applyClientFilters(tasks, { status: ["To-do"] }).map((t) => t.id), ["1"]);
+  assert.deepEqual(applyClientFilters(tasks, { status: ["A fazer"] }).map((t) => t.id), ["1"]);
+});
+
+test("applyClientFilters: prazo_de/ate comparam só o DIA (datetime entra na janela do dia)", () => {
+  const tasks = [
+    mk({ id: "dt", prazo: "2026-06-11T15:00:00-03:00" }),
+    mk({ id: "cedo", prazo: "2026-06-09" }),
+    mk({ id: "semprazo" }),
+  ];
+  assert.deepEqual(
+    applyClientFilters(tasks, { prazo_ate: "2026-06-11" }).map((t) => t.id),
+    ["dt", "cedo"],
+  );
+  assert.deepEqual(
+    applyClientFilters(tasks, { prazo_de: "2026-06-10", prazo_ate: "2026-06-11" }).map((t) => t.id),
+    ["dt"],
+  );
+  assert.deepEqual(applyClientFilters(tasks, { prazo_ate: "2026-06-08" }), []);
 });
 
 test("summarizeBoard: contagem por status, estimado dos abertos, overdue", () => {
@@ -265,6 +308,104 @@ test("listTasks: 400 na query → invalida o profile, recarrega e tenta 1x", asy
   assert.equal(queries, 2, "retry após o 400");
   assert.equal(schemaGets, 2, "profile recarregado após invalidate");
   assert.deepEqual(r.tasks, []);
+});
+
+test("listTasks: segue next_cursor — board resume TODAS as páginas, limit só fatia o retorno", async () => {
+  const mkPage = (id: string, status: string, due?: string) => ({
+    id,
+    url: null,
+    properties: {
+      Task: { type: "title", title: [{ plain_text: id }] },
+      Status: { type: "status", status: { name: status } },
+      ...(due ? { "Due date": { type: "date", date: { start: due } } } : {}),
+    },
+  });
+  const page1 = [mkPage("a1", "To-do", "2026-06-12"), mkPage("a2", "Done")];
+  const page2 = [mkPage("b1", "In progress"), mkPage("b2", "To-do", "2026-06-01")]; // b2 overdue
+  const bodies: any[] = [];
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) return { body: SCHEMA_OWNER };
+      if (init?.method === "POST" && url.includes("/query")) {
+        const body = JSON.parse(init.body);
+        bodies.push(body);
+        if (!body.start_cursor) return { body: { results: page1, has_more: true, next_cursor: "c2" } };
+        return { body: { results: page2, has_more: false, next_cursor: null } };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-owner",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+    now: new Date("2026-06-10T15:00:00Z"),
+  };
+  const r = await listTasks("friend:pag1", { limit: 2 }, deps);
+  assert.equal(bodies.length, 2, "seguiu o cursor");
+  assert.equal(bodies[1].start_cursor, "c2");
+  // limit fatia o retorno…
+  assert.equal(r.tasks.length, 2);
+  // …mas o board cobre as 3 abertas das DUAS páginas (Done fora por default).
+  assert.equal(r.board.abertos, 3);
+  assert.equal(r.board.overdue_count, 1);
+  assert.equal(r.truncated, false);
+});
+
+test("listTasks: para no cap de 500 linhas com has_more → truncated:true", async () => {
+  const mkPage = (id: string) => ({
+    id,
+    properties: { Task: { type: "title", title: [{ plain_text: id }] } },
+  });
+  let queries = 0;
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) return { body: SCHEMA_OWNER };
+      if (init?.method === "POST" && url.includes("/query")) {
+        queries += 1;
+        return {
+          body: {
+            results: Array.from({ length: 100 }, (_, i) => mkPage(`p${queries}-${i}`)),
+            has_more: true,
+            next_cursor: `c${queries + 1}`,
+          },
+        };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-owner",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+  };
+  const r = await listTasks("friend:pag2", { limit: 5 }, deps);
+  assert.equal(queries, 5, "500 linhas = 5 páginas de 100, depois para");
+  assert.equal(r.truncated, true);
+  assert.equal(r.tasks.length, 5);
+  assert.equal(r.board.abertos, 500);
+});
+
+test("listTasks: overdue do board usa o dia no fuso do usuário (00:30Z = dia anterior em BRT)", async () => {
+  // Instante 2026-06-11T00:30Z = 2026-06-10 21:30 em America/Sao_Paulo.
+  // Prazo 2026-06-10 NÃO está atrasado (ainda é dia 10 pro usuário);
+  // prazo 2026-06-09 está.
+  const mkPage = (id: string, due: string) => ({
+    id,
+    properties: {
+      Task: { type: "title", title: [{ plain_text: id }] },
+      Status: { type: "status", status: { name: "To-do" } },
+      "Due date": { type: "date", date: { start: due } },
+    },
+  });
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) return { body: SCHEMA_OWNER };
+      if (init?.method === "POST" && url.includes("/query")) {
+        return { body: { results: [mkPage("hoje", "2026-06-10"), mkPage("ontem", "2026-06-09")] } };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-owner",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+    now: new Date("2026-06-11T00:30:00Z"),
+  };
+  const r = await listTasks("friend:tz", {}, deps);
+  assert.equal(r.board.overdue_count, 1, "só o prazo 06-09 está atrasado em BRT");
 });
 
 test("listTasks: erro não-400 propaga (sem retry infinito)", async () => {

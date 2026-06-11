@@ -188,5 +188,14 @@ export async function createTaskTracker(
   const dataSourceId: string = db?.data_sources?.[0]?.id ?? db?.id;
   if (!dataSourceId) throw new Error("Notion não retornou o id da base criada");
   await setTasksDbId(accountId, dataSourceId);
+  // Todo write de tasks_db derruba o profile cacheado — senão o adapter segue
+  // lendo a base antiga por até 5 min. (Import dinâmico: task-tracker↔adapter
+  // teria ciclo estático; mesmo padrão do branch de reuse acima.)
+  try {
+    const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
+    invalidateTrackerProfile(accountId);
+  } catch (err: any) {
+    console.warn(`[task-tracker] ${accountId}: invalidate after create failed: ${err?.message ?? err}`);
+  }
   return { dataSourceId, created: true };
 }

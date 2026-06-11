@@ -139,6 +139,14 @@ test("update payload: só os campos passados; done → Concluída em hoje", () =
   assert.deepEqual(props["Concluída em"], { date: { start: TODAY } });
 });
 
+test("update payload: projeto multi_select divide por vírgula (round-trip do join do read)", () => {
+  const props = buildUpdatePagePayload(ownerProfile(), { projeto: "Zinom, Nora" }, TODAY) as any;
+  assert.deepEqual(props.Projeto, { multi_select: [{ name: "Zinom" }, { name: "Nora" }] });
+  // select-kind continua passando o valor inteiro
+  const sel = buildUpdatePagePayload(newProfile(), { projeto: "Zinom, Nora" }, TODAY) as any;
+  assert.deepEqual(sel.Projeto, { select: { name: "Zinom, Nora" } });
+});
+
 test("update payload: titulo/prazo/tempo/quem; prazo vazio limpa a data", () => {
   const props = buildUpdatePagePayload(
     newProfile(),
@@ -195,6 +203,20 @@ test("createTask: 400 → invalida profile, recarrega e tenta exatamente 1x", as
   const r = await createTask("friend:w2", { title: "Retry" }, deps);
   assert.equal(r.pageId, "p2");
   assert.deepEqual(counts(), { schemaGets: 2, creates: 2 });
+});
+
+test("createTask: concluida_em usa o dia no fuso do usuário (00:30Z = dia anterior em BRT)", async () => {
+  // Instante 2026-06-11T00:30Z = 2026-06-10 21:30 em America/Sao_Paulo.
+  let createdBody: any = null;
+  const { deps } = writeDeps(SCHEMA_STANDARD_NEW, (_attempt, body) => {
+    createdBody = body;
+    return { body: { id: "p-tz" } };
+  });
+  await createTask("friend:wtz", { title: "X", status: "done" }, {
+    ...deps,
+    now: new Date("2026-06-11T00:30:00Z"),
+  });
+  assert.deepEqual(createdBody.properties["Concluída em"], { date: { start: "2026-06-10" } });
 });
 
 test("createTask: título vazio → erro antes de qualquer rede", async () => {
@@ -289,4 +311,23 @@ test("updateTask: página inexistente (GET falha) → TaskNotFoundError", async 
     resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
   };
   await assert.rejects(updateTask("friend:u4", "page-x", { status: "done" }, deps), TaskNotFoundError);
+});
+
+test("updateTask: GET 429 NÃO vira not_found — propaga o status real", async () => {
+  const deps = {
+    fetchImpl: fakeFetch((url, init) => {
+      if (init?.method === "GET" && url.includes("/v1/data_sources/")) return { body: SCHEMA_STANDARD_NEW };
+      if (init?.method === "GET" && url.includes("/v1/pages/")) {
+        return { status: 429, body: { code: "rate_limited" } };
+      }
+      return undefined;
+    }),
+    getTasksDbIdImpl: async () => "ds-new",
+    resolveTokensImpl: async () => [{ workspace: "w", token: "t" }],
+  };
+  await assert.rejects(updateTask("friend:u5", "page-1", { status: "done" }, deps), (err: any) => {
+    assert.ok(!(err instanceof TaskNotFoundError), "429 não é not_found");
+    assert.match(err.message, /HTTP 429/);
+    return true;
+  });
 });

@@ -173,6 +173,44 @@ test("createTaskTracker: reusa 'Tarefas' existente, sem criar página duplicada"
   assert.ok(!calls.some((c) => c.includes("/v1/databases")), "não deve criar DB nova");
 });
 
+test("createTaskTracker: criação NOVA invalida o profile cacheado da conta", async () => {
+  await seedNotion("friend:inv");
+  const { loadTrackerProfile, __clearTrackerProfileCache } = await import("../../tasks/adapter.js");
+  __clearTrackerProfileCache();
+
+  // Pré-aquece o cache do adapter com uma base antiga.
+  let schemaGets = 0;
+  const profileDeps = {
+    fetchImpl: (async (url: string, init?: any) => {
+      if (init?.method === "GET" && String(url).includes("/v1/data_sources/")) schemaGets += 1;
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ title: [{ plain_text: "Velha" }], properties: { Nome: { type: "title", title: {} } } }),
+      };
+    }) as any,
+    getTasksDbIdImpl: async () => "ds-velha",
+    resolveTokensImpl: async () => [{ workspace: "ws-1", token: "t" }],
+  };
+  await loadTrackerProfile("friend:inv", profileDeps);
+  await loadTrackerProfile("friend:inv", profileDeps);
+  assert.equal(schemaGets, 1, "cache quente");
+
+  // Cria uma base NOVA (sem reuse) → o cache precisa cair.
+  const fetchImpl = (async (url: string) => {
+    const u = String(url);
+    let body: any = {};
+    if (u.includes("/v1/pages")) body = { id: "page-1" };
+    else if (u.includes("/v1/databases")) body = { id: "db-1", data_sources: [{ id: "ds-nova" }] };
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+  }) as any;
+  await createTaskTracker("friend:inv", { fetchImpl });
+
+  await loadTrackerProfile("friend:inv", profileDeps);
+  assert.equal(schemaGets, 2, "profile recarregado após o write de tasks_db");
+});
+
 test("createTaskTracker sem Notion → erro claro", async () => {
   await assert.rejects(
     () => createTaskTracker("friend:no-notion", { fetchImpl: routeFetch(() => ({})) }),

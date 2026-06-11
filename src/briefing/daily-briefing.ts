@@ -91,14 +91,18 @@ function timeOf(data: string | null): string {
 }
 
 /**
- * Today's calendar events from brain_chunks. Filters source_type='calendar'
- * AND (metadata->>'data')::date = the current (local) date, dedupes by
- * source_id, and returns a compact list. The event title is the first `# `
- * line of the chunk text (the iCal indexer writes `# <summary>` as line 1).
+ * Today's calendar events from brain_chunks FOR ONE ACCOUNT. Filters
+ * source_type='calendar' AND account_id AND (metadata->>'data')::date = the
+ * current (local) date, dedupes by source_id, and returns a compact list.
+ * SECURITY: the account filter is mandatory — brain_today runs on the friend
+ * surface, so account A must never see account B's events. The event title is
+ * the first `# ` line of the chunk text (the iCal indexer writes
+ * `# <summary>` as line 1).
  */
 export async function getTodayEvents(
   pool: PoolLike,
   now: Date,
+  accountId: string,
 ): Promise<BriefingEvent[]> {
   const today = localDateStr(now);
   const sql = `
@@ -109,10 +113,11 @@ export async function getTodayEvents(
            metadata->'attendees'        AS attendees
     FROM brain_chunks
     WHERE source_type = 'calendar'
+      AND account_id = $2
       AND (metadata->>'data')::date = $1::date
     ORDER BY metadata->>'data' ASC
   `;
-  const { rows } = await pool.query(sql, [today]);
+  const { rows } = await pool.query(sql, [today, accountId]);
 
   const seen = new Set<string>();
   const events: BriefingEvent[] = [];
@@ -134,11 +139,13 @@ export async function getTodayEvents(
   return events;
 }
 
-/** Pull the event title from the chunk text's first `# ` heading line. */
+/** Pull the event title from the chunk text's first line: strips a `# `
+ *  heading marker AND the contextual bracket header indexed chunks carry
+ *  ("[Calendar · personal · 2026-06-15] Reunião X" → "Reunião X"). */
 function titleFromText(text: string | undefined): string {
   if (!text) return "";
   const first = text.split("\n")[0] ?? "";
-  return first.replace(/^#\s+/, "").trim();
+  return first.replace(/^#\s+/, "").replace(/^\[[^\]]*\]\s*/, "").trim();
 }
 
 // --- per-event context from the brain --------------------------------------
@@ -386,7 +393,9 @@ export async function runDailyBriefing(): Promise<void> {
   let tasks: BriefingTask[] = [];
   try {
     const pool = getPool();
-    events = await getTodayEvents(pool, now);
+    // The 07:00 cron is the OWNER's briefing — scope events to his account.
+    const { DEFAULT_ACCOUNT_ID } = await import("../context.js");
+    events = await getTodayEvents(pool, now, DEFAULT_ACCOUNT_ID);
     tasks = await getTopTasks();
     const contexts = await gatherContext(events, tasks);
     const markdown = await buildBriefingMarkdown(events, contexts, tasks, now);

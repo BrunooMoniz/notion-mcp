@@ -60,6 +60,16 @@ export class TaskNotFoundError extends Error {
   }
 }
 
+/** The vault lookup itself failed (DB down etc) — a TRANSIENT error, distinct
+ *  from NoTrackerError: the account may well have a tracker configured, we just
+ *  couldn't read the config now. Never falls back to the owner's hardcoded ds. */
+export class TrackerLookupError extends Error {
+  constructor(cause: string) {
+    super(`não consegui ler a configuração da sua base de tarefas agora — tente de novo (${cause})`);
+    this.name = "TrackerLookupError";
+  }
+}
+
 // --- raw Notion fetch (token-explicit; fetchImpl injectable for tests) --------
 
 export interface RawNotionResponse {
@@ -153,12 +163,19 @@ function plainTitle(title: unknown): string {
     .trim();
 }
 
-/** Per-property version of portal/task-tracker-schema.ts hasStatusLike: a select
- *  whose NAME or OPTIONS sound like a status column. */
-function isStatusLikeSelect(name: string, def: any): boolean {
-  if (def?.type !== "select") return false;
-  if (/status|situa|estado|stage|etapa/.test(normalize(name))) return true;
-  const opts = (def.select?.options ?? [])
+/** Select NAMES that sound like a status column (pass 1 of the claim). */
+const STATUS_NAME_RE = /status|situa|estado|stage|etapa/;
+
+/** Selects whose NAME maps to another canonical select field (tipo/prioridade/
+ *  projeto) must never be claimed by the status OPTIONS heuristic — e.g. the
+ *  template's own "Tipo" (Fazer/Cobrar) matches /fazer/ but is not a status. */
+const NON_STATUS_SELECT_NAMES = new Set(
+  ["tipo", "prioridade", "projeto"].flatMap((f) => (PROP_SYNONYMS[f] ?? []).map(normalize)),
+);
+
+/** Pass 2 of the claim: the select's OPTIONS sound like a status column. */
+function hasStatusLikeOptions(def: any): boolean {
+  const opts = (def?.select?.options ?? [])
     .map((o: any) => normalize(o?.name ?? ""))
     .join(" ");
   return /fazer|fazendo|feito|done|todo|to do|andamento|conclu|backlog|progress/.test(opts);
@@ -258,14 +275,28 @@ export function buildTrackerProfile(ds: {
       break;
     }
   }
+  // Select fallback in two passes: (1) a select whose NAME sounds like status;
+  // only when none exists, (2) the options heuristic — which must skip selects
+  // named like another canonical field (Tipo "Fazer/Cobrar" matches /fazer/).
   if (!props.status) {
     for (const [name, def] of Object.entries(properties)) {
       if (claimed.has(name)) continue;
-      if (isStatusLikeSelect(name, def)) {
-        props.status = { name, kind: "select", ...buildStatusMaps(optionNames(def)) };
-        claimed.add(name);
-        break;
-      }
+      if (def?.type !== "select") continue;
+      if (!STATUS_NAME_RE.test(normalize(name))) continue;
+      props.status = { name, kind: "select", ...buildStatusMaps(optionNames(def)) };
+      claimed.add(name);
+      break;
+    }
+  }
+  if (!props.status) {
+    for (const [name, def] of Object.entries(properties)) {
+      if (claimed.has(name)) continue;
+      if (def?.type !== "select") continue;
+      if (NON_STATUS_SELECT_NAMES.has(normalize(name))) continue;
+      if (!hasStatusLikeOptions(def)) continue;
+      props.status = { name, kind: "select", ...buildStatusMaps(optionNames(def)) };
+      claimed.add(name);
+      break;
     }
   }
 
@@ -425,14 +456,10 @@ export function __clearTrackerProfileCache(): void {
 }
 
 async function defaultGetTasksDbId(accountId: string): Promise<string | null> {
-  try {
-    return await getTasksDbId(accountId);
-  } catch (err: any) {
-    // Vault unreachable: the owner still has the hardcoded fallback below;
-    // a friend will get a NoTrackerError (read paths degrade gracefully).
-    console.warn(`[tasks] getTasksDbId(${accountId}) failed: ${err?.message ?? err}`);
-    return null;
-  }
+  // No swallowing here: a vault FAILURE must not look like "no tracker" (that
+  // would silently route the owner to the hardcoded fallback and a friend to
+  // no_tracker). loadTrackerProfile wraps it in TrackerLookupError.
+  return getTasksDbId(accountId);
 }
 
 /** Resolve the tracker data source + a token that can read it, and build the
@@ -453,15 +480,29 @@ export async function loadTrackerProfile(
   const tokens = await resolveTokens(accountId);
   if (tokens.length === 0) throw new NoNotionError();
 
-  let dsId = await getId(accountId);
+  let dsId: string | null;
+  try {
+    dsId = await getId(accountId);
+  } catch (err: any) {
+    // Vault unreachable ≠ no tracker. Owner fallback only applies when the
+    // vault genuinely answered null.
+    console.warn(`[tasks] getTasksDbId(${accountId}) failed: ${err?.message ?? err}`);
+    throw new TrackerLookupError(err?.message ?? String(err));
+  }
   if (!dsId) {
     if (accountId === DEFAULT_ACCOUNT_ID) dsId = OWNER_TASKS_DS_FALLBACK;
     else throw new NoTrackerError();
   }
 
+  const transientStatus = (s: number) => s === 429 || s >= 500;
   let lastErr = "";
+  let lastTransient = false;
   for (const { workspace, token } of tokens) {
-    const r = await rawNotionFetch(token, `/v1/data_sources/${dsId}`, { method: "GET" }, fetchImpl);
+    let r = await rawNotionFetch(token, `/v1/data_sources/${dsId}`, { method: "GET" }, fetchImpl);
+    if (!r.ok && transientStatus(r.status)) {
+      // One retry per token: rate limit / transient Notion 5xx.
+      r = await rawNotionFetch(token, `/v1/data_sources/${dsId}`, { method: "GET" }, fetchImpl);
+    }
     if (r.ok) {
       const profile = buildTrackerProfile({ ...r.data, id: dsId });
       const ctx: TrackerContext = { profile, token, workspace };
@@ -469,6 +510,12 @@ export async function loadTrackerProfile(
       return ctx;
     }
     lastErr = `HTTP ${r.status} ${r.data?.code ?? ""} ${r.data?.message ?? ""}`.trim();
+    lastTransient = transientStatus(r.status);
+  }
+  if (lastTransient) {
+    // Clearly transient wording — distinct from no_tracker, so callers/AI know
+    // a retry can fix it (nothing is misconfigured).
+    throw new Error(`não consegui ler sua base de tarefas agora — tente de novo (${lastErr})`);
   }
   throw new Error(`não consegui ler a base de tarefas (${dsId}): ${lastErr}`);
 }

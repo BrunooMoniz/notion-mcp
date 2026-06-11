@@ -27,6 +27,7 @@ import {
   TIPO_NAME_PT,
   type Task,
 } from "./model.js";
+import { localDateInTz, DEFAULT_TIMEZONE } from "./plan-context.js";
 
 export interface CreateTaskInput {
   title: string;
@@ -104,8 +105,14 @@ function applyTipo(profile: TrackerProfile, props: Record<string, unknown>, valu
 function applyProjeto(profile: TrackerProfile, props: Record<string, unknown>, value: string): void {
   const pj = profile.props.projeto;
   if (!pj) return;
-  props[pj.name] =
-    pj.kind === "multi_select" ? { multi_select: [{ name: value }] } : { select: { name: value } };
+  if (pj.kind === "multi_select") {
+    // Comma-separated input → one option per name, so the "A, B" the read path
+    // joins round-trips losslessly (a single option name with a comma is a 400).
+    const names = value.split(",").map((s) => s.trim()).filter(Boolean);
+    props[pj.name] = { multi_select: names.map((name) => ({ name })) };
+  } else {
+    props[pj.name] = { select: { name: value } };
+  }
 }
 
 function applyPrazo(
@@ -213,11 +220,10 @@ export function buildUpdatePagePayload(
 
 // --- network --------------------------------------------------------------------
 
+/** "Today" (concluida_em on done) follows the USER's timezone, not the server
+ *  clock: at 00:30Z it is still the previous day in America/Sao_Paulo. */
 function localDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return localDateInTz(DEFAULT_TIMEZONE, d);
 }
 
 export interface CreatedTask {
@@ -297,7 +303,10 @@ export async function updateTask(
   let ctx = await loadTrackerProfile(accountId, deps);
 
   const page = await rawNotionFetch(ctx.token, `/v1/pages/${pageId.trim()}`, { method: "GET" }, fetchImpl);
-  if (!page.ok) throw new TaskNotFoundError();
+  // Only a real 404 means "not your task"; a 429/5xx is a transient read
+  // failure and must surface as such (mirrors the PATCH error handling below).
+  if (page.status === 404) throw new TaskNotFoundError();
+  if (!page.ok) throw new Error(rawErrorMessage(`/v1/pages/${pageId}`, page));
   const parentDs = page.data?.parent?.data_source_id;
   if (!parentDs || normalizeId(parentDs) !== normalizeId(ctx.profile.dataSourceId)) {
     throw new TaskNotFoundError();
