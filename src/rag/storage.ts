@@ -496,6 +496,15 @@ export function buildFilterClauses(
   };
 }
 
+// Multi-tenant HNSW correctness: the index scan ranks candidates GLOBALLY
+// (every account's vectors) and the account/workspace filter is applied
+// post-scan. With several tenants holding near-duplicate content, the default
+// ef_search (40) candidate set can be 100% other-tenant rows and the filtered
+// result collapses to ZERO even though the account has thousands of chunks.
+// Fix: raise ef_search per-query and enable pgvector >= 0.8 iterative scans
+// (relaxed_order keeps fetching candidates until LIMIT survives the filter).
+const HNSW_EF_SEARCH = Math.max(40, Number(process.env.HNSW_EF_SEARCH) || 200);
+
 export async function searchSemantic(
   queryEmbedding: number[],
   filters: SearchFilters | undefined,
@@ -514,11 +523,39 @@ export async function searchSemantic(
     ORDER BY embedding <=> $1::vector
     LIMIT $2
   `;
-  const { rows } = await p.query<QueryRow>(sql, [
-    formatVector(queryEmbedding),
-    topK,
-    ...filterClauses.params,
-  ]);
+  const params = [formatVector(queryEmbedding), topK, ...filterClauses.params];
+
+  let rows: QueryRow[];
+  if (typeof (p as any).connect === "function") {
+    // SET LOCAL needs a transaction pinned to one connection.
+    const client = await (p as any).connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`);
+      try {
+        // pgvector >= 0.8 only; best-effort (older versions just keep ef_search).
+        // strict_order: keeps scanning until LIMIT rows survive the filter while
+        // preserving exact distance order (relaxed_order can truncate better
+        // candidates at the LIMIT because rows arrive approximately ordered).
+        await client.query("SET LOCAL hnsw.iterative_scan = strict_order");
+      } catch {
+        /* pgvector < 0.8: parameter does not exist */
+      }
+      rows = (await client.query(sql, params)).rows;
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    // Injected test pools may not expose connect(); plain query keeps them working.
+    rows = (await p.query<QueryRow>(sql, params)).rows;
+  }
+
+  // relaxed_order may yield slightly out-of-order rows — re-sort by similarity.
+  rows.sort((a, b) => (b as any).score - (a as any).score);
   // Expose the real cosine similarity (1 - distance) instead of discarding it.
   return rows.map((r, idx) => ({ chunk: rowToChunk(r), rank: idx + 1, score: r.score }));
 }
