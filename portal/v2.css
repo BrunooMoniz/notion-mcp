@@ -168,3 +168,20 @@ body:not([data-zstate]) .z-ativo, body:not([data-zstate]) .z-novo { display: non
 .link-quiet:hover { color: var(--ink); }
 .guia-eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 26px 0 10px; }
 .guia-eyebrow:first-child { margin-top: 0; }
+
+/* ---- tarefas (003-tasks-v1): escolha dupla + info da base configurada ---- */
+.task-choice { display: flex; gap: 8px; flex-wrap: wrap; }
+.act-tasks-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px 28px; font-size: 13px; color: var(--ink-soft); }
+.act-tasks-info a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- Guia → tarefas: tabela compacta do template ---- */
+.tg-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.tg-table th, .tg-table td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.45; }
+.tg-table th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.tg-table td:first-child { font-weight: 560; color: var(--ink); white-space: nowrap; }
+.tg-table td:nth-child(2) { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tg-table tr:last-child td { border-bottom: none; }
+
+/* ---- painel Claude Code: lista de troubleshooting ---- */
+.cc-trouble { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.55; }
+.cc-trouble code { font-family: var(--mono); font-size: 12px; background: var(--paper-2); border-radius: 5px; padding: 1px 5px; }
