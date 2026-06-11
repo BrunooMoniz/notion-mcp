@@ -150,6 +150,9 @@ function go(view) {
   });
   var mn = document.getElementById('mobile-view-name');
   if (mn) mn.textContent = view;
+  /* Conta: a lista de sessões era carregada só no boot e ficava stale —
+     recarrega ao entrar na view */
+  if (view === 'conta' && typeof loadSessions === 'function') loadSessions();
   document.scrollingElement.scrollTo({ top: 0 });
   try { history.replaceState(null, '', '#' + view); } catch (e) { /* sandbox */ }
 }
@@ -192,6 +195,24 @@ function countSources(me) {
   if (s.ical && s.ical.links && s.ical.links.length) n++;
   if (s.granola && s.granola.set) n++;
   return n;
+}
+
+/* contagem por tipo: "2 Notion · 4 agendas · Granola" + total de conexões */
+function sourcesBreakdown(me) {
+  var s = (me && me.sources) || {};
+  var nNotion = (s.notion && s.notion.workspaces && s.notion.workspaces.length) ||
+    (s.notion && s.notion.connected ? 1 : 0);
+  var nCal = ((s.google && s.google.length) || 0) +
+    ((s.ical && s.ical.links && s.ical.links.length) || 0);
+  var hasGranola = !!(s.granola && s.granola.set);
+  var parts = [];
+  if (nNotion) parts.push(nNotion + ' Notion');
+  if (nCal) parts.push(nCal + (nCal > 1 ? ' agendas' : ' agenda'));
+  if (hasGranola) parts.push('Granola');
+  return {
+    total: nNotion + nCal + (hasGranola ? 1 : 0),
+    label: parts.join(' · ')
+  };
 }
 
 function totalChunks(st) {
@@ -393,7 +414,7 @@ function renderOnboarding() {
     {
       done: tasksDone,
       st: 'Onde suas tarefas vivem',
-      sd: 'Aponte a base de tarefas que você já tem no Notion — o Zinom se adapta aos seus campos — ou crie o Kanban padrão Zinom: status, prioridade, prazo, tempo estimado, tipo (fazer ou cobrar), quem e origem, tudo que a IA precisa para planejar seu dia.',
+      sd: 'Aponte a base de tarefas que você já tem no Notion — o Zinom se adapta aos seus campos — ou crie o Kanban padrão Zinom (a página "🧠 Zinom" com a base "Tarefas" no topo do seu workspace): status, prioridade, prazo, tempo estimado, tipo (fazer ou cobrar), quem e origem. Dá para trocar a base depois em Fontes.',
       cta: '<div class="task-choice js-tasks-actions">' +
         '<button class="btn btn-primary btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
         '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
@@ -693,7 +714,10 @@ async function loadSessions() {
 async function revokeSession(id, isCurrent) {
   try {
     var res = await apiJSON('/portal/sessions/revoke', 'POST', { id: id });
-    if (!res.ok && res.status !== 204) { toast('Não consegui encerrar a sessão.'); return; }
+    /* 404 = a sessão já tinha expirado/sido encerrada (lista stale) — trate como
+       encerrada e recarregue a lista em vez de deixar a linha fantasma na tela */
+    if (res.status === 404) { toast('Essa sessão já estava encerrada.'); loadSessions(); return; }
+    if (!res.ok && res.status !== 204) { toast('Não consegui encerrar a sessão.'); loadSessions(); return; }
     if (isCurrent) { location.href = '/login.html'; return; }
     toast('Sessão encerrada');
     loadSessions();
@@ -788,12 +812,12 @@ function renderFontes(me) {
       : '<p class="muted">Nenhum workspace conectado ainda. O Notion costuma ser a fonte mais rica do cerebro.</p>';
   }
 
-  /* fontes-count + badge */
-  var nConn = countSources(me);
+  /* fontes-count + badge: contagem por tipo, não só o número de tipos */
+  var bd = sourcesBreakdown(me);
   var fcEl = document.getElementById('fontes-count');
-  if (fcEl) fcEl.textContent = '· ' + nConn + ' conectadas';
+  if (fcEl) fcEl.textContent = bd.total ? '· ' + (bd.label || bd.total + ' conectadas') : '';
   var nbEl = document.getElementById('nav-fontes-badge');
-  if (nbEl) nbEl.textContent = nConn;
+  if (nbEl) nbEl.textContent = bd.total;
 
   /* google */
   var gAccounts = sources.google || [];
@@ -813,8 +837,13 @@ function renderFontes(me) {
       : '<p class="muted">Nenhuma conta conectada.</p>';
   }
 
-  /* ical */
+  /* ical (card secundário, colapsado por padrão; abre sozinho quando já há links) */
   var icalLinks = (sources.ical && sources.ical.links) || [];
+  var icalCard = document.getElementById('ical-card');
+  if (icalCard && !icalCard._autoOpened && icalLinks.length) {
+    icalCard.open = true;
+    icalCard._autoOpened = true; /* só na primeira render — depois respeita o usuário */
+  }
   var icTag = document.getElementById('ical-tag');
   if (icTag) {
     icTag.textContent = icalLinks.length
@@ -873,6 +902,60 @@ function renderFontes(me) {
   if (grSave) grSave.textContent = granola.set ? 'Trocar' : 'Salvar';
   var grRm = document.getElementById('granola-remove');
   if (grRm) grRm.classList.toggle('hidden', !granola.set);
+}
+
+/* ==================== FONTES: CARD "TAREFAS NO NOTION" ====================
+   A base de tarefas era configurável só no onboarding/ativação; este card dá
+   visibilidade permanente e permite TROCAR a base depois (reusa os endpoints
+   /portal/tasks/detect|use|create e a delegação global data-tasks-*). */
+
+async function loadTasksCard(me) {
+  var card = document.getElementById('tasks-card');
+  if (!card) return;
+  var notionConnected = !!(me && me.sources && me.sources.notion && me.sources.notion.connected);
+  if (notionConnected) await loadTasksInfo();
+  renderTasksCard(notionConnected);
+}
+
+function renderTasksCard(notionConnected) {
+  var card = document.getElementById('tasks-card');
+  if (!card) return;
+  var tag = document.getElementById('tasks-tag');
+  var state = document.getElementById('tasks-config-state');
+  var info = window._tasksInfo;
+
+  if (!notionConnected) {
+    if (tag) { tag.textContent = 'requer Notion'; tag.className = 'tag'; }
+    if (state) state.innerHTML = '<p class="muted">Conecte um workspace do Notion acima para configurar onde suas tarefas vivem.</p>';
+    _tasksMsg('');
+    _tasksActions('');
+    return;
+  }
+
+  if (info && info.configured) {
+    if (tag) { tag.textContent = 'configurada'; tag.className = 'tag ok'; }
+    if (state) {
+      var baseLink = isHttpUrl(info.url)
+        ? '<a href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">' + escapeHtml(info.title || 'Tarefas') + '</a>'
+        : '<strong>' + escapeHtml(info.title || 'Tarefas') + '</strong>';
+      var nMissing = (info.missing || []).length;
+      state.innerHTML = '<div class="kv-row"><span class="k">Base configurada</span>' +
+        '<span class="v">' + baseLink + '</span>' +
+        (nMissing ? '<span class="tag warn">' + nMissing + ' campo(s) sem correspondência</span>' : '<span class="tag ok">ativa</span>') +
+        '</div>';
+    }
+    _tasksMsg('');
+    _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Trocar de base</button>');
+    return;
+  }
+
+  if (tag) { tag.textContent = 'não configurada'; tag.className = 'tag warn'; }
+  if (state) state.innerHTML = '';
+  _tasksMsg('Aponte uma base que você já tem ou crie o Kanban padrão Zinom — a página "🧠 Zinom" com a base "Tarefas" é criada no topo do seu workspace do Notion.');
+  _tasksActions(
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>'
+  );
 }
 
 /* ==================== FONTES: NUDGE DE PRÓXIMO PASSO ====================  */
@@ -1708,7 +1791,10 @@ async function loadStatus() {
   var ss = document.getElementById('stat-strip');
   if (ss) {
     var bySource = (st.counts && st.counts.bySource) || [];
-    var nSrcActive = bySource.filter(function (s) { return s.documents > 0; }).length;
+    /* fontes ativas = fontes REAIS (workspace, conta, agenda) com docs indexados,
+       não o número de source_types distintos */
+    var nSrcActive = (st.sources || []).filter(function (s) { return (s.documents || 0) > 0; }).length;
+    if (!nSrcActive) nSrcActive = bySource.filter(function (s) { return s.documents > 0; }).length;
     var lastAt2 = bySource.reduce(function (m, s) {
       return s.last_indexed_at && s.last_indexed_at > m ? s.last_indexed_at : m;
     }, '');
@@ -1747,11 +1833,14 @@ async function loadStatus() {
         var t = s.source_type || (s.source && s.source.startsWith('notion') ? 'notion'
           : s.source && s.source.startsWith('granola') ? 'granola'
           : s.source && s.source.startsWith('calendar') ? 'calendar' : 'web');
-        /* counts: prefer ActivitySource shape (counts blob); fall back to bySource totals */
-        var bySrc = (st.counts && st.counts.bySource || []).find(function (b) { return b.source_type === t; }) || {};
+        /* counts: prefer os campos VIVOS por fonte (brain_chunks); depois o blob do
+           último run; nunca o total por source_type (repetia o mesmo número em
+           todos os workspaces) */
         var cts = s.counts && typeof s.counts === 'object' ? s.counts : null;
-        var docsN = (cts && cts.documents != null) ? cts.documents : (bySrc.documents || 0);
-        var chunksN = (cts && cts.chunks != null) ? cts.chunks : (bySrc.chunks || 0);
+        var docsN = (s.documents != null) ? s.documents
+          : (cts && cts.documents != null) ? cts.documents : 0;
+        var chunksN = (s.chunks != null) ? s.chunks
+          : (cts && cts.chunks != null) ? cts.chunks : 0;
         var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
         var tagCls = ESTADO_TAG[estado] || 'warn';
         var tagLbl = ESTADO_LABEL[estado] || estado;
@@ -1795,9 +1884,12 @@ async function loadStatus() {
 function renderGuiaPipeline() {
   var st = window._lastStatus;
   var fEl = document.getElementById('guia-pl-fontes');
+  var fSubEl = document.getElementById('guia-pl-fontes-sub');
   var cEl = document.getElementById('guia-pl-chunks');
   var aEl = document.getElementById('guia-pl-assist');
-  if (fEl) fEl.textContent = window._lastMe ? String(countSources(window._lastMe)) : '—';
+  var bd = window._lastMe ? sourcesBreakdown(window._lastMe) : null;
+  if (fEl) fEl.textContent = bd ? String(bd.total) : '—';
+  if (fSubEl && bd && bd.label) fSubEl.textContent = bd.label;
   if (cEl) cEl.textContent = st ? fmt(totalChunks(st)) : '—';
   if (aEl) aEl.textContent = String(assistants.length);
 }
@@ -1954,6 +2046,26 @@ function wireAtividade() {
   var toggleGrafo = document.getElementById('brain-toggle-grafo');
   if (toggleLista) toggleLista.addEventListener('click', function() { switchBrainView('lista'); });
   if (toggleGrafo) toggleGrafo.addEventListener('click', function() { switchBrainView('grafo'); });
+
+  // Tela cheia do explorador (Esc sai). cy.resize() recalcula o canvas do grafo.
+  var fsBtn = document.getElementById('brain-fullscreen-btn');
+  function setExplorerFullscreen(on) {
+    var card = document.getElementById('brain-explorer');
+    if (!card) return;
+    card.classList.toggle('fullscreen', on);
+    document.body.classList.toggle('explorer-fs', on);
+    if (fsBtn) {
+      fsBtn.classList.toggle('active', on);
+      fsBtn.textContent = on ? '✕ Sair da tela cheia' : '⛶ Tela cheia';
+    }
+    if (_cy) setTimeout(function () { _cy.resize(); _cy.fit(undefined, 30); }, 60);
+  }
+  if (fsBtn) fsBtn.addEventListener('click', function () {
+    setExplorerFullscreen(!document.getElementById('brain-explorer').classList.contains('fullscreen'));
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.body.classList.contains('explorer-fs')) setExplorerFullscreen(false);
+  });
 
   // Match toggle (Todas | Qualquer)
   var matchAllBtn = document.getElementById('match-all-btn');
@@ -2162,38 +2274,52 @@ async function runIndex() {
   }
 
   toast('Indexacao iniciada — acompanhe em Atividade.');
-  /* progresso simulado enquanto o servidor processa */
-  var steps = [
-    ['Lendo Notion…', 18], ['Lendo reunioes do Granola…', 42],
-    ['Lendo agendas…', 58], ['Gerando embeddings…', 86], ['Indexando…', 100]
-  ];
-  var si = 0;
+  /* progresso REAL: o backend grava um run por fonte conforme termina; o poll
+     de /portal/status mostra quantas fontes já concluíram — sem stepper fake */
+  var isFirstIndex = !totalChunks(window._lastStatus);
+  var noteEl = document.getElementById('index-note');
+  if (noteEl) {
+    noteEl.textContent = isFirstIndex
+      ? 'Pode fechar esta página — a indexação continua no servidor e você recebe um e-mail quando a primeira terminar. Acompanhe fonte a fonte em Atividade.'
+      : 'Pode fechar esta página — a indexação continua no servidor. Acompanhe fonte a fonte em Atividade.';
+  }
+  if (stepEl) stepEl.textContent = 'Indexação em andamento — isso pode levar vários minutos…';
+  if (pctEl) pctEl.textContent = '';
+  if (fillEl) fillEl.style.width = '4%';
+
   function tick() {
-    var st = steps[si];
-    if (stepEl) stepEl.textContent = st[0];
-    if (pctEl) pctEl.textContent = st[1] + '%';
-    if (fillEl) fillEl.style.width = st[1] + '%';
-    si++;
-    if (si < steps.length) { setTimeout(tick, 1100); return; }
-    /* Aguardar a conclusão real via polling de /portal/status */
     var pollCount = 0;
+    /* 4s × 300 = 20 min de acompanhamento; depois o servidor segue sozinho */
     var pollDone = setInterval(async function () {
       pollCount++;
       try {
         var r = await api('/portal/status');
         if (!r.ok) { clearInterval(pollDone); finishIndex(); return; }
         var s = await r.json();
-        if (!s.running || pollCount > 30) {
+        var srcs = s.sources || [];
+        var doneN = srcs.filter(function (x) {
+          return x.estado && x.estado !== 'indexando' && x.estado !== 'aguardando_primeira_indexacao';
+        }).length;
+        var totalN = srcs.length || 1;
+        if (s.running) {
+          if (stepEl) stepEl.textContent = 'Indexando suas fontes — ' + doneN + ' de ' + totalN + ' concluída' + (doneN === 1 ? '' : 's');
+          var pct = Math.round((doneN / totalN) * 100);
+          if (pctEl) pctEl.textContent = doneN ? pct + '%' : '';
+          if (fillEl) fillEl.style.width = Math.max(4, pct) + '%';
+        }
+        if (!s.running) {
           clearInterval(pollDone);
           finishIndex(s);
-        } else {
-          if (stepEl) stepEl.textContent = 'Indexando suas fontes…';
+        } else if (pollCount > 300) {
+          clearInterval(pollDone);
+          if (stepEl) stepEl.textContent = 'A indexação continua no servidor — acompanhe em Atividade.';
+          finishIndex(s);
         }
       } catch (e) {
         clearInterval(pollDone);
         finishIndex(null);
       }
-    }, 3000);
+    }, 4000);
   }
 
   function finishIndex(statusData) {
@@ -2230,6 +2356,12 @@ async function runIndex() {
     }
     load();
     loadBilling();
+    /* explorador liberado/atualizado assim que a indexação termina */
+    try {
+      loadBrain(true);
+      loadEntities();
+      if (explorerState.view === 'grafo') reloadGraph();
+    } catch (e) { /* explorador indisponível neste ambiente */ }
   }
 
   tick();
@@ -3357,7 +3489,7 @@ async function runDetectTasks() {
 }
 
 async function runCreateTasks() {
-  _tasksMsg('Criando base de Tarefas…');
+  _tasksMsg('Criando a página "🧠 Zinom" no topo do seu workspace do Notion, com a base "Tarefas" dentro…');
   _tasksActions('');
   var res;
   try {
@@ -3479,6 +3611,7 @@ async function load() {
   me.google_configured = me.google_configured !== false;
 
   renderFontes(me);
+  loadTasksCard(me); /* assíncrono — card "Tarefas no Notion" em Fontes */
   renderConta(me);
   renderInicio(me, window._lastBilling);
   renderChatEmpty(me);
