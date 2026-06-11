@@ -123,6 +123,55 @@ export async function sendInviteEmail(
   }
 }
 
+let lastFirstIndex: { to: string; documents: number; chunks: number } | null = null;
+/** Test/e2e seam: the last first-index-done email "sent" (or captured in dev mode). */
+export function __getLastFirstIndexEmail(): { to: string; documents: number; chunks: number } | null {
+  return lastFirstIndex;
+}
+
+/** Send (or, in dev, capture) the "primeira indexação concluída" email. */
+export async function sendFirstIndexDoneEmail(
+  to: string,
+  totals: { documents: number; chunks: number },
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  lastFirstIndex = { to, documents: totals.documents, chunks: totals.chunks };
+  if (isDevEmail()) {
+    console.log(
+      `[portal-email] DEV mode (no send) — first index done for ${to}: ${totals.documents} docs / ${totals.chunks} chunks`,
+    );
+    return;
+  }
+  const doFetch = opts.fetchImpl ?? fetch;
+  const from = process.env.PORTAL_EMAIL_FROM ?? "onboarding@resend.dev";
+  const appUrl = (process.env.PORTAL_BASE_URL ?? process.env.BASE_URL ?? "https://zinom.ai") + "/app.html#atividade";
+  const res = await doFetch(RESEND_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject: "Seu Zinom está pronto 🧠",
+      html: `<!doctype html><html><body style="font:16px/1.5 -apple-system,system-ui,sans-serif;color:#222">
+      <h2 style="font-size:18px">🧠 Primeira indexação concluída</h2>
+      <p>Seu segundo cérebro está pronto: <strong>${totals.documents.toLocaleString("pt-BR")} documentos</strong> e <strong>${totals.chunks.toLocaleString("pt-BR")} trechos</strong> pesquisáveis.</p>
+      <p>Já dá para explorar o cérebro, ver as entidades e o grafo — e conectar sua IA favorita para começar a perguntar.</p>
+      <p style="margin:24px 0">
+        <a href="${appUrl}" style="background:#1f8b4c;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Explorar meu cérebro</a>
+      </p>
+      <p style="color:#888;font-size:13px">As próximas indexações acontecem automaticamente — você não vai receber este aviso de novo.</p>
+      </body></html>`,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`resend send failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+}
+
 /** Send (or, in dev, capture) the magic-link email. Throws on a real-send failure
  *  so the route can surface a retryable state. fetchImpl injectable for tests. */
 export async function sendMagicLinkEmail(

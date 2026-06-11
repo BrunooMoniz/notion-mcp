@@ -50,7 +50,11 @@ function kickoffIndex(accountId: string): void {
   }
   indexInFlight.add(accountId);
   void indexAccount(accountId)
-    .then((r) => console.log(`[notion-onboard] indexed ${accountId}: ${r.documents} docs / ${r.chunks} chunks`))
+    .then(async (r) => {
+      console.log(`[notion-onboard] indexed ${accountId}: ${r.documents} docs / ${r.chunks} chunks`);
+      const { notifyFirstIndexDone } = await import("./portal/first-index-notify.js");
+      await notifyFirstIndexDone(accountId, r);
+    })
     .catch((e) => console.error(`[notion-onboard] index ${accountId} failed: ${e?.message ?? e}`))
     .finally(() => indexInFlight.delete(accountId));
 }
