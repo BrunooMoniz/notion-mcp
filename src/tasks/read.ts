@@ -16,6 +16,7 @@ import {
 import {
   normalize,
   canonicalStatusFor,
+  canonicalPriorityFor,
   canonicalTipoFor,
   priorityRank,
   isClosedStatus,
@@ -146,11 +147,13 @@ export function pageToTask(profile: TrackerProfile, page: any): Task {
 
   if (p.status) {
     const raw = props[p.status.name]?.status?.name ?? props[p.status.name]?.select?.name ?? "";
-    task.status = raw ? (p.status.reverse[normalize(raw)] ?? raw) : "";
+    // Synonym fallback covers options created after the cached profile was
+    // built (e.g. a write just auto-created "Cancelada" on a select base).
+    task.status = raw ? (p.status.reverse[normalize(raw)] ?? canonicalStatusFor(raw) ?? raw) : "";
   }
   if (p.prioridade) {
     const raw = props[p.prioridade.name]?.select?.name ?? "";
-    if (raw) task.prioridade = p.prioridade.reverse[normalize(raw)] ?? raw;
+    if (raw) task.prioridade = p.prioridade.reverse[normalize(raw)] ?? canonicalPriorityFor(raw) ?? raw;
   }
   if (p.prazo) {
     const d = props[p.prazo.name]?.date;

@@ -149,7 +149,18 @@ export function buildCreatePagePayload(
   }
   props[p.title] = titleValue(title);
 
-  if (input.status && input.status.trim()) applyStatus(profile, props, input.status.trim(), todayISO);
+  if (input.status && input.status.trim()) {
+    applyStatus(profile, props, input.status.trim(), todayISO);
+  } else if (p.status) {
+    // No status given: land the task in the "todo" column instead of an
+    // ungrouped (sem status) card on the Kanban. Best-effort — a status-kind
+    // base with no todo-like option just leaves it unset, as before.
+    try {
+      applyStatus(profile, props, "todo", todayISO);
+    } catch {
+      /* base sem opção todo-like: mantém sem status */
+    }
+  }
   if (input.prioridade && input.prioridade.trim()) applyPriority(profile, props, input.prioridade.trim());
   if (input.prazo && input.prazo.trim()) applyPrazo(profile, props, input.prazo, input.prazo_fim);
   if (typeof input.tempo_estimado_min === "number" && p.tempo) {
