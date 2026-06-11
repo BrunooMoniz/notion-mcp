@@ -792,7 +792,9 @@ export function createPortalRouter(): express.Router {
     }
   });
 
-  // Usa uma DB existente que a pessoa escolheu (grava o id; não muta schema no MVP).
+  // Usa uma DB existente que a pessoa escolheu: grava o id e valida o schema via
+  // adapter, devolvendo o shape do /info (o que mapeou/faltou). Grava MESMO com
+  // campos missing — o adapter se adapta ao schema; nada é bloqueado.
   router.post("/portal/tasks/use", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     const id = typeof req.body?.data_source_id === "string" ? req.body.data_source_id.trim() : "";
@@ -800,9 +802,48 @@ export function createPortalRouter(): express.Router {
       res.status(400).json({ error: "data_source_id obrigatório" });
       return;
     }
-    const { useExistingTracker } = await import("./task-tracker.js");
-    await useExistingTracker(accountId, id);
-    res.sendStatus(200);
+    try {
+      const { useExistingTracker } = await import("./task-tracker.js");
+      await useExistingTracker(accountId, id);
+      const { getTasksInfo, invalidateTrackerProfile } = await import("../tasks/adapter.js");
+      invalidateTrackerProfile(accountId);
+      try {
+        res.json({ ...(await getTasksInfo(accountId)), configured: true });
+      } catch (err: any) {
+        // Gravado; só não deu pra validar o schema agora (ex.: Notion fora).
+        console.warn(`[portal] tasks/use info ${accountId}: ${err?.message ?? err}`);
+        res.json({ configured: true, title: null, url: null, mapped: [], missing: [], is_standard: false });
+      }
+    } catch (err: any) {
+      console.error(`[portal] tasks/use ${accountId}: ${err?.message ?? err}`);
+      res.status(400).json({ error: err?.message ?? "não consegui usar essa base" });
+    }
+  });
+
+  // 003-tasks-v1: estado da base de tarefas — o que o adapter mapeou/faltou.
+  router.get("/portal/tasks/info", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { getTasksInfo } = await import("../tasks/adapter.js");
+      res.json(await getTasksInfo(accountId));
+    } catch (err: any) {
+      console.error(`[portal] tasks/info ${accountId}: ${err?.message ?? err}`);
+      res.status(502).json({ error: "não consegui ler sua base de tarefas agora" });
+    }
+  });
+
+  // 003-tasks-v1: upgrade ADITIVO do template padrão "Tarefas" (nunca muta base
+  // arbitrária do usuário — o módulo recusa título diferente de "Tarefas").
+  router.post("/portal/tasks/upgrade", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { upgradeStandardTracker } = await import("../tasks/upgrade.js");
+      const r = await upgradeStandardTracker(accountId);
+      res.json({ ok: true, added: r.added });
+    } catch (err: any) {
+      console.error(`[portal] tasks/upgrade ${accountId}: ${err?.message ?? err}`);
+      res.status(400).json({ ok: false, error: err?.message ?? "não consegui atualizar o template" });
+    }
   });
 
   router.post("/portal/activation/ask", requireSession, async (_req, res) => {

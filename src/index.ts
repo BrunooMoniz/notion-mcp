@@ -12,7 +12,7 @@ import { registerBrainSearchTool } from "./rag/brain-tool.js";
 import { registerBrainIndexUrlTool } from "./rag/brain-index-url-tool.js";
 import { registerBrainIndexWebTool } from "./rag/brain-index-web-tool.js";
 import { registerRememberTool, registerRecallTool } from "./rag/remember-tool.js";
-import { registerZinomTaskTool } from "./zinom-task-tool.js";
+import { registerZinomTasksTools } from "./zinom-tasks-tools.js";
 import { registerCalendarTools } from "./google/calendar-tool.js";
 import { registerBrainStatusTool, setReindexInFlightSet } from "./rag/brain-status-tool.js";
 import { registerBrainReindexTool, setReindexSet } from "./rag/brain-reindex-tool.js";
@@ -129,6 +129,13 @@ You have access to a Notion MCP server that manages three separate workspaces. E
 ## Calendário
 
 **REGRA:** para criar ou editar eventos, chame list_calendars PRIMEIRO para descobrir o calendar_ref correto da agenda certa. Nunca invente ou assuma um calendar_ref; se não encontrar, pergunte ao usuário.
+
+## Fluxo de tarefas
+
+- **Onde vivem:** as tarefas moram na base de tarefas do usuário no Notion, conectada ao Zinom. Use as tools zinom_*: **zinom_list_tasks** (ler o board), **zinom_create_task** (criar), **zinom_update_task** (mover status, repriorizar, dar prazo, estimar), **zinom_plan_context** (planejar). Prefira-as às notion_* para tarefas: elas falam o modelo canônico e se adaptam ao schema real da base.
+- **Reunião → tarefas:** ao pedir "extraia/identifique tarefas da reunião X": busque a reunião (brain_search com source_type granola), identifique (a) o que a PESSOA deve FAZER → tipo 'fazer'; (b) o que ela deve COBRAR de alguém → tipo 'cobrar' + quem. SEMPRE rode zinom_list_tasks com q antes de criar (dedup); origem_url = link da reunião; proponha a lista e confirme antes de criar em lote.
+- **Planejamento (dia/semana/mês):** chame zinom_plan_context na janela pedida; aloque respeitando prazo, prioridade e tempo_estimado vs free_slots; blocktime: create_calendar_event quando houver Google, senão zinom_create_task com data + fim; depois atualize o board.
+- **Manter vivo:** concluir/bloquear/repriorizar via zinom_update_task; revisão semanal = zinom_plan_context da semana + overdue + cobranças (tipo 'cobrar').
 `.trim();
 
 const app = express();
@@ -523,6 +530,7 @@ app.post("/mcp", async (req, res) => {
     registerBrainIndexWebTool(server);
     registerRememberTool(server);
     registerRecallTool(server);
+    registerZinomTasksTools(server); // 003-tasks-v1: tasks also on the owner surface
     registerCalendarTools(server);
     registerBrainStatusTool(server);
     registerBrainReindexTool(server);
@@ -535,7 +543,7 @@ app.post("/mcp", async (req, res) => {
     registerBrainIndexWebTool(server);
     registerRememberTool(server);
     registerRecallTool(server);
-    registerZinomTaskTool(server);
+    registerZinomTasksTools(server);
     registerCalendarTools(server);
     registerBrainStatusTool(server);
     registerBrainReindexTool(server);

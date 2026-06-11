@@ -78,8 +78,41 @@ test("buildCreateDbPayload usa o parent page e o schema-alvo em initial_data_sou
   assert.equal(p.title[0].text.content, "Tarefas");
   // Notion 2025-09-03: o schema vive em initial_data_source.properties
   assert.equal(p.initial_data_source.properties, TARGET_PROPERTIES);
-  for (const k of ["Nome", "Status", "Prazo", "Tempo estimado", "Frente"]) {
+});
+
+test("TARGET_PROPERTIES é o template 003-tasks-v1 (sem Frente)", () => {
+  for (const k of [
+    "Nome",
+    "Status",
+    "Prioridade",
+    "Prazo",
+    "Tempo estimado (min)",
+    "Tipo",
+    "Quem",
+    "Origem",
+    "Projeto",
+    "Criada em",
+    "Concluída em",
+  ]) {
     assert.ok(k in TARGET_PROPERTIES, `falta ${k}`);
   }
-  assert.equal(TARGET_PROPERTIES["Nome"].title !== undefined, true);
+  assert.ok(!("Frente" in TARGET_PROPERTIES), "Frente saiu do template novo");
+  assert.ok(TARGET_PROPERTIES["Nome"].title !== undefined);
+  assert.deepEqual(
+    TARGET_PROPERTIES["Status"].select.options.map((o: any) => o.name),
+    ["Backlog", "A fazer", "Em andamento", "Bloqueada", "Concluída", "Cancelada"],
+  );
+  assert.deepEqual(
+    TARGET_PROPERTIES["Prioridade"].select.options.map((o: any) => o.name),
+    ["Urgente", "Alta", "Média", "Baixa"],
+  );
+  assert.deepEqual(
+    TARGET_PROPERTIES["Tipo"].select.options.map((o: any) => o.name),
+    ["Fazer", "Cobrar"],
+  );
+  assert.ok(TARGET_PROPERTIES["Origem"].url !== undefined);
+  assert.ok(TARGET_PROPERTIES["Quem"].rich_text !== undefined);
+  assert.ok(TARGET_PROPERTIES["Criada em"].created_time !== undefined);
+  assert.ok(TARGET_PROPERTIES["Concluída em"].date !== undefined);
+  assert.deepEqual(TARGET_PROPERTIES["Projeto"].select.options, []);
 });

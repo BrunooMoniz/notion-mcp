@@ -1,19 +1,18 @@
 // src/portal/task-write.ts
 // 001-account-portal / WS2 — create a task/event PAGE in the friend's Notion
-// "Tarefas" data source, conversationally (the zinom_create_task MCP tool calls
-// this). Clients-free (raw fetch + the account's vault PAT), reusing the Task
-// Tracker that activation already detects/creates. Account-scoped by construction:
-// the caller passes accountId (from the trusted request context, never input).
+// "Tarefas" data source, conversationally.
 //
-// Multi-workspace by design: a friend may connect SEVERAL Notion workspaces with
-// arbitrary names. The Tasks data source lives in exactly one of them, so we try
-// each warmed workspace's PAT until one can read the data source, then write with
-// that same token. No assumption that there is only one workspace.
-import { warmAccount, getAccountToken } from "../account-tokens.js";
-import { getTasksDbId, createTaskTracker } from "./task-tracker.js";
+// 003-tasks-v1: this is now a THIN compatibility wrapper over the canonical
+// task pipeline in src/tasks/write.ts (profile-driven, works with ANY schema).
+// createTaskPage keeps its exact signature — portal/ask-actions.ts and the
+// zinom task tools depend on it. Token resolution moved to
+// tasks/adapter.resolveNotionTokens (covers both friend vault and owner .env).
+import { createTask } from "../tasks/write.js";
+import type { AdapterDeps } from "../tasks/adapter.js";
 
-const NOTION_VERSION = "2025-09-03"; // keep in sync with clients.ts / task-tracker.ts
-const NOTION_API = "https://api.notion.com";
+// Re-exported so existing `instanceof NoNotionError` checks keep working
+// against the single canonical class.
+export { NoNotionError } from "../tasks/adapter.js";
 
 export interface CreateTaskInput {
   /** Task/event title (the "Nome" title property). */
@@ -31,9 +30,10 @@ export interface CreateTaskInput {
   note?: string;
 }
 
-/** PURE: build the POST /v1/pages payload for a task page under a data source.
- *  Properties match the Task Tracker schema (Nome=title, Prazo=date, Status=select).
- *  Exported for unit tests — no network, no account state. */
+/** LEGACY pure builder for the FIXED standard schema (Nome/Prazo/Status). The
+ *  live write path now builds payloads through the TrackerProfile
+ *  (tasks/write.buildCreatePagePayload, schema-aware); this stays exported for
+ *  the existing unit tests and as the reference of the old behavior. */
 export function buildTaskPagePayload(
   dataSourceId: string,
   input: CreateTaskInput,
@@ -65,61 +65,6 @@ export function buildTaskPagePayload(
   return payload;
 }
 
-async function notionFetch(
-  token: string,
-  path: string,
-  init: RequestInit,
-  fetchImpl: typeof fetch,
-): Promise<{ ok: boolean; status: number; data: any }> {
-  const res = await fetchImpl(`${NOTION_API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Notion-Version": NOTION_VERSION,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-  const text = await res.text();
-  let data: any = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = {};
-  }
-  return { ok: res.ok, status: res.status, data };
-}
-
-/** Find which connected workspace's PAT can read the given data source. Tries
- *  each warmed workspace token (GET /v1/data_sources/{id}); returns the first that
- *  succeeds. Handles friends with multiple, arbitrarily-named workspaces. */
-async function resolveTokenForDataSource(
-  accountId: string,
-  dataSourceId: string,
-  fetchImpl: typeof fetch,
-): Promise<string | null> {
-  const workspaces = await warmAccount(accountId);
-  let firstToken: string | null = null;
-  for (const ws of workspaces) {
-    const token = getAccountToken(accountId, ws, "pat");
-    if (!token) continue;
-    if (!firstToken) firstToken = token;
-    const r = await notionFetch(token, `/v1/data_sources/${dataSourceId}`, { method: "GET" }, fetchImpl);
-    if (r.ok) return token;
-  }
-  // None confirmed readable (e.g. transient error): fall back to the first PAT so
-  // the create still attempts rather than hard-failing on a flaky GET.
-  return firstToken;
-}
-
-export class NoNotionError extends Error {
-  constructor() {
-    super("conecte seu Notion no portal antes de criar tarefas");
-    this.name = "NoNotionError";
-  }
-}
-
 export interface CreatedTask {
   pageId: string;
   url: string | null;
@@ -127,43 +72,25 @@ export interface CreatedTask {
   created: boolean;
 }
 
-/** Create a task/event page in the friend's Tasks data source. Auto-creates the
- *  "🧠 Zinom → Tarefas" tracker on first use if none is configured yet. */
+/** Create a task/event page in the account's Tasks data source. Auto-creates
+ *  the "🧠 Zinom → Tarefas" tracker on first use if none is configured yet.
+ *  Signature preserved; delegates to tasks/write.createTask (canonical model). */
 export async function createTaskPage(
   accountId: string,
   input: CreateTaskInput,
   opts: { fetchImpl?: typeof fetch } = {},
 ): Promise<CreatedTask> {
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  if (!input.title || !input.title.trim()) {
-    throw new Error("título obrigatório");
-  }
-
-  // Need at least one Notion workspace connected to write anywhere.
-  const workspaces = await warmAccount(accountId);
-  const hasNotion = workspaces.some((ws) => getAccountToken(accountId, ws, "pat"));
-  if (!hasNotion) throw new NoNotionError();
-
-  // Resolve (or first-time create) the Tasks data source.
-  let dataSourceId = await getTasksDbId(accountId);
-  let created = false;
-  if (!dataSourceId) {
-    const r = await createTaskTracker(accountId, { fetchImpl });
-    dataSourceId = r.dataSourceId;
-    created = r.created; // false when an existing "Tarefas" was reused
-  }
-
-  const token = await resolveTokenForDataSource(accountId, dataSourceId, fetchImpl);
-  if (!token) throw new NoNotionError();
-
-  const res = await notionFetch(
-    token,
-    "/v1/pages",
-    { method: "POST", body: JSON.stringify(buildTaskPagePayload(dataSourceId, input)) },
-    fetchImpl,
+  const deps: AdapterDeps = {};
+  if (opts.fetchImpl) deps.fetchImpl = opts.fetchImpl;
+  return createTask(
+    accountId,
+    {
+      title: input.title,
+      prazo: input.date,
+      prazo_fim: input.endDate,
+      status: input.status,
+      note: input.note,
+    },
+    deps,
   );
-  if (!res.ok) {
-    throw new Error(`Notion /v1/pages: HTTP ${res.status} ${res.data?.code ?? ""} ${res.data?.message ?? ""}`.trim());
-  }
-  return { pageId: res.data?.id ?? "", url: res.data?.url ?? null, dataSourceId, created };
 }

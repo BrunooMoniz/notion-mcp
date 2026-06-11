@@ -19,16 +19,15 @@ import { brainSearch } from "../rag/search.js";
 import { callHaiku } from "../classifier/anthropic.js";
 import { markdownToBlocks } from "../markdown.js";
 
-// NOTE: ../clients.js is imported LAZILY inside getTopTasks / writeBriefingPage.
-// That module validates required Notion tokens at import time and calls
-// process.exit(1) when they're absent — importing it eagerly would kill the
-// test process (no creds). The pure surface (getTodayEvents / prompt assembly)
-// must stay importable without credentials, so the import is deferred to the
-// two functions that actually talk to Notion.
-
-// Tasks Tracker data_source (workspace 'personal'). Under Notion API
-// 2025-09-03 queries hit /v1/data_sources/{id}/query.
-const TASKS_DATA_SOURCE = "30d07ba5-bee8-8040-841b-000b5d0b5d84";
+// NOTE: ../clients.js is imported LAZILY inside writeBriefingPage. That module
+// validates required Notion tokens at import time and calls process.exit(1)
+// when they're absent — importing it eagerly would kill the test process (no
+// creds). The pure surface (getTodayEvents / prompt assembly) must stay
+// importable without credentials, so Notion-touching imports stay deferred.
+//
+// 003-tasks-v1: the Tasks Tracker data_source id that used to be hardcoded
+// here moved to tasks/adapter.ts (OWNER_TASKS_DS_FALLBACK) — getTopTasks below
+// is now a thin wrapper over the schema adapter.
 
 // Minimal pg-like surface so tests can inject a fake pool (no live DB).
 type PoolLike = Pick<pg.Pool, "query">;
@@ -197,62 +196,20 @@ function snippetOf(text: string): string {
 
 // --- top open / overdue tasks -----------------------------------------------
 
-const PRIORITY_RANK: Record<string, number> = { Ultra: 0, High: 1, Medium: 2, Low: 3 };
-
 /**
- * Top open tasks from the Tasks Tracker data_source (workspace 'personal'):
- * Status NOT in {Done, Canceled}, sorted by Due asc (no-due last) then
- * Priority (Ultra > High > Medium > Low). Returns the top ~8, compact.
+ * Top open tasks for the OWNER account, sorted by due asc (no-due last) then
+ * priority. 003-tasks-v1: thin wrapper over the schema adapter
+ * (tasks/read.getTopTasksForAccount). When the owner has no vault `tasks_db`,
+ * the adapter falls back to OWNER_TASKS_DS_FALLBACK (the id formerly hardcoded
+ * here) — the 07:00 briefing cron must never break. Lazy import keeps this
+ * module's pure surface importable with no credentials/DB.
  */
 export async function getTopTasks(limit = 8): Promise<BriefingTask[]> {
-  const { getClient, notionFetch } = await import("../clients.js");
-  // Touch getClient so the workspace scope assertion runs (no-op out of an
-  // HTTP request), keeping behaviour consistent with the rest of the codebase.
-  getClient("personal");
-
-  const resp = (await notionFetch(
-    "personal",
-    `/v1/data_sources/${TASKS_DATA_SOURCE}/query`,
-    {
-      method: "POST",
-      body: {
-        filter: {
-          and: [
-            { property: "Status", status: { does_not_equal: "Done" } },
-            { property: "Status", status: { does_not_equal: "Canceled" } },
-          ],
-        },
-        sorts: [{ property: "Due date", direction: "ascending" }],
-        page_size: 50,
-      },
-    },
-  )) as { results: any[] };
-
-  const tasks: BriefingTask[] = (resp.results ?? []).map((page) => {
-    const props = page.properties ?? {};
-    const titleProp = Object.values<any>(props).find((p) => p?.type === "title");
-    const name =
-      titleProp?.title?.map((t: any) => t.plain_text).join("").trim() || "(sem título)";
-    const priority = props["Priority"]?.select?.name ?? "";
-    const due = props["Due date"]?.date?.start ?? null;
-    const tempo =
-      typeof props["Tempo estimado"]?.number === "number"
-        ? props["Tempo estimado"].number
-        : null;
-    return { name, priority, due: due ? String(due).slice(0, 10) : null, tempo_estimado: tempo };
-  });
-
-  tasks.sort((a, b) => {
-    // Due asc, tasks with no due date last.
-    const da = a.due ?? "9999-99-99";
-    const db = b.due ?? "9999-99-99";
-    if (da !== db) return da < db ? -1 : 1;
-    const pa = PRIORITY_RANK[a.priority] ?? 9;
-    const pb = PRIORITY_RANK[b.priority] ?? 9;
-    return pa - pb;
-  });
-
-  return tasks.slice(0, limit);
+  const [{ getTopTasksForAccount }, { DEFAULT_ACCOUNT_ID }] = await Promise.all([
+    import("../tasks/read.js"),
+    import("../context.js"),
+  ]);
+  return getTopTasksForAccount(DEFAULT_ACCOUNT_ID, limit);
 }
 
 // --- prompt + markdown assembly ---------------------------------------------

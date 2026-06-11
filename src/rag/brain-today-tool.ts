@@ -14,7 +14,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { BriefingEvent, EventContext, BriefingTask } from "../briefing/daily-briefing.js";
 import type pg from "pg";
-import { getAccountId, DEFAULT_ACCOUNT_ID } from "../context.js";
+import { getAccountId } from "../context.js";
+import { normalize } from "../tasks/model.js";
 
 // ---------- dep-injection seam -----------------------------------------------
 
@@ -46,11 +47,25 @@ export async function buildBrainToday(
   const dateStr = localDateStr(now);
 
   const pool = deps.getPool();
-  const events = await deps.getTodayEvents(pool, now);
+  // 003-tasks-v1: the same meeting often lives on several indexed calendars —
+  // dedup by (normalized title + date + time) before building context.
+  const events = dedupBriefingEvents(await deps.getTodayEvents(pool, now), dateStr);
   const tasks = await deps.getTopTasks(8);
   const context = await deps.gatherContext(events, tasks);
 
   return { date: dateStr, events, context, tasks };
+}
+
+/** PURE: drop duplicate events by (normalized title + date + time). Exported
+ *  for unit tests. */
+export function dedupBriefingEvents(events: BriefingEvent[], dateStr: string): BriefingEvent[] {
+  const seen = new Set<string>();
+  return events.filter((ev) => {
+    const key = `${normalize(ev.title)}|${dateStr}|${ev.time}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function localDateStr(d: Date): string {
@@ -94,24 +109,34 @@ export function registerBrainTodayTool(server: McpServer): void {
         .describe("Data alvo (YYYY-MM-DD). Padrão: hoje."),
     },
     async ({ date }) => {
-      // getTopTasks calls notionFetch (owner's Tasks Tracker) — only meaningful
-      // for the owner account. For friends, we gracefully skip it.
-      const accountId = getAccountId() ?? DEFAULT_ACCOUNT_ID;
-      const isOwner = accountId === DEFAULT_ACCOUNT_ID;
+      // 003-tasks-v1: tasks come from the schema adapter for ANY account (the
+      // owner keeps the hardcoded data-source fallback inside the adapter so
+      // the briefing never breaks). Friends without a tracker get [].
+      const accountId = getAccountId();
 
       const [
-        { getTodayEvents, gatherContext, getTopTasks },
+        { getTodayEvents, gatherContext },
         { getPool },
+        { getTopTasksForAccount },
       ] = await Promise.all([
         import("../briefing/daily-briefing.js"),
         import("./storage.js"),
+        import("../tasks/read.js"),
       ]);
 
       const deps: BrainTodayDeps = {
         getTodayEvents,
         gatherContext,
-        // Friends don't have the owner's Tasks Tracker; return empty list.
-        getTopTasks: isOwner ? getTopTasks : async () => [],
+        getTopTasks: async (limit) => {
+          try {
+            return await getTopTasksForAccount(accountId, limit ?? 8);
+          } catch (err: any) {
+            // brain_today must stay useful (agenda + context) even when the
+            // tasks base is unreachable/unconfigured.
+            console.warn(`[brain_today] tasks for ${accountId} failed: ${err?.message ?? err}`);
+            return [];
+          }
+        },
         getPool,
       };
 
