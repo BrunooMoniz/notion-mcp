@@ -16,7 +16,9 @@ test("friend saves an iCal link and Granola key; secrets stored masked", async (
   // v2: sources live in their own view now.
   await page.click('.sidebar-nav [data-nav="fontes"]');
 
-  // Add an iCal link.
+  // Add an iCal link. The iCal card is secondary now (collapsed <details>;
+  // Google Calendar is the default path) — expand it first, like a real user.
+  await page.click("#ical-card summary");
   await page.fill("#ical-url", ICAL_URL);
   await page.click("#ical-form button[type=submit]");
 

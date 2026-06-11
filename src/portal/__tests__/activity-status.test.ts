@@ -137,6 +137,61 @@ test("running=true with no run → still indexando", () => {
   assert.equal(entry.estado, "indexando");
 });
 
+test("running=true + runningSince: source finished INSIDE this run shows ok", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [
+      { workspace: "ws-done", name: "Done" },
+      { workspace: "ws-pending", name: "Pending" },
+    ],
+  };
+  const runningSince = new Date("2026-06-09T11:00:00Z");
+  const runs = [
+    // finished after the reindex started → real result surfaces
+    makeRun("notion-ws-done", { last_run_at: "2026-06-09T11:30:00Z" }),
+    // last run predates this reindex → still being processed
+    makeRun("notion-ws-pending", { last_run_at: "2026-06-09T09:00:00Z" }),
+  ];
+  const [done, pending] = buildActivitySources(creds, runs, true, { runningSince });
+  assert.equal(done.estado, "ok");
+  assert.equal(pending.estado, "indexando");
+});
+
+test("running=true + runningSince: source that FAILED inside this run shows erro", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [{ workspace: "ws-a", name: "W" }],
+  };
+  const runningSince = new Date("2026-06-09T11:00:00Z");
+  const runs = [makeRun("notion-ws-a", { ok: false, error: "boom", last_run_at: "2026-06-09T11:30:00Z" })];
+  const [entry] = buildActivitySources(creds, runs, true, { runningSince });
+  assert.equal(entry.estado, "erro");
+  assert.equal(entry.error, "boom");
+});
+
+test("live counts attach per source key; missing key → null", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [
+      { workspace: "ws-a", name: "Alpha" },
+      { workspace: "ws-b", name: "Beta" },
+    ],
+    hasGranola: true,
+    icalLinks: [{ id: "c1", label: "Cal" }],
+  };
+  const liveCounts = new Map([
+    ["notion-ws-a", { documents: 100, chunks: 400 }],
+    ["notion-ws-b", { documents: 7, chunks: 21 }],
+    ["granola", { documents: 3, chunks: 9 }],
+  ]);
+  const [a, b, g, cal] = buildActivitySources(creds, [], false, { liveCounts });
+  assert.equal(a.documents, 100);
+  assert.equal(b.documents, 7);
+  assert.equal(b.chunks, 21);
+  assert.equal(g.documents, 3);
+  assert.equal(cal.documents, null);
+});
+
 // ---- Granola ----------------------------------------------------------------
 
 test("hasGranola=false → no granola entry", () => {
@@ -244,14 +299,34 @@ test("one google account with no run → aguardando_primeira_indexacao, email as
   assert.equal(entry.estado, "aguardando_primeira_indexacao");
 });
 
-test("two google accounts → single gcal entry (shared run key)", () => {
+test("two google accounts → one gcal entry per account (shared run key)", () => {
   const creds: ActivityCredentials = {
     ...NO_CREDS,
     googleAccounts: [{ email: "a@gmail.com" }, { email: "b@gmail.com" }],
   };
   const result = buildActivitySources(creds, [], false);
-  assert.equal(result.filter((e) => e.source_type === "gcal").length, 1);
-  assert.equal(result[0].display_name, "a@gmail.com");
+  const gcal = result.filter((e) => e.source_type === "gcal");
+  assert.equal(gcal.length, 2);
+  assert.equal(gcal[0].display_name, "a@gmail.com");
+  assert.equal(gcal[0].source, "gcal:a@gmail.com");
+  assert.equal(gcal[1].display_name, "b@gmail.com");
+  assert.equal(gcal[1].source, "gcal:b@gmail.com");
+});
+
+test("gcal entries get per-account live counts via gcal:<email> keys", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    googleAccounts: [{ email: "a@gmail.com" }, { email: "b@gmail.com" }],
+  };
+  const liveCounts = new Map([
+    ["gcal:a@gmail.com", { documents: 12, chunks: 30 }],
+  ]);
+  const [a, b] = buildActivitySources(creds, [makeRun("gcal")], false, { liveCounts });
+  assert.equal(a.documents, 12);
+  assert.equal(a.chunks, 30);
+  // account with no indexed events yet → null (frontend shows 0)
+  assert.equal(b.documents, null);
+  assert.equal(b.chunks, null);
 });
 
 test("google account with successful gcal run → ok", () => {

@@ -663,6 +663,52 @@ export async function getBrainCounts(
   return { bySource, totals };
 }
 
+// E2.1 fix — live counts per ACTIVITY SOURCE KEY (not per source_type), so the
+// "Por fonte" list can show real numbers per Notion workspace / Google account
+// instead of repeating the source_type total on every row. Keys mirror
+// buildActivitySources: notion-<ws> | granola | calendar | gcal:<email>.
+export interface ActivitySourceCount {
+  source_key: string;
+  documents: number;
+  chunks: number;
+  last_indexed_at: Date | null;
+}
+
+export async function getActivitySourceCounts(
+  accountId: string,
+): Promise<ActivitySourceCount[]> {
+  const p = getPool();
+  const { rows } = await p.query<{
+    source_key: string;
+    documents: string;
+    chunks: string;
+    last_indexed_at: Date | null;
+  }>(
+    `SELECT CASE
+              WHEN source_type = 'notion'  THEN 'notion-' || COALESCE(workspace, '')
+              WHEN source_type = 'granola' THEN 'granola'
+              WHEN source_type = 'calendar' AND source_id LIKE 'gcal:%'
+                THEN 'gcal:' || split_part(source_id, ':', 2)
+              WHEN source_type = 'calendar' THEN 'calendar'
+              ELSE source_type
+            END                       AS source_key,
+            COUNT(DISTINCT source_id) AS documents,
+            COUNT(*)                  AS chunks,
+            MAX(indexed_at)           AS last_indexed_at
+       FROM brain_chunks
+      WHERE account_id = $1
+      GROUP BY 1
+      ORDER BY 1`,
+    [accountId],
+  );
+  return rows.map((r) => ({
+    source_key: r.source_key,
+    documents: Number(r.documents),
+    chunks: Number(r.chunks),
+    last_indexed_at: r.last_indexed_at,
+  }));
+}
+
 export interface BrainDocument {
   source_id: string;
   source_type: string;

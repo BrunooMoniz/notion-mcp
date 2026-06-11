@@ -1072,3 +1072,29 @@ details[open] > .explorer-entities-toggle::before { content: '−'; }
   .explorer-entities-toggle { padding: 10px 11px; flex-wrap: wrap; }
   #brain-graph-cy { height: 60vh; min-height: 300px; }
 }
+
+/* ---- explorador em tela cheia (botão ⛶ no toggle Lista|Grafo) ---- */
+#brain-explorer.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  margin: 0;
+  border-radius: 0;
+  overflow-y: auto;
+  max-width: none;
+}
+body.explorer-fs { overflow: hidden; }
+#brain-explorer.fullscreen #brain-graph-cy { height: calc(100vh - 280px); min-height: 320px; }
+
+/* ---- card colapsável (iCal secundário em Fontes) ---- */
+details.card > summary { list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary .card-title::after {
+  content: "▾";
+  font-size: 12px;
+  color: var(--muted, #888);
+  margin-left: 8px;
+  display: inline-block;
+  transition: transform .15s ease;
+}
+details.card[open] > summary .card-title::after { transform: rotate(180deg); }

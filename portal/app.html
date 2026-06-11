@@ -239,6 +239,19 @@
           </details>
         </div>
 
+        <!-- Tarefas no Notion -->
+        <div class="card" id="tasks-card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title"><span class="si" data-icon="notion"></span>Tarefas no Notion <span class="tag" id="tasks-tag">—</span></h2>
+              <p class="card-sub">A base onde sua IA cria e acompanha tarefas. Você pode trocar a base configurada quando quiser.</p>
+            </div>
+          </div>
+          <div class="kv-rows" id="tasks-config-state"></div>
+          <p class="muted js-tasks-msg" style="font-size:13px;margin:8px 0 6px"></p>
+          <div class="task-choice js-tasks-actions"></div>
+        </div>
+
         <!-- Google Calendar -->
         <div class="card">
           <div class="card-head">
@@ -249,35 +262,7 @@
             <button class="btn btn-ghost btn-sm" type="button" id="google-add">Conectar conta Google</button>
           </div>
           <div class="kv-rows" id="google-list"></div>
-        </div>
-
-        <!-- iCal -->
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2 class="card-title"><span class="si" data-icon="calendar"></span>Calendários por link (iCal) <span class="tag" id="ical-tag">0 agendas</span></h2>
-              <p class="card-sub">Links secretos, somente leitura. Funcionam com qualquer agenda, sem conta Google.</p>
-            </div>
-          </div>
-          <div class="kv-rows" id="ical-list"></div>
-          <details class="source-help" style="margin:10px 0">
-            <summary class="source-help-summary">Onde encontro meu link iCal?</summary>
-            <ol class="source-help-steps">
-              <li>No Google Calendar (web), passe o mouse sobre a agenda → <strong>Configurações e compartilhamento</strong>.</li>
-              <li>Role até <strong>Integrar agenda</strong> → copie o <strong>Endereço secreto no formato iCal</strong> (termina em <code>basic.ics</code>).</li>
-              <li>Cole abaixo. Trate o link como uma senha — quem tem o link lê a agenda.</li>
-            </ol>
-          </details>
-          <form id="ical-form" class="stack-v mt-sm">
-            <div>
-              <label for="ical-url">Link iCal secreto</label>
-              <input type="url" id="ical-url" placeholder="https://…/basic.ics" required>
-            </div>
-            <div class="flex wrap">
-              <input type="text" id="ical-label" placeholder="Nome (ex.: Pessoal)" style="flex:1;min-width:160px" aria-label="Nome do calendário">
-              <button class="btn btn-ghost btn-sm" type="submit">Adicionar calendário</button>
-            </div>
-          </form>
+          <p class="muted" style="font-size:12.5px;margin:8px 0 0">Prefere um link em vez de conectar a conta? Veja <strong>Calendários por link (iCal)</strong> no fim da página.</p>
         </div>
 
         <!-- Granola -->
@@ -305,14 +290,46 @@
           </form>
         </div>
 
+        <!-- iCal (secundário — o padrão é conectar a conta Google acima) -->
+        <details class="card" id="ical-card">
+          <summary style="cursor:pointer;list-style:none">
+            <div class="card-head" style="margin:0">
+              <div>
+                <h2 class="card-title"><span class="si" data-icon="calendar"></span>Calendários por link (iCal) <span class="tag" id="ical-tag">0 agendas</span></h2>
+                <p class="card-sub">Alternativa avançada, somente leitura — funciona com qualquer agenda. O padrão é conectar sua conta Google acima.</p>
+              </div>
+            </div>
+          </summary>
+          <div class="kv-rows" id="ical-list"></div>
+          <details class="source-help" style="margin:10px 0">
+            <summary class="source-help-summary">Onde encontro meu link iCal?</summary>
+            <ol class="source-help-steps">
+              <li>No Google Calendar (web), passe o mouse sobre a agenda → <strong>Configurações e compartilhamento</strong>.</li>
+              <li>Role até <strong>Integrar agenda</strong> → copie o <strong>Endereço secreto no formato iCal</strong> (termina em <code>basic.ics</code>).</li>
+              <li>Cole abaixo. Trate o link como uma senha — quem tem o link lê a agenda.</li>
+            </ol>
+          </details>
+          <form id="ical-form" class="stack-v mt-sm">
+            <div>
+              <label for="ical-url">Link iCal secreto</label>
+              <input type="url" id="ical-url" placeholder="https://…/basic.ics" required>
+            </div>
+            <div class="flex wrap">
+              <input type="text" id="ical-label" placeholder="Nome (ex.: Pessoal)" style="flex:1;min-width:160px" aria-label="Nome do calendário">
+              <button class="btn btn-ghost btn-sm" type="submit">Adicionar calendário</button>
+            </div>
+          </form>
+        </details>
+
         <!-- Indexar -->
         <div class="index-bar" id="index-bar">
           <div class="grow">
             <strong style="font-size:14px">Indexar meu Zinom agora</strong>
-            <p class="muted" id="index-sub">A primeira indexação pode levar alguns minutos. Acompanhe em Atividade.</p>
+            <p class="muted" id="index-sub">A primeira indexação pode levar vários minutos, dependendo do tamanho das suas fontes. Avisamos por e-mail quando ela terminar.</p>
             <div class="index-progress hidden" id="index-progress-bar">
               <div class="meter-head"><span id="index-step">Iniciando…</span><strong id="index-pct"></strong></div>
               <div class="meter-track"><div class="meter-bar" id="index-bar-fill" style="width:0%"></div></div>
+              <p class="muted" id="index-note" style="font-size:12px;margin:6px 0 0">Pode fechar esta página — a indexação continua no servidor e você recebe um e-mail quando a primeira terminar. Acompanhe fonte a fonte em Atividade.</p>
             </div>
             <div class="index-done hidden" id="index-done-msg"></div>
           </div>
@@ -364,6 +381,7 @@
             <div class="brain-view-toggle" role="group" aria-label="Modo de visualização">
               <button class="fchip active" id="brain-toggle-lista" type="button">Lista</button>
               <button class="fchip" id="brain-toggle-grafo" type="button">Grafo</button>
+              <button class="fchip" id="brain-fullscreen-btn" type="button" title="Ver em tela cheia (Esc sai)" aria-label="Ver o explorador em tela cheia">⛶ Tela cheia</button>
             </div>
           </div>
 
@@ -940,7 +958,7 @@
         <div class="card">
           <p class="muted" style="line-height:1.65">O Zinom lê suas fontes (Notion, Granola, agendas, web) e transforma tudo em memória pesquisável. Quando você pergunta algo no Claude ou no ChatGPT, o assistente consulta esse índice antes de responder — com busca semântica, sem precisar da palavra exata — e cita a fonte original. O Zinom não gera texto: ele entrega o contexto certo para a IA que você já usa.</p>
           <div class="pipeline" style="margin-top:16px">
-            <div class="pl-col"><span class="pl-k">fontes</span><span class="pl-v" id="guia-pl-fontes">—</span><span class="pl-sub">Notion · reuniões · agendas · web</span></div>
+            <div class="pl-col"><span class="pl-k">fontes</span><span class="pl-v" id="guia-pl-fontes">—</span><span class="pl-sub" id="guia-pl-fontes-sub">Notion · reuniões · agendas · web</span></div>
             <span class="pl-arrow" aria-hidden="true"></span>
             <div class="pl-col hero"><span class="pl-k">zinom</span><span class="pl-v" id="guia-pl-chunks">—</span><span class="pl-sub">trechos pesquisáveis</span></div>
             <span class="pl-arrow" aria-hidden="true"></span>

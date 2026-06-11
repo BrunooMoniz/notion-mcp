@@ -537,7 +537,9 @@ export function createPortalRouter(): express.Router {
   // Trigger a per-account index over all three sources (US3) ------------------
   // Dedup by account so a friend can't spam concurrent full re-embeds (each runs
   // paid Voyage embeddings) — same in-flight guard the onboarding path uses.
-  const reindexInFlight = new Set<string>();
+  // Map accountId -> when the in-flight reindex started (feeds the honest
+  // per-source "indexando"/"ok" split in /portal/status).
+  const reindexInFlight = new Map<string, Date>();
   router.post("/portal/reindex", requireSession, async (_req, res) => {
     const accountId: string = res.locals.accountId;
     if (reindexInFlight.has(accountId)) {
@@ -546,8 +548,13 @@ export function createPortalRouter(): express.Router {
     }
     try {
       const { indexAccount } = await import("../rag/index-account.js");
-      reindexInFlight.add(accountId);
+      reindexInFlight.set(accountId, new Date());
       void indexAccount(accountId)
+        .then(async (totals) => {
+          // Primeira indexação concluída → avisa por e-mail (uma vez por conta).
+          const { notifyFirstIndexDone } = await import("./first-index-notify.js");
+          await notifyFirstIndexDone(accountId, totals);
+        })
         .catch((e) => console.error(`[portal] reindex ${accountId} failed: ${e?.message ?? e}`))
         .finally(() => reindexInFlight.delete(accountId));
       res.status(202).json({ started: true });
@@ -569,7 +576,7 @@ export function createPortalRouter(): express.Router {
     let activitySources: unknown[] = [];
     let counts: unknown = { bySource: [], totals: { documents: 0, chunks: 0 } };
     try {
-      const { getStatus, getBrainCounts } = await import("../rag/storage.js");
+      const { getStatus, getBrainCounts, getActivitySourceCounts } = await import("../rag/storage.js");
       const { summarizeStatus } = await import("../rag/status.js");
       const { buildActivitySources } = await import("./activity-status.js");
       const { listNotionWorkspaces: lnw } = await import("./notion-workspaces.js");
@@ -577,10 +584,11 @@ export function createPortalRouter(): express.Router {
       const { getGranolaMasked: ggm } = await import("./sources.js");
       const { listGoogleAccountsMasked: lgam } = await import("../google/google-accounts.js");
 
-      const [rawRuns, brainCounts, notionWs, icalLinks, granolaState, googleAccounts] =
+      const [rawRuns, brainCounts, liveCountRows, notionWs, icalLinks, granolaState, googleAccounts] =
         await Promise.all([
           getStatus(accountId),
           getBrainCounts(accountId),
+          getActivitySourceCounts(accountId).catch(() => []),
           lnw(accountId).catch(() => [] as { workspace: string; name: string | null }[]),
           lim(accountId).catch(() => [] as { id: string; label: string }[]),
           ggm(accountId).catch(() => ({ set: false, masked: null })),
@@ -588,6 +596,9 @@ export function createPortalRouter(): express.Router {
         ]);
 
       const summarized = summarizeStatus(rawRuns);
+      const liveCounts = new Map(
+        liveCountRows.map((r) => [r.source_key, { documents: r.documents, chunks: r.chunks }]),
+      );
       activitySources = buildActivitySources(
         {
           notionWorkspaces: notionWs.map((w) => ({ workspace: w.workspace, name: w.name })),
@@ -597,6 +608,7 @@ export function createPortalRouter(): express.Router {
         },
         summarized,
         running,
+        { liveCounts, runningSince: reindexInFlight.get(accountId) ?? null },
       );
       counts = brainCounts;
     } catch (err: any) {
