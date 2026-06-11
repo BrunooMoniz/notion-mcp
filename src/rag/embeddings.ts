@@ -4,7 +4,9 @@ import pg from "pg";
 import { getAccountId } from "../context.js";
 import { recordUsage } from "./usage.js";
 
-const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
+// Overridable p/ rotear por um egress IPv6 (ex.: Worker zinom-egress) quando o
+// IPv4 da VPS está fora — api.voyageai.com é v4-only. Sem env = endpoint direto.
+const VOYAGE_URL = process.env.VOYAGE_EMBEDDINGS_URL ?? "https://api.voyageai.com/v1/embeddings";
 const MODEL = process.env.EMBEDDING_MODEL ?? "voyage-3-large";
 const DIM = Number(process.env.EMBEDDING_DIM ?? 1024);
 
