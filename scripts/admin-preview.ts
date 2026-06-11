@@ -13,6 +13,11 @@ import { buildFunnel } from "../src/admin/business.js";
 
 const PORT = Number(process.env.ADMIN_PREVIEW_PORT ?? 4799);
 
+// Render calls checkCostAlert() (fire-and-forget). Neutralize any real alert
+// config inherited from the dev's shell so previews/tests never push to ntfy.
+process.env.COST_ALERT_USD = "999999";
+process.env.NTFY_URL = "";
+
 // Frozen "now" so the rendered page is deterministic.
 const NOW = new Date("2026-06-11T12:00:00Z").toISOString();
 const MONTH_START = new Date(Date.UTC(2026, 5, 1)); // 2026-06-01

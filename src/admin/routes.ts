@@ -1014,6 +1014,8 @@ code{
   display:flex;align-items:center;gap:12px;
 }
 .banner-fixed .banner-msg{flex:1}
+/* Mobile: stick below the sticky topbar (z-60) instead of sliding under it. */
+@media(max-width:899px){.banner-fixed{top:54px}}
 .banner-close{
   background:none;border:none;cursor:pointer;
   color:inherit;font-size:18px;line-height:1;padding:0 4px;
@@ -1021,9 +1023,8 @@ code{
 }
 .banner-close:hover{opacity:.7}
 /* Error variant: POST handlers redirect with &kind=err on failure. Errors must
-   not wear the success green. (Named banner-err: a plain "err" class would
-   collide with the index-error text class below, whose max-width:360px shrank
-   the banner.) */
+   not wear the success green. (Named banner-err, not "err", to avoid colliding
+   with other short class names.) */
 .banner-fixed.banner-err{
   background:#fdecec;border-color:rgba(154,40,32,.25);color:#9a2820;
 }
@@ -1153,10 +1154,6 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 
 /* --- Inline form row --- */
 .inline-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-
-/* --- Error details (expandable) --- */
-.err-details>summary{font-size:11.5px;color:#9a2820;cursor:pointer}
-.err{margin-top:4px;color:#9a2820;font-size:11px;line-height:1.4;max-width:360px;word-break:break-word}
 
 /* --- Funnel bars --- */
 .funnel-wrap{max-width:540px;display:flex;flex-direction:column;gap:14px}
@@ -1567,7 +1564,7 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       const msg = revoked
         ? `Cortesia removida de ${account}. Plano voltou para free.`
         : `Conta ${account} não está em cortesia — nenhuma ação.`;
-      res.redirect(`${back}&msg=${encodeURIComponent(msg)}#contas`);
+      res.redirect(`${back}&msg=${encodeURIComponent(msg)}${revoked ? "" : "&kind=err"}#contas`);
     } catch (err: any) {
       console.error(`[admin] revoke-unlimited failed: ${err?.message ?? err}`);
       res.redirect(`${back}&msg=${encodeURIComponent(`Falha ao remover cortesia: ${err?.message ?? "erro"}`)}&kind=err#contas`);

@@ -136,6 +136,14 @@ test.describe("admin desktop", () => {
     );
     expect(noOverflow, "página não pode ter scroll horizontal").toBe(true);
 
+    // ...nem DENTRO do wrapper da tabela: .table-wrap tem overflow-x:auto, então
+    // a tabela poderia estourar e rolar internamente sem afetar o scrollWidth
+    // da página. O critério A3 é caber em 1440px de verdade.
+    const noTableOverflow = await page
+      .locator("#contas .table-wrap")
+      .evaluate((el) => el.scrollWidth <= el.clientWidth);
+    expect(noTableOverflow, "tabela de contas não pode rolar horizontalmente em 1440px").toBe(true);
+
     // Todas as linhas de detalhe começam ocultas.
     const details = page.locator("tr.acct-detail");
     const detailCount = await details.count();
