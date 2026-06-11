@@ -68,3 +68,20 @@ None were tried and discarded — 3a was kept, 3b was no-op, 3c is dormant.
 |----------|----------|-----|------|
 | Nora <> Woovi próximos passos | 0 | 0.125 | chunk_index=6 still ranks 8th even after dedup |
 | Alinhamento Nora PNA (q22) | 0 | 0 | Golden set entry had wrong expect URL; question ambiguous |
+
+## 2026-06-11 — fix/hnsw-multitenant-recall (ef_search=200 + iterative_scan=strict_order)
+
+| metric | baseline (post-3a) | main em 2026-06-11 | com fix |
+|---|---|---|---|
+| Recall@5 | 0.917 | 0.917 | 0.833 |
+| MRR | 0.616 | 0.610 | 0.597 |
+
+**Exceção justificada à regra "manter ou melhorar":** o scan HNSW ranqueia
+candidatos globalmente e o filtro de account/workspace é pós-scan; com vários
+tenants de conteúdo quase idêntico, o ef_search default (40) colapsava a busca
+semântica de contas friend para ZERO resultados em queries naturais
+(reproduzido: "reunião Parfin Global Cripto" → 0 rows; com ef_search=400 → 10).
+O eval mede só a conta owner e não captura esse modo de falha. Custo medido no
+owner: 3/24 perguntas com o doc esperado deslizando do rank 3-5 para 6-8
+(dilução do RRF/dedup com o pool semântico completo). Follow-up de tuning
+possível: dedup por melhor score de rerank em vez de RRF.
