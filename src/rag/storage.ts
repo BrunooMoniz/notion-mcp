@@ -534,7 +534,10 @@ export async function searchSemantic(
       await client.query(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`);
       try {
         // pgvector >= 0.8 only; best-effort (older versions just keep ef_search).
-        await client.query("SET LOCAL hnsw.iterative_scan = relaxed_order");
+        // strict_order: keeps scanning until LIMIT rows survive the filter while
+        // preserving exact distance order (relaxed_order can truncate better
+        // candidates at the LIMIT because rows arrive approximately ordered).
+        await client.query("SET LOCAL hnsw.iterative_scan = strict_order");
       } catch {
         /* pgvector < 0.8: parameter does not exist */
       }
