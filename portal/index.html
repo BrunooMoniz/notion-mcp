@@ -3,413 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zinom</title>
-<meta name="description" content="Zinom.ai conecta suas reuniões, anotações do Notion e calendários num segundo cérebro pesquisável — e entrega o contexto certo para a sua IA preferida.">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Zinom · dê memória à sua IA</title>
+<meta name="description" content="O Zinom conecta suas reuniões, anotações do Notion e calendários num cérebro pesquisável e dá memória ao ChatGPT, ao Claude.ai, ao Claude Code ou a qualquer IA via MCP.">
 
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>
 @import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.2.6/index.css');
 @import url('https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.2.6/index.css');
 </style>
-
-<style>
-:root{
-  --bg:#ffffff;
-  --paper:#f7f6f3;
-  --paper-2:#f1efe9;
-  --ink:#26241f;
-  --ink-soft:#4a4740;
-  --muted:#827d73;
-  --line:#eae7df;
-  --line-2:#e0ddd3;
-  --accent:#1f8b4c;
-  --accent-ink:#15643789;
-  --accent-strong:#15633a;
-  --accent-soft:#ecf5ef;
-  --accent-ring:rgba(31,139,76,.18);
-  --r:16px;
-  --r-sm:11px;
-  --r-xs:8px;
-  --shadow-sm:0 1px 2px rgba(38,36,31,.05), 0 1px 1px rgba(38,36,31,.04);
-  --shadow:0 12px 32px -12px rgba(38,36,31,.18), 0 4px 10px -6px rgba(38,36,31,.10);
-  --shadow-lg:0 28px 70px -26px rgba(38,36,31,.32), 0 8px 22px -14px rgba(38,36,31,.14);
-  --maxw:1080px;
-  --sans:"Geist Variable","Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  --mono:"Geist Mono Variable","Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
-}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{
-  margin:0;
-  font-family:var(--sans);
-  color:var(--ink);
-  background:var(--bg);
-  line-height:1.5;
-  -webkit-font-smoothing:antialiased;
-  text-rendering:optimizeLegibility;
-}
-a{color:inherit;text-decoration:none}
-h1,h2,h3,p{margin:0}
-::selection{background:var(--accent-ring)}
-
-.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
-
-/* ---------- Nav ---------- */
-.nav{
-  position:sticky;top:0;z-index:40;
-  background:rgba(255,255,255,.82);
-  backdrop-filter:saturate(150%) blur(14px);
-  border-bottom:1px solid transparent;
-  transition:border-color .25s ease, background .25s ease;
-}
-.nav.scrolled{border-color:var(--line);background:rgba(255,255,255,.9)}
-.nav-inner{display:flex;align-items:center;justify-content:space-between;height:66px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.02em;font-size:18px}
-.brand .mark{flex:0 0 auto}
-.nav-links{display:flex;align-items:center;gap:30px}
-.nav-links a.lnk{font-size:14.5px;color:var(--ink-soft);font-weight:480;transition:color .15s}
-.nav-links a.lnk:hover{color:var(--ink)}
-.nav-cta{display:flex;align-items:center;gap:14px}
-
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  font-family:var(--sans);font-size:14.5px;font-weight:540;letter-spacing:-.01em;
-  border-radius:var(--r-sm);padding:9px 17px;cursor:pointer;border:1px solid transparent;
-  transition:transform .12s ease, background .15s ease, box-shadow .15s ease, border-color .15s;
-  white-space:nowrap;
-}
-.btn:active{transform:translateY(1px)}
-.btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(21,99,55,.25)}
-.btn-primary:hover{background:var(--accent-strong);box-shadow:0 6px 16px -6px rgba(21,99,55,.5)}
-.btn-ghost{background:transparent;color:var(--ink);border-color:var(--line-2)}
-.btn-ghost:hover{background:var(--paper);border-color:var(--line-2)}
-.btn-lg{padding:13px 24px;font-size:15.5px;border-radius:12px}
-.btn-block{width:100%}
-
-/* ---------- Hero ---------- */
-.hero{position:relative;padding:78px 0 40px;overflow:hidden}
-.hero::before{
-  content:"";position:absolute;inset:0;z-index:-1;
-  background:
-    radial-gradient(60% 50% at 50% -8%, var(--accent-soft) 0%, rgba(255,255,255,0) 62%),
-    #fff;
-}
-.hero.no-glow::before{background:#fff}
-.hero-grid{
-  display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;
-}
-.eyebrow{
-  display:inline-flex;align-items:center;gap:8px;
-  font-size:12.5px;font-weight:560;letter-spacing:.01em;color:var(--accent-strong);
-  background:var(--accent-soft);border:1px solid #d7e9de;
-  padding:6px 12px 6px 10px;border-radius:999px;margin-bottom:22px;
-}
-.eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
-h1.title{
-  font-size:clamp(38px,5vw,58px);line-height:1.04;font-weight:600;letter-spacing:-.035em;
-  margin-bottom:20px;text-wrap:balance;
-}
-h1.title em{font-style:normal;color:var(--accent-strong)}
-.lede{font-size:clamp(17px,1.5vw,19px);color:var(--ink-soft);max-width:30em;text-wrap:pretty;line-height:1.55}
-.hero-meta{display:flex;gap:24px;margin-top:30px;flex-wrap:wrap}
-.hero-meta .m{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--muted)}
-.hero-meta .m svg{color:var(--accent)}
-
-/* ---------- Access card ---------- */
-.access{
-  background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
-  box-shadow:var(--shadow-lg);padding:7px;position:relative;
-}
-.access-head{padding:20px 22px 6px}
-.access-head h3{font-size:17px;font-weight:580;letter-spacing:-.02em}
-.access-head p{font-size:13.5px;color:var(--muted);margin-top:3px}
-.tabs{display:flex;gap:4px;background:var(--paper);border-radius:var(--r-sm);padding:4px;margin:14px 16px 0}
-.tab{
-  flex:1;text-align:center;font-size:13px;font-weight:520;color:var(--muted);white-space:nowrap;
-  padding:9px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;
-  transition:all .16s ease;
-}
-.tab.active{background:var(--bg);color:var(--ink);box-shadow:var(--shadow-sm);border-color:var(--line)}
-.pane{padding:18px 22px 20px;display:none}
-.pane.active{display:block}
-.pane.anim{animation:fade .28s ease}
-@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-.field{margin-bottom:13px}
-.field label{display:block;font-size:12.5px;font-weight:540;color:var(--ink-soft);margin-bottom:6px}
-.field input{
-  width:100%;font-family:var(--sans);font-size:14.5px;color:var(--ink);
-  padding:11px 13px;border:1px solid var(--line-2);border-radius:var(--r-xs);background:var(--bg);
-  transition:border-color .15s, box-shadow .15s;
-}
-.field input::placeholder{color:#b3aea3}
-.field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3.5px var(--accent-ring)}
-.pane .hint{font-size:12px;color:var(--muted);margin-top:12px;text-align:center;line-height:1.5}
-.pane .hint a{color:var(--accent-strong);font-weight:520;border-bottom:1px solid transparent}
-.pane .hint a:hover{border-color:var(--accent-strong)}
-.field-err{font-size:12px;color:#b3261e;margin-top:7px;display:none}
-.field-err.show{display:block}
-.card-note{
-  margin:0 16px;padding:10px 13px;border-radius:var(--r-xs);font-size:12.5px;line-height:1.45;
-  background:#fdecec;border:1px solid #f4c9c5;color:#9a2820;display:none;
-}
-.card-note.show{display:block}
-.ok-msg{
-  display:none;text-align:center;padding:10px 8px 6px;
-}
-.ok-msg.show{display:block;animation:fade .3s ease}
-.ok-msg .check{
-  width:46px;height:46px;border-radius:50%;background:var(--accent-soft);
-  display:grid;place-items:center;margin:0 auto 14px;color:var(--accent);
-}
-.ok-msg h4{font-size:16px;font-weight:580;margin-bottom:5px}
-.ok-msg p{font-size:13.5px;color:var(--muted);max-width:24em;margin:0 auto}
-
-/* ---------- Logos / social proof strip ---------- */
-.strip{padding:30px 0 6px}
-.strip .lbl{text-align:center;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:20px;font-weight:540}
-.sources{display:flex;justify-content:center;align-items:center;gap:14px;flex-wrap:wrap}
-.source-chip{
-  display:inline-flex;align-items:center;gap:9px;font-size:14px;font-weight:500;color:var(--ink-soft);
-  border:1px solid var(--line);background:var(--bg);padding:9px 15px;border-radius:999px;box-shadow:var(--shadow-sm);
-}
-.source-chip svg,.source-chip .ic{width:17px;height:17px;flex:0 0 auto}
-
-/* ---------- Section shell ---------- */
-.section{padding:84px 0}
-.section.alt{background:var(--paper);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.sec-head{max-width:34em;margin:0 auto 52px;text-align:center}
-.sec-tag{font-size:12.5px;font-weight:560;letter-spacing:.02em;color:var(--accent-strong);margin-bottom:12px}
-.sec-head h2{font-size:clamp(28px,3.4vw,38px);font-weight:600;letter-spacing:-.03em;line-height:1.1;text-wrap:balance}
-.sec-head p{font-size:16.5px;color:var(--ink-soft);margin-top:14px;text-wrap:pretty}
-
-/* ---------- How it works ---------- */
-.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;position:relative}
-.step{
-  background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:26px 24px 28px;
-  position:relative;box-shadow:var(--shadow-sm);transition:transform .2s ease, box-shadow .2s ease;
-}
-.step:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-.step .num{
-  font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);
-  background:var(--accent-soft);border:1px solid #d7e9de;width:30px;height:30px;border-radius:9px;
-  display:grid;place-items:center;margin-bottom:18px;
-}
-.step h3{font-size:18px;font-weight:580;letter-spacing:-.02em;margin-bottom:8px}
-.step p{font-size:14.5px;color:var(--ink-soft);line-height:1.55}
-.step .icons{display:flex;gap:8px;margin-top:18px}
-.step .mini{
-  width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--paper);
-  display:grid;place-items:center;
-}
-.step .mini svg,.step .mini .ic{width:18px;height:18px}
-
-/* ---------- Chat demo ---------- */
-.demo-grid{display:grid;grid-template-columns:.85fr 1.15fr;gap:48px;align-items:center}
-.demo-copy h2{font-size:clamp(26px,3vw,34px);font-weight:600;letter-spacing:-.03em;line-height:1.12;text-wrap:balance}
-.demo-copy p{font-size:16px;color:var(--ink-soft);margin-top:16px;line-height:1.6;text-wrap:pretty}
-.feat-list{margin-top:26px;display:flex;flex-direction:column;gap:14px}
-.feat-list .fi{display:flex;gap:13px;align-items:flex-start}
-.feat-list .fi .fic{
-  flex:0 0 auto;width:30px;height:30px;border-radius:9px;background:var(--accent-soft);
-  display:grid;place-items:center;color:var(--accent-strong);margin-top:1px;
-}
-.feat-list .fi b{font-weight:560;font-size:14.5px}
-.feat-list .fi span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
-
-.chat{
-  background:var(--bg);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-lg);
-  overflow:hidden;
-}
-.chat-bar{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--paper)}
-.chat-bar .dots{display:flex;gap:6px}
-.chat-bar .dots i{width:11px;height:11px;border-radius:50%;background:#e2ded3;display:block}
-.chat-bar .ttl{font-size:12.5px;color:var(--muted);margin-left:6px;font-weight:500;display:flex;align-items:center;gap:7px}
-.chat-bar .ttl .mk{width:15px;height:15px}
-.chat-body{padding:20px 18px 22px;display:flex;flex-direction:column;gap:16px;min-height:300px}
-.msg{display:flex;gap:11px;max-width:100%}
-.msg .av{flex:0 0 auto;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:13px}
-.msg.user{justify-content:flex-end}
-.msg.user .bubble{background:var(--accent);color:#fff;border-radius:13px 13px 4px 13px;padding:10px 14px;font-size:14px;max-width:78%;box-shadow:0 1px 2px rgba(21,99,55,.2)}
-.msg.ai .av{background:var(--ink);color:#fff}
-.msg.ai .stack{display:flex;flex-direction:column;gap:10px;max-width:88%}
-.tool-call{
-  font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);
-  background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:8px 11px;
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-}
-.tool-call .tk{color:var(--accent-strong);font-weight:600}
-.tool-call .arg{color:var(--muted)}
-.tool-call .score{margin-left:auto;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 6px;font-size:10.5px}
-.bubble.ai{background:var(--paper);border:1px solid var(--line);border-radius:13px 13px 13px 4px;padding:12px 14px;font-size:14px;color:var(--ink);line-height:1.55}
-.bubble.ai strong{font-weight:580}
-.cites{display:flex;flex-direction:column;gap:7px;margin-top:11px;padding-top:11px;border-top:1px dashed var(--line-2)}
-.cite{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--ink-soft);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 9px;transition:border-color .15s}
-.cite:hover{border-color:var(--line-2)}
-.cite .ci{width:15px;height:15px;flex:0 0 auto}
-.cite .ttl{font-weight:500;color:var(--ink)}
-.cite .meta{color:var(--muted);margin-left:auto;font-size:11px}
-.typing{display:inline-flex;gap:3px;padding:3px 0}
-.typing i{width:6px;height:6px;border-radius:50%;background:var(--muted);opacity:.4;animation:blink 1.2s infinite}
-.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
-@keyframes blink{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
-
-/* client selector */
-.cb-brand{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:560;color:var(--ink)}
-.cb-brand .mk{width:17px;height:17px;display:inline-flex}
-.cb-sep{color:var(--muted);font-weight:460;font-size:11px;font-family:var(--mono)}
-.clients{display:flex;gap:3px;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px}
-.cl{display:inline-flex;align-items:center;gap:5px;font-family:var(--sans);font-size:11.5px;font-weight:520;color:var(--muted);background:transparent;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;transition:all .15s}
-.cl .ic{width:14px;height:14px;display:inline-flex;flex:0 0 auto}
-.cl:hover{color:var(--ink)}
-.cl.active{background:var(--paper);color:var(--ink);box-shadow:var(--shadow-sm)}
-/* prompt chips */
-.chat-prompts{display:flex;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg);flex-wrap:wrap}
-.cp{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;transition:all .15s}
-.cp:hover{border-color:var(--line-2);color:var(--ink)}
-.cp.active{background:var(--accent-soft);border-color:#cfe6d8;color:var(--accent-strong);font-weight:540}
-/* tool chip mark */
-.tool-call .tmk{width:13px;height:13px;display:inline-flex;flex:0 0 auto}
-/* action cards */
-.actions{display:flex;flex-direction:column;gap:7px;margin-top:11px}
-.action{display:flex;align-items:center;gap:9px;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
-.action .ck{flex:0 0 auto;width:19px;height:19px;border-radius:50%;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
-.action .ai-ic{width:16px;height:16px;flex:0 0 auto;display:inline-flex}
-.action .col{display:flex;flex-direction:column;min-width:0}
-.action .tt{font-size:12.5px;font-weight:540;color:var(--ink)}
-.action .mt{font-size:11.5px;color:var(--muted);margin-top:1px}
-/* demo note */
-.demo-note{font-size:13px;color:var(--muted);margin-top:22px;font-weight:500}
-
-/* terminal (Claude Code CLI) */
-.chat-body.term{display:block;background:#1b1a18;color:#d6d2c8;font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:18px 18px 22px}
-.term .tl{white-space:pre-wrap;word-break:break-word}
-.term .dim{color:#807a6c}
-.term .cmd{color:#ece7db}
-.term .pr{color:#5fd08a;font-weight:700}
-.term .q{color:#fff}
-.term .tool{margin-top:11px}
-.term .tool .bullet{color:#5fd08a}
-.term .tool .fn{color:#bfe6cc}
-.term .tool .str{color:#e6c486}
-.term .sub{color:#807a6c}
-.term .ck{color:#5fd08a;font-weight:700}
-.term .ans{color:#e6e1d6;margin:12px 0 2px;white-space:normal}
-.term .ans strong{color:#fff;font-weight:600}
-.term .ftitle{margin-top:12px}
-.term .ref{color:#cfcabd}
-.term .done{margin-top:4px}
-.term .done .q{margin:0 6px}
-.term .tag{display:inline-block;min-width:54px;color:#1b1a18;border-radius:4px;padding:1px 7px;margin-right:9px;font-size:10px;font-weight:700;text-align:center;letter-spacing:.01em;white-space:nowrap}
-.term .tag.notion{background:#e7e3da}
-.term .tag.granola{background:#f6c544}
-.term .tag.calendar{background:#7fb0ee}
-.term .tag.ref{background:#a8a294}
-.term .cursor{display:inline-block;width:7px;height:14px;background:#d6d2c8;vertical-align:-2px;margin-top:8px;animation:tblink 1s steps(2,end) infinite}
-@keyframes tblink{50%{opacity:0}}
-
-/* diagram */
-.diagram{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:nowrap;margin:0 auto;max-width:800px}
-.dg-col{display:flex;flex-direction:column;gap:11px}
-.dg-node{display:inline-flex;align-items:center;gap:9px;font-size:14px;font-weight:500;color:var(--ink-soft);background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:10px 14px;box-shadow:var(--shadow-sm);white-space:nowrap}
-.dg-node .ic{width:18px;height:18px;display:inline-flex;flex:0 0 auto}
-.dg-wire{position:relative;flex:1 1 auto;min-width:34px;max-width:84px;height:2px;background:var(--line-2);margin:0 12px;border-radius:2px}
-.dg-wire .pulse{position:absolute;top:50%;left:0;width:7px;height:7px;border-radius:50%;background:var(--accent);transform:translateY(-50%);box-shadow:0 0 0 3px var(--accent-ring);animation:dgflow 1.9s linear infinite}
-.dg-wire .pulse.d2{animation-delay:.95s}
-@keyframes dgflow{0%{left:0;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
-@keyframes dgflowv{0%{top:0;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:100%;opacity:0}}
-.dg-hub{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;justify-content:center;width:104px;height:104px;border-radius:22px;background:var(--accent-soft);border:1px solid #cfe6d8;color:var(--accent-strong);font-weight:600;font-size:14px}
-.dg-hub .mk{width:36px;height:36px;display:inline-flex}
-.steps3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:800px;margin:46px auto 0}
-.s3{text-align:center}
-.s3 b{display:block;font-size:15px;font-weight:580;letter-spacing:-.01em;margin-bottom:4px;color:var(--ink)}
-.s3 span{font-size:13.5px;color:var(--muted)}
-@media(max-width:680px){
-  .diagram{flex-direction:column}
-  .dg-wire{width:2px;height:34px;max-width:none;flex:0 0 auto;margin:4px 0}
-  .dg-wire .pulse{left:50%;top:0;transform:translateX(-50%);animation-name:dgflowv}
-  .steps3{grid-template-columns:1fr;gap:16px}
-  .s3{text-align:left}
-}
-
-/* ---------- Pricing ---------- */
-.pricing-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:stretch}
-.plan{display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:24px 22px;box-shadow:var(--shadow-sm);position:relative;transition:transform .2s ease, box-shadow .2s ease}
-.plan:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-.plan.featured{border-color:#cfe6d8;box-shadow:var(--shadow)}
-.plan .badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;letter-spacing:.02em;color:#fff;background:var(--accent);border-radius:999px;padding:4px 12px;white-space:nowrap}
-.plan .pname{font-size:16px;font-weight:580;letter-spacing:-.02em}
-.plan .pdesc{font-size:12.5px;color:var(--muted);margin-top:4px;min-height:32px}
-.plan .price{display:flex;align-items:baseline;gap:2px;margin:14px 0 6px}
-.plan .price .cur{font-size:15px;font-weight:560;color:var(--ink-soft)}
-.plan .price .amt{font-size:34px;font-weight:600;letter-spacing:-.03em}
-.plan .price .per{font-size:13px;color:var(--muted)}
-.plan .pfeats{list-style:none;padding:0;margin:16px 0 22px;display:flex;flex-direction:column;gap:10px;flex:1}
-.plan .pfeats li{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--ink-soft);line-height:1.4}
-.plan .pfeats li svg{flex:0 0 auto;color:var(--accent);margin-top:1px}
-.plan .pfeats li.off{color:#b7b2a7}
-.plan .pfeats li.off svg{color:#d4cfc4}
-.plan-note{text-align:center;font-size:13.5px;color:var(--muted);margin-top:26px}
-@media(max-width:900px){.pricing-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:520px){.pricing-grid{grid-template-columns:1fr}}
-
-/* reveal — opacity:0 only applied once JS confirms (html.reveal-ready), so
-   content is always visible if JS/IO fail */
-.reveal{transition:opacity .6s ease, transform .6s ease}
-html.reveal-ready .reveal{opacity:0;transform:translateY(14px)}
-html.reveal-ready .reveal.in{opacity:1;transform:none}
-
-/* ---------- Footer ---------- */
-.footer{padding:56px 0 40px;border-top:1px solid var(--line);background:var(--bg)}
-.foot-grid{display:flex;justify-content:space-between;align-items:flex-start;gap:40px;flex-wrap:wrap}
-.foot-brand{max-width:24em}
-.foot-brand p{font-size:13.5px;color:var(--muted);margin-top:14px;line-height:1.6}
-.foot-cols{display:flex;gap:64px;flex-wrap:wrap}
-.foot-col h5{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:560;margin-bottom:14px}
-.foot-col a{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);padding:5px 0;transition:color .15s}
-.foot-col a:hover{color:var(--accent-strong)}
-.foot-bot{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:44px;padding-top:22px;border-top:1px solid var(--line);flex-wrap:wrap}
-.foot-bot small{font-size:12.5px;color:var(--muted)}
-.foot-bot .made{font-size:12.5px;color:var(--muted);font-family:var(--mono)}
-
-/* ---------- responsive ---------- */
-@media (max-width:900px){
-  .hero-grid{grid-template-columns:1fr;gap:40px}
-  .demo-grid{grid-template-columns:1fr;gap:36px}
-  .flow{grid-template-columns:1fr;gap:14px}
-  .nav-links{display:none}
-}
-@media (max-width:560px){
-  .wrap{padding:0 18px}
-  .hero{padding:52px 0 30px}
-  .section{padding:60px 0}
-  .hero-meta{gap:16px}
-}
-</style>
+<link rel="stylesheet" href="/landing.css">
 </head>
 <body>
 
 <!-- ============ NAV ============ -->
 <header class="nav" id="nav">
   <div class="wrap nav-inner">
-    <a href="#top" class="brand">
-      <span class="mark" aria-hidden="true">
-        <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-          <rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/>
-          <path d="M8 8 H18 L8 18 H18" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="8" cy="8" r="1.7" fill="#fff"/>
-          <circle cx="18" cy="8" r="1.7" fill="#fff"/>
-          <circle cx="8" cy="18" r="1.7" fill="#fff"/>
-          <circle cx="18" cy="18" r="1.7" fill="#fff"/>
-        </svg>
-      </span>
-      <span>Zinom</span>
-    </a>
+    <a href="#top" class="brand"><span class="ic" data-ic="zinom" style="width:26px;height:26px"></span><span>Zinom</span></a>
     <nav class="nav-links">
-      <a class="lnk" href="#demo">Demonstração</a>
       <a class="lnk" href="#como">Como funciona</a>
+      <a class="lnk" href="#alimente">Alimentar o cérebro</a>
+      <a class="lnk" href="#usar">Usar na sua IA</a>
       <a class="lnk" href="#planos">Planos</a>
-      <a class="lnk" href="https://github.com/BrunooMoniz/notion-mcp" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <div class="nav-cta">
       <a class="btn btn-ghost" href="/login.html">Entrar</a>
@@ -424,13 +39,19 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
 <section class="hero">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <span class="eyebrow"><span class="dot"></span> Servidor MCP · auto-hospedado</span>
-      <h1 class="title">Um <em>segundo cérebro</em> para a sua IA preferida.</h1>
-      <p class="lede">O Zinom reúne suas reuniões, anotações do Notion e calendários — e entrega o contexto certo para a IA que você já usa. Não é mais uma IA: é a memória da sua.</p>
-      <div class="hero-meta">
-        <span class="m"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg> Funciona na sua IA</span>
-        <span class="m"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg> Respostas com a fonte</span>
-        <span class="m"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg> Roda no seu servidor</span>
+      <span class="eyebrow"><span class="dot"></span> Conexão MCP · funciona com qualquer IA</span>
+      <h1 class="title">Dê <em>memória</em> ao seu ChatGPT, Claude.ai ou Claude Code.</h1>
+      <p class="lede">Sua IA não conhece suas reuniões, suas notas nem sua agenda. O Zinom é a conexão que liga essas fontes à IA que você já usa e transforma seu dia a dia em memória pesquisável.</p>
+      <div class="hero-eq" aria-label="Notion + Reuniões + Agenda viram memória da sua IA">
+        <span class="eq-chip"><span class="ic" data-ic="notion"></span>Notion</span>
+        <span class="eq-op">+</span>
+        <span class="eq-chip"><span class="ic" data-ic="granola"></span>Reuniões</span>
+        <span class="eq-op">+</span>
+        <span class="eq-chip"><span class="ic" data-ic="calendar"></span>Agenda</span>
+        <span class="eq-op">→</span>
+        <span class="eq-chip zin"><span class="ic" data-ic="zinom"></span>Zinom</span>
+        <span class="eq-op">→</span>
+        <span class="eq-chip ai">sua IA, com memória</span>
       </div>
     </div>
 
@@ -439,16 +60,13 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
       <div class="access-head">
         <h3>Acesse o Zinom</h3>
         <p>Use seu código de convite ou peça acesso à lista de espera.</p>
+        <p class="access-note" id="error"></p>
       </div>
       <div class="tabs" role="tablist">
-        <div class="tab active" data-tab="invite" role="tab">Convite</div>
+        <div class="tab active" data-tab="invite" role="tab">Tenho convite</div>
         <div class="tab" data-tab="waitlist" role="tab">Pedir convite</div>
-        <div class="tab" data-tab="login" role="tab">Entrar</div>
       </div>
 
-      <div id="error" class="card-note" role="alert"></div>
-
-      <!-- Invite -->
       <div class="pane active" data-pane="invite">
         <form id="register-form" data-form="invite">
           <div class="field">
@@ -460,19 +78,18 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
             <input id="reg-email" name="email" type="email" placeholder="voce@email.com" required>
           </div>
           <button class="btn btn-primary btn-lg btn-block" type="submit">Criar conta</button>
-          <p class="field-err" data-err="invite">E-mail inválido. Confira e tente de novo.</p>
+          <p class="field-err" data-err="invite">Convite inválido ou já usado. Confira o código e tente de novo.</p>
           <p class="hint">Ao continuar você concorda com os termos de uso.</p>
         </form>
         <div class="ok-msg" id="sent" data-ok="invite">
-          <div class="check"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <div class="check"><span class="ic" data-ic="check" style="width:24px;height:24px"></span></div>
           <h4>Tudo certo</h4>
           <p>Enviamos um link de acesso para o seu e-mail. Confira a caixa de entrada.</p>
         </div>
       </div>
 
-      <!-- Waitlist -->
       <div class="pane" data-pane="waitlist">
-        <form id="request-form" data-form="waitlist">
+        <form data-form="waitlist">
           <div class="field">
             <label for="req-email">Seu e-mail</label>
             <input id="req-email" name="email" type="email" placeholder="voce@email.com" required>
@@ -482,37 +99,19 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
             <input id="req-note" name="note" type="text" placeholder="Ex.: organizar reuniões e notas do trabalho">
           </div>
           <button class="btn btn-primary btn-lg btn-block" type="submit">Entrar na lista de espera</button>
-          <p class="field-err" data-err="waitlist">E-mail inválido. Confira e tente de novo.</p>
+          <p class="field-err" data-err="waitlist">Não deu certo. Confira o e-mail e tente de novo.</p>
           <p class="hint">Liberamos convites em lotes. Sem spam.</p>
         </form>
         <div class="ok-msg" data-ok="waitlist">
-          <div class="check"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <div class="check"><span class="ic" data-ic="check" style="width:24px;height:24px"></span></div>
           <h4>Você está na lista</h4>
           <p>Avisaremos por e-mail assim que seu convite estiver pronto.</p>
         </div>
       </div>
 
-      <!-- Login -->
-      <div class="pane" data-pane="login">
-        <form id="login-form" data-form="login">
-          <div class="field">
-            <label for="login-email">Seu e-mail</label>
-            <input id="login-email" name="email" type="email" placeholder="voce@email.com" required>
-          </div>
-          <button class="btn btn-primary btn-lg btn-block" type="submit">Enviar link de acesso</button>
-          <p class="field-err" data-err="login">E-mail inválido. Confira e tente de novo.</p>
-          <p class="hint">Login sem senha — mandamos um link mágico para o seu e-mail.</p>
-        </form>
-        <div class="ok-msg" data-ok="login">
-          <div class="check"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg></div>
-          <h4>Link enviado</h4>
-          <p>Se o e-mail tiver uma conta, você receberá um link de acesso em instantes.</p>
-        </div>
-      </div>
     </div>
   </div>
 
-  <!-- AI clients strip -->
   <div class="wrap strip">
     <p class="lbl">Funciona com a IA que você já usa</p>
     <div class="sources">
@@ -525,77 +124,130 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
   </div>
 </section>
 
-<!-- ============ DEMO ============ -->
-<section class="section alt" id="demo">
-  <div class="wrap demo-grid">
-    <div class="demo-copy reveal">
-      <p class="sec-tag">Demonstração</p>
-      <h2>A inteligência é da sua IA. O contexto é do Zinom.</h2>
-      <p>O Zinom não é mais um chat de IA. É a ferramenta que liga o seu conhecimento — e as suas ações — à IA que você já usa: Claude.ai, Claude Code ou ChatGPT.</p>
-      <div class="feat-list">
-        <div class="fi">
-          <span class="fic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0V8zM12 16v6"/></svg></span>
-          <div><b>Na sua IA preferida</b><span>Claude.ai, Claude Code, ChatGPT e outros clientes via MCP.</span></div>
-        </div>
-        <div class="fi">
-          <span class="fic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
-          <div><b>Sempre com a fonte</b><span>Toda resposta vem com link pra página, reunião ou evento.</span></div>
-        </div>
-        <div class="fi">
-          <span class="fic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span>
-          <div><b>E ainda age por você</b><span>Cria tarefas, páginas e agenda eventos no seu lugar.</span></div>
-        </div>
-      </div>
-      <p class="demo-note">Troque a IA e o exemplo no chat ao lado →</p>
-    </div>
-
-    <!-- chat mock -->
-    <div class="chat reveal" id="chat">
-      <div class="chat-bar">
-        <span class="cb-brand"><span class="mk" data-ic="zinom"></span> Zinom <span class="cb-sep">via MCP</span></span>
-        <span class="clients" id="clients" role="tablist">
-          <button class="cl active" data-cl="claude"><span class="ic" data-ic="claude"></span>Claude.ai</button>
-          <button class="cl" data-cl="code"><span class="ic" data-ic="claudecode"></span>Code</button>
-          <button class="cl" data-cl="gpt"><span class="ic" data-ic="chatgpt"></span>ChatGPT</button>
-        </span>
-      </div>
-      <div class="chat-prompts" id="chat-prompts">
-        <button class="cp active" data-sc="0">Buscar uma decisão</button>
-        <button class="cp" data-sc="1">Criar tarefa + agenda</button>
-        <button class="cp" data-sc="2">Resumo de pessoa</button>
-      </div>
-      <div class="chat-body" id="chat-body"></div>
-    </div>
-  </div>
-</section>
-
 <!-- ============ COMO FUNCIONA ============ -->
 <section class="section" id="como">
   <div class="wrap">
     <div class="sec-head reveal">
       <p class="sec-tag">Como funciona</p>
-      <h2>Simples assim.</h2>
-      <p>Conecte suas fontes uma vez. Depois é só conversar com a sua IA.</p>
+      <h2>Uma conexão entre suas fontes e a sua IA.</h2>
+      <p>O ChatGPT, o Claude.ai e o Claude Code não conhecem o seu trabalho. O Zinom fica no meio: indexa suas fontes e entrega o contexto certo para qualquer um deles, via MCP.</p>
     </div>
     <div class="diagram reveal" id="diagram">
       <div class="dg-col">
-        <span class="dg-node"><span class="ic" data-ic="notion"></span> Notion</span>
-        <span class="dg-node"><span class="ic" data-ic="granola"></span> Reuniões</span>
-        <span class="dg-node"><span class="ic" data-ic="calendar"></span> Agenda</span>
+        <span class="dg-node"><span class="ic" data-ic="notion"></span><span class="col">Notion<span class="sub">páginas e bancos de dados</span></span></span>
+        <span class="dg-node"><span class="ic" data-ic="granola"></span><span class="col">Reuniões<span class="sub">transcripts do Granola</span></span></span>
+        <span class="dg-node"><span class="ic" data-ic="calendar"></span><span class="col">Agenda<span class="sub">Google Calendar via iCal</span></span></span>
       </div>
       <div class="dg-wire"><i class="pulse"></i><i class="pulse d2"></i></div>
       <div class="dg-hub"><span class="mk" data-ic="zinom"></span><b>Zinom</b></div>
       <div class="dg-wire"><i class="pulse"></i><i class="pulse d2"></i></div>
       <div class="dg-col">
-        <span class="dg-node"><span class="ic" data-ic="claude"></span> Claude.ai</span>
-        <span class="dg-node"><span class="ic" data-ic="chatgpt"></span> ChatGPT</span>
-        <span class="dg-node"><span class="ic" data-ic="claudecode"></span> Claude Code</span>
+        <span class="dg-node"><span class="ic" data-ic="claude"></span><span class="col">Claude.ai<span class="sub">conector custom</span></span></span>
+        <span class="dg-node"><span class="ic" data-ic="chatgpt"></span><span class="col">ChatGPT<span class="sub">via MCP</span></span></span>
+        <span class="dg-node"><span class="ic" data-ic="claudecode"></span><span class="col">Claude Code<span class="sub">e Cursor, no terminal</span></span></span>
       </div>
     </div>
     <div class="steps3 reveal">
-      <div class="s3"><b>1 · Conecte</b><span>Seu Notion, reuniões e agenda.</span></div>
-      <div class="s3"><b>2 · O Zinom organiza</b><span>Junta tudo num só lugar, pesquisável.</span></div>
-      <div class="s3"><b>3 · Use na sua IA</b><span>Pergunte e aja pela IA que preferir.</span></div>
+      <div class="s3"><span class="n">1</span><span><b>Conecte suas fontes</b><span>Notion com 1 clique, Granola com a chave, agenda com o link iCal.</span></span></div>
+      <div class="s3"><span class="n">2</span><span><b>O Zinom indexa sozinho</b><span>Tudo vira memória pesquisável, atualizada em segundo plano.</span></span></div>
+      <div class="s3"><span class="n">3</span><span><b>Pergunte na sua IA</b><span>Ela busca o contexto, responde com a fonte e ainda age por você.</span></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ALIMENTE O CÉREBRO (demo do dia a dia) ============ -->
+<section class="section alt" id="alimente">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="sec-tag">Alimentar o cérebro</p>
+      <h2>Você não precisa fazer nada de novo.</h2>
+      <p>Veja um dia comum: cada reunião, anotação e evento vira memória automaticamente, enquanto você trabalha.</p>
+    </div>
+
+    <div class="feedlab reveal">
+      <div class="fl-controls">
+        <button class="fl-play" id="fl-play" type="button" aria-label="Pausar ou continuar"></button>
+        <div id="fl-steps" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"></div>
+      </div>
+
+      <div class="fl-stage">
+        <div class="fl-panel">
+          <div class="fl-panel-head">
+            <span id="fl-day-title">Seu dia, como sempre</span>
+            <span class="fl-clock" id="fl-clock">08:00</span>
+          </div>
+          <div class="fl-body" id="fl-day-body"></div>
+        </div>
+
+        <div class="fl-wirebox" aria-hidden="true">
+          <div class="lane" id="fl-lane"></div>
+        </div>
+
+        <div class="fl-panel">
+          <div class="fl-panel-head">
+            <span class="mk" data-ic="zinom"></span>
+            <span>Seu cérebro no Zinom</span>
+            <span class="right">indexação automática</span>
+          </div>
+          <div class="fl-body">
+            <div id="fl-mem-list" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div class="fl-search" id="fl-search">
+              <div class="fl-query"><span class="pr">›</span><span>brain_search(</span><span id="fl-query-text"></span><span>)</span><span class="cursor"></span></div>
+              <div class="fl-answer" id="fl-answer"></div>
+            </div>
+            <div class="fl-count"><b id="fl-count-n">0</b><span>trechos pesquisáveis, crescendo todo dia</span></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="fl-caption"><b>Em segundo plano:</b> o Zinom acompanha suas fontes enquanto você trabalha. No fim do dia, tudo que você viveu já está pesquisável pela sua IA.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ USAR NA SUA IA (demo de chat) ============ -->
+<section class="section" id="usar">
+  <div class="wrap demo-grid">
+    <div class="demo-copy reveal">
+      <p class="sec-tag">Usar na sua IA</p>
+      <h2>Pergunte. Sua IA busca, responde com a fonte e age.</h2>
+      <p>O Zinom não é mais um chat de IA. É a memória conectada ao ChatGPT, ao Claude.ai ou ao Claude Code. Acompanhe os 4 passos enquanto a demo roda ao lado.</p>
+      <div class="demo-steps">
+        <div class="dstep" data-step="1">
+          <span class="dn">1</span>
+          <span><b>Você pergunta na sua IA</b><span>Claude.ai, ChatGPT ou Claude Code, na que você preferir.</span></span>
+        </div>
+        <div class="dstep" data-step="2">
+          <span class="dn">2</span>
+          <span><b>Ela busca no seu cérebro</b><span><code style="font-family:var(--mono);font-size:12px">brain_search</code> encontra reuniões, páginas e eventos relevantes.</span></span>
+        </div>
+        <div class="dstep" data-step="3">
+          <span class="dn">3</span>
+          <span><b>Responde com a fonte</b><span>Toda resposta vem com link para a reunião, página ou evento original.</span></span>
+        </div>
+        <div class="dstep" data-step="4">
+          <span class="dn">4</span>
+          <span><b>E age por você</b><span>Cria tarefas e páginas no Notion, agenda eventos no Calendar.</span></span>
+        </div>
+      </div>
+      <p class="demo-note">Troque o exemplo nos botões acima do chat →</p>
+    </div>
+
+    <div class="chat reveal" id="chat">
+      <div class="chat-bar">
+        <span class="cb-brand"><span class="mk" data-ic="zinom"></span> Zinom <span class="cb-sep">via MCP</span></span>
+        <span class="clients" id="clients" role="tablist">
+          <button class="cl active" data-cl="claude" type="button"><span class="ic" data-ic="claude"></span>Claude.ai</button>
+          <button class="cl" data-cl="code" type="button"><span class="ic" data-ic="claudecode"></span>Code</button>
+          <button class="cl" data-cl="gpt" type="button"><span class="ic" data-ic="chatgpt"></span>ChatGPT</button>
+        </span>
+      </div>
+      <div class="chat-prompts" id="chat-prompts">
+        <button class="cp active" type="button">Buscar uma decisão</button>
+        <button class="cp" type="button">Criar tarefa + agendar</button>
+        <button class="cp" type="button">Briefing do dia</button>
+      </div>
+      <div class="chat-body" id="chat-body"></div>
     </div>
   </div>
 </section>
@@ -610,67 +262,63 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
     </div>
     <div class="pricing-grid reveal">
 
-      <!-- Free -->
       <div class="plan">
         <div class="pname">Free</div>
         <div class="pdesc">Pra experimentar o segundo cérebro.</div>
         <div class="price"><span class="cur">R$</span><span class="amt">0</span><span class="per">/mês</span></div>
         <ul class="pfeats">
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1 workspace do Notion</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>2.000 trechos indexados</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>100 consultas / mês</span></li>
-          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Indexação sob demanda</span></li>
-          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Granola + Calendar</span></li>
-          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Classificador + Briefing</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>1 workspace do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>2.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>100 consultas / mês</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg><span>Indexação sob demanda</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg><span>Granola + Calendar</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg><span>Classificador + Briefing</span></li>
         </ul>
         <a class="btn btn-ghost btn-block" href="#acesso">Pedir convite</a>
       </div>
 
-      <!-- Essencial -->
       <div class="plan">
         <div class="pname">Essencial</div>
         <div class="pdesc">Pro uso pessoal do dia a dia.</div>
         <div class="price"><span class="cur">R$</span><span class="amt">4</span><span class="per">,99/mês</span></div>
         <ul class="pfeats">
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1 workspace do Notion</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>10.000 trechos indexados</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>1.000 consultas / mês</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (50 pág/dia)</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
-          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Classificador + Briefing</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>1 workspace do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>10.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>1.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Sob demanda (50 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Granola + Calendar</span></li>
+          <li class="off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg><span>Classificador + Briefing</span></li>
         </ul>
         <a class="btn btn-ghost btn-block" href="/plano.html">Assinar</a>
       </div>
 
-      <!-- Pro -->
       <div class="plan featured">
         <span class="badge">Mais popular</span>
         <div class="pname">Pro</div>
         <div class="pdesc">Pra quem vive dentro do segundo cérebro.</div>
         <div class="price"><span class="cur">R$</span><span class="amt">9</span><span class="per">,99/mês</span></div>
         <ul class="pfeats">
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>3 workspaces do Notion</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>40.000 trechos indexados</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>5.000 consultas / mês</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (200 pág/dia)</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Classificador + Revisitar + Briefing</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>3 workspaces do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>40.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>5.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Sob demanda (200 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Granola + Calendar</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Classificador + Revisitar + Briefing</span></li>
         </ul>
         <a class="btn btn-primary btn-block" href="/plano.html">Assinar</a>
       </div>
 
-      <!-- Ilimitado -->
       <div class="plan">
         <div class="pname">Ilimitado</div>
         <div class="pdesc">Sem se preocupar com limites.</div>
         <div class="price"><span class="cur">R$</span><span class="amt">18</span><span class="per">,99/mês</span></div>
         <ul class="pfeats">
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>5 workspaces do Notion</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>150.000 trechos indexados</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>20.000 consultas / mês</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sob demanda (500 pág/dia)</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Granola + Calendar</span></li>
-          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Classificador + Revisitar + Briefing</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>5 workspaces do Notion</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>150.000 trechos indexados</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>20.000 consultas / mês</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Sob demanda (500 pág/dia)</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Granola + Calendar</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg><span>Classificador + Revisitar + Briefing</span></li>
         </ul>
         <a class="btn btn-ghost btn-block" href="/plano.html">Assinar</a>
       </div>
@@ -680,12 +328,12 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
   </div>
 </section>
 
-<!-- ============ CTA band ============ -->
-<section class="section alt" style="padding:64px 0">
-  <div class="wrap" style="text-align:center;max-width:40em;margin:0 auto">
-    <h2 style="font-size:clamp(26px,3.2vw,36px);font-weight:600;letter-spacing:-.03em;line-height:1.12">Dê à sua IA a memória que faltava.</h2>
-    <p style="font-size:16.5px;color:var(--ink-soft);margin-top:14px;text-wrap:pretty">Convites liberados em lotes. Entre na lista e seja avisado.</p>
-    <div style="display:flex;gap:12px;justify-content:center;margin-top:26px;flex-wrap:wrap">
+<!-- ============ CTA ============ -->
+<section class="cta-band">
+  <div class="wrap" style="max-width:42em">
+    <h2>Dê à sua IA a memória que faltava.</h2>
+    <p>Convites liberados em lotes. Entre na lista e seja avisado.</p>
+    <div class="row">
       <a class="btn btn-primary btn-lg" href="#acesso">Solicitar convite</a>
       <a class="btn btn-ghost btn-lg" href="https://github.com/BrunooMoniz/notion-mcp" target="_blank" rel="noopener">Ver no GitHub</a>
     </div>
@@ -697,33 +345,20 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
   <div class="wrap">
     <div class="foot-grid">
       <div class="foot-brand">
-        <a href="#top" class="brand">
-          <span class="mark" aria-hidden="true">
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <rect x="1" y="1" width="24" height="24" rx="7.5" fill="var(--accent)"/>
-              <circle cx="8.5" cy="8.5" r="2.1" fill="#fff"/>
-              <circle cx="17.5" cy="8.5" r="2.1" fill="#fff" opacity=".75"/>
-              <circle cx="13" cy="17" r="2.1" fill="#fff"/>
-              <path d="M8.5 8.5 L13 17 L17.5 8.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
-            </svg>
-          </span>
-          <span>Zinom</span>
-        </a>
-        <p>Um segundo cérebro pesquisável para a sua IA. Open source, auto-hospedado, sem SaaS.</p>
+        <a href="#top" class="brand"><span class="ic" data-ic="zinom" style="width:26px;height:26px"></span><span>Zinom</span></a>
+        <p>Um segundo cérebro pesquisável para a sua IA. Suas fontes, sua memória, na IA que você já usa.</p>
       </div>
       <div class="foot-cols">
         <div class="foot-col">
           <h5>Produto</h5>
-          <a href="#demo">Demonstração</a>
           <a href="#como">Como funciona</a>
+          <a href="#alimente">Alimentar o cérebro</a>
+          <a href="#usar">Usar na sua IA</a>
           <a href="#acesso">Solicitar convite</a>
         </div>
         <div class="foot-col">
           <h5>Recursos</h5>
-          <a href="https://github.com/BrunooMoniz/notion-mcp" target="_blank" rel="noopener">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.4-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11 11 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
-            Repositório
-          </a>
+          <a href="https://github.com/BrunooMoniz/notion-mcp" target="_blank" rel="noopener">Repositório</a>
           <a href="https://modelcontextprotocol.io/" target="_blank" rel="noopener">Sobre MCP</a>
         </div>
         <div class="foot-col">
@@ -739,12 +374,14 @@ html.reveal-ready .reveal.in{opacity:1;transform:none}
       </div>
     </div>
     <div class="foot-bot">
-      <small>© 2026 Zinom.ai — Licença MIT · <a href="/privacidade.html">Privacidade</a> · <a href="/termos.html">Termos</a></small>
-      <span class="made">npm start → :3456</span>
+      <small>© 2026 Zinom.ai · Licença MIT</small>
+      <span class="made">feito para a sua IA</span>
     </div>
   </div>
 </footer>
 
 <script src="/landing.js"></script>
+<script src="/landing-feed.js"></script>
+<script src="/landing-chat.js"></script>
 </body>
 </html>
