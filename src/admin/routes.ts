@@ -709,9 +709,12 @@ export function renderHtml(data: AdminData, now: string, token: string, msg: str
   const revokeCompAction = `/admin/revoke-unlimited?token=${encodeURIComponent(token)}`;
 
   const rows = data.accounts
-    .map((a) => {
+    .map((a, i) => {
       const usageRows = data.usage.get(a.id) ?? [];
-      const usageStr = usageRows.map((u) => `${u.metric}:${u.total}`).join(" · ") || "—";
+      // Usage chips for the detail row: one .tag per metric of the current month.
+      const usageChips = usageRows.length
+        ? usageRows.map((u) => `<span class="tag">${escapeHtml(u.metric)} ${escapeHtml(u.total)}</span>`).join(" ")
+        : "—";
       // F7: compute credits used from usage rows.
       const creditsUsed = Math.round(usageRows.reduce((sum, u) => sum + creditsFor(u.metric, Number(u.total)), 0));
       const planLimits = getPlanLimits(a.plan);
@@ -720,17 +723,17 @@ export function renderHtml(data: AdminData, now: string, token: string, msg: str
         ? `${creditsUsed}/${creditsLimit}`
         : `${creditsUsed}/∞`;
       const creditsOver = isFinite(creditsLimit) && creditsUsed > creditsLimit;
-      // Latest failed-run error per source (truncated), shown beneath the ✓/✗ flags
-      // so a red source explains itself.
+      // Latest failed-run error per source (full text), shown in the detail row
+      // so a red source explains itself. The main row only carries a count badge.
       const errs = (data.errors.get(a.id) ?? [])
         .filter((e) => e.error)
-        .map((e) => `${escapeHtml(e.source)}: ${escapeHtml(String(e.error).slice(0, 160))}`);
+        .map((e) => `${escapeHtml(e.source)}: ${escapeHtml(String(e.error))}`);
       const runFlags =
         (data.runs.get(a.id) ?? [])
           .map((r) => `${escapeHtml(r.source)}${r.ok ? "&#10003;" : "&#10007;"}`)
           .join(" ") || "—";
       const runs = runFlags + (errs.length
-        ? `<details class="err-details"><summary>${errs.length} erro(s)</summary><div class="err">${errs.join("<br>")}</div></details>`
+        ? ` <span class="tag bad">${errs.length} erro(s)</span>`
         : "");
       const ws = data.workspaces.get(a.id);
       const status = a.status ?? ACTIVE_STATUS;
@@ -778,24 +781,34 @@ export function renderHtml(data: AdminData, now: string, token: string, msg: str
                <button type="submit" style="font-size:11.5px;padding:4px 10px">Liberar ilimitado</button>
              </form>`;
 
-      return `<tr>
+      // Compact main row (8 cols) + hidden detail row toggled by the ▸ button.
+      // Long content (workspaces, usage, comp forms, index errors) lives in the
+      // detail row so the table fits 1440px without horizontal scroll.
+      return `<tr class="acct-row">
         <td>
-          <span class="acct-primary">${escapeHtml(dispA.primary)}</span>
-          <span class="acct-secondary mono xs muted">${escapeHtml(dispA.secondary)}</span>
+          <span class="acct-primary" title="${escapeHtml(dispA.primary)}">${escapeHtml(dispA.primary)}</span>
+          <span class="acct-secondary mono xs muted" title="${escapeHtml(dispA.secondary)}">${escapeHtml(dispA.secondary)}</span>
         </td>
-        <td class="xs">${escapeHtml(a.kind ?? "—")}</td>
         <td>${statusCell}</td>
-        <td class="xs">${planLabel}${compCtrl}</td>
-        <td class="xs">${escapeHtml(periodEnd)}</td>
+        <td class="xs">${planLabel}</td>
         <td class="xs">${escapeHtml(sourceFlags(data.secrets.get(a.id)))}</td>
-        <td class="xs">${tokenCount ? `${tokenCount} token(s)` : "—"}</td>
-        <td class="xs trunc">${ws ? escapeHtml(ws.join(", ")) : "—"}</td>
         <td class="xs">${runs}</td>
-        <td class="xs">${escapeHtml(usageStr)}</td>
         <td class="xs"${creditsOver ? ' style="color:#d64545;font-weight:600"' : ""}>${escapeHtml(creditsStr)}</td>
-        <td class="xs">${new Date(a.created_at).toLocaleString("pt-BR")}</td>
         <td>${actCell}</td>
-      </tr>`;
+        <td><button type="button" class="acct-toggle" aria-expanded="false" aria-controls="acct-detail-${i}" title="Detalhes">&#9656;</button></td>
+      </tr>
+      <tr class="acct-detail" id="acct-detail-${i}" hidden><td colspan="8">
+        <div class="acct-d-grid">
+          <div class="acct-d-block"><span class="acct-d-label">Tipo</span><span class="acct-d-val">${escapeHtml(a.kind ?? "—")}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Renova em</span><span class="acct-d-val">${escapeHtml(periodEnd)}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">MCP tokens</span><span class="acct-d-val">${tokenCount ? `${tokenCount} token(s)` : "—"}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Criada</span><span class="acct-d-val">${new Date(a.created_at).toLocaleString("pt-BR")}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Workspaces</span><span class="acct-d-val">${ws ? escapeHtml(ws.join(", ")) : "—"}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Uso do mês</span><span class="acct-d-val acct-d-chips">${usageChips}</span></div>
+          <div class="acct-d-block"><span class="acct-d-label">Cortesia</span>${compCtrl}</div>
+          ${errs.length ? `<div class="acct-d-block acct-d-wide"><span class="acct-d-label">Erros de indexação</span><div class="acct-d-errs">${errs.join("<br>")}</div></div>` : ""}
+        </div>
+      </td></tr>`;
     })
     .join("\n");
 
@@ -1085,6 +1098,29 @@ td.mono{font-family:var(--mono);font-size:12px;color:var(--accent-strong)}
 .acct-primary{display:block;font-size:13px;color:var(--ink);font-weight:500}
 .acct-secondary{display:block;font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:1px}
 
+/* --- Contas: compact rows + expandable detail --- */
+table.acct-table td{white-space:nowrap}        /* keep main rows one line tall */
+table.acct-table td:first-child{white-space:normal} /* Conta cell may wrap */
+/* Long emails/ids must not inflate the row: one truncated line each, full
+   value on the title tooltip (and in the detail row context). */
+table.acct-table .acct-primary,
+table.acct-table .acct-secondary{
+  max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.acct-toggle{
+  background:none;border:1px solid var(--line);color:var(--muted);
+  border-radius:var(--r-xs);padding:2px 8px;font-size:12px;line-height:1.4;
+}
+.acct-toggle:hover{background:var(--paper);color:var(--ink)}
+tbody tr.acct-detail td{background:var(--paper);padding:14px 16px;white-space:normal}
+tbody tr.acct-detail:hover td{background:var(--paper)}
+.acct-d-grid{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:flex-start}
+.acct-d-label{display:block;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}
+.acct-d-val{font-size:12.5px;color:var(--ink-soft)}
+.acct-d-chips{display:inline-flex;flex-wrap:wrap;gap:4px}
+.acct-d-wide{flex-basis:100%}
+.acct-d-errs{color:#9a2820;font-size:11.5px;line-height:1.5;word-break:break-word;max-width:720px}
+
 /* --- Buttons --- */
 button{
   font-family:var(--sans);
@@ -1138,6 +1174,9 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 </style>
 </head>
 <body>
+<!-- No-JS fallback: detail rows render with [hidden]; without JS the toggle
+     can't open them, so force them visible (accepted degradation). -->
+<noscript><style>tr.acct-detail[hidden]{display:table-row}</style></noscript>
 
 <div class="shell">
 
@@ -1287,24 +1326,19 @@ ${leadRows || '<tr><td colspan="5" class="xs muted">Nenhuma solicitacao ainda.</
 <section class="section" id="contas">
   <div class="section-header">
     <h2 class="section-title">Contas</h2>
-    <p class="section-desc">Todas as contas cadastradas. Colunas de uso mostram o mes corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}). Passe o cursor sobre os cabecalhos para ver a descricao de cada coluna. Erros de indexacao ficam expansiveis na coluna "Indices".</p>
+    <p class="section-desc">Todas as contas cadastradas. Uso e creditos mostram o mes corrente (desde ${escapeHtml(data.monthStart.toISOString().slice(0, 10))}). Passe o cursor sobre os cabecalhos para ver a descricao de cada coluna. Detalhes (tipo, workspaces, uso, cortesia e erros de indexacao) ficam no botao &#9656; de cada linha.</p>
   </div>
   <div class="table-wrap">
-  <table>
+  <table class="acct-table">
     <thead><tr>
       <th title="Identificador unico da conta no Zinom">Conta</th>
-      <th title="Tipo: owner (operador), friend (convidado)">Tipo</th>
       <th title="Estado atual: active ou suspended">Status</th>
       <th title="Plano contratado e status da assinatura">Plano</th>
-      <th title="Data de renovacao do plano atual">Renova em</th>
       <th title="Fontes de dados conectadas (Notion, Granola, iCal, Google)">Fontes</th>
-      <th title="Quantidade de tokens MCP emitidos para esta conta">MCP</th>
-      <th title="Workspaces Notion vinculados a conta">Workspaces</th>
-      <th title="Resultado do ultimo ciclo de indexacao por fonte — expanda para ver erros">Indices</th>
-      <th title="Uso de metricas no mes corrente (embed_tokens, search, etc.)">Uso (mes)</th>
+      <th title="Resultado do ultimo ciclo de indexacao por fonte — erros completos no detalhe da linha">Indices</th>
       <th title="Creditos de IA usados / limite do plano no mes corrente (F7)">Creditos</th>
-      <th title="Data de criacao da conta">Criada</th>
       <th title="Bloquear ou reativar a conta">Acao</th>
+      <th title="Expandir detalhes"></th>
     </tr></thead>
     <tbody>
 ${rows}
@@ -1350,6 +1384,21 @@ ${rows}
   }
   window.addEventListener('hashchange', go);
   go();
+})();
+
+/* Contas: per-row detail toggle. Delegated click on .acct-toggle flips the
+   [hidden] attr of the row named by aria-controls, plus aria-expanded + glyph. */
+(function() {
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target.closest ? ev.target.closest('.acct-toggle') : null;
+    if (!btn) return;
+    var row = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!row) return;
+    var open = row.hidden; // true => we are opening it now
+    row.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '\\u25BE' : '\\u25B8'; /* ▾ / ▸ */
+  });
 })();
 </script>
 </body>
