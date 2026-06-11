@@ -23,8 +23,10 @@ test("friend generates an MCP token and a ready-to-paste connect command", async
   const tokenText = await page.locator("#token-area .tk").innerText();
   expect(tokenText).toMatch(/^acct_[0-9a-f]{48}$/);
 
-  const cmdText = await page.locator("#token-area .code-block").innerText();
-  expect(cmdText).toContain("claude mcp add");
+  // tasks-v1: the generated command moved to the "Colar no terminal" step
+  // (#cc-cmd-area) and now installs at user scope (-s user).
+  const cmdText = await page.locator("#cc-cmd-area .code-block").innerText();
+  expect(cmdText).toContain("claude mcp add -s user");
   expect(cmdText).toContain(tokenText.trim());
   expect(cmdText).toContain("/mcp");
 

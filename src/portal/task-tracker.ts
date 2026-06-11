@@ -152,6 +152,17 @@ export async function createTaskTracker(
     const reuse = findReusableTrackerId(hits);
     if (reuse) {
       await setTasksDbId(accountId, reuse);
+      // 003-tasks-v1: a reused "Tarefas" may predate the new template — bring it
+      // up to date additively. Best-effort: an upgrade failure must not block
+      // the reuse (dynamic import also avoids a module cycle with tasks/).
+      try {
+        const { upgradeStandardTracker } = await import("../tasks/upgrade.js");
+        const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
+        invalidateTrackerProfile(accountId);
+        await upgradeStandardTracker(accountId, { fetchImpl });
+      } catch (err: any) {
+        console.warn(`[task-tracker] ${accountId}: reuse upgrade failed: ${err?.message ?? err}`);
+      }
       return { dataSourceId: reuse, created: false };
     }
   } catch (err: any) {
@@ -177,5 +188,14 @@ export async function createTaskTracker(
   const dataSourceId: string = db?.data_sources?.[0]?.id ?? db?.id;
   if (!dataSourceId) throw new Error("Notion não retornou o id da base criada");
   await setTasksDbId(accountId, dataSourceId);
+  // Todo write de tasks_db derruba o profile cacheado — senão o adapter segue
+  // lendo a base antiga por até 5 min. (Import dinâmico: task-tracker↔adapter
+  // teria ciclo estático; mesmo padrão do branch de reuse acima.)
+  try {
+    const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
+    invalidateTrackerProfile(accountId);
+  } catch (err: any) {
+    console.warn(`[task-tracker] ${accountId}: invalidate after create failed: ${err?.message ?? err}`);
+  }
   return { dataSourceId, created: true };
 }

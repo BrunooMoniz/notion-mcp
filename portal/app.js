@@ -98,6 +98,42 @@ function logoSvg(size) {
     '<circle cx="8" cy="18" r="1.7" fill="#fff"/><circle cx="18" cy="18" r="1.7" fill="#fff"/></svg>';
 }
 
+/* ---- prompts de tarefas e planejamento (003-tasks-v1) ----
+   FONTE ÚNICA dos textos: Guia (seção Tarefas) e Receitas leem daqui.
+   Os textos dos prompts de reunião/dia/semana/mês/cobranças são os do spec. */
+var TASK_PROMPTS = {
+  reuniao: 'Pega minha última reunião do Granola, identifica o que EU tenho que fazer e o que eu tenho que COBRAR de alguém, confere o que já existe no board e cria as tarefas que faltam com origem e prazo.',
+  reuniao_especifica: 'Pega a reunião "[nome ou tema da reunião]" no Granola, identifica o que EU tenho que fazer e o que eu tenho que COBRAR de alguém, confere o que já existe no board e cria as tarefas que faltam com origem e prazo.',
+  dia: 'Planeja meu dia de amanhã: cruza minha agenda com as tarefas abertas, sugere o que fazer em cada espaço livre e cria os blocktimes que eu aprovar.',
+  semana: 'Planeja minha semana: distribui as tarefas abertas pelos dias conforme prazo, prioridade e tempo estimado, respeitando minha agenda.',
+  mes: 'Faz o plano do mês: grandes entregas por semana, o que está atrasado e o que dá pra cortar.',
+  cobrancas: 'Lista minhas tarefas de cobrar, agrupadas por pessoa, com há quanto tempo estão paradas.',
+  revisao_semana: 'Faz minha revisão da semana no board: o que concluí, o que está atrasado, cobranças paradas e o que reprogramar para a semana que vem.',
+  fechar_dia: 'Fecha meu dia: confere o que fiz hoje, marca as tarefas concluídas no board e reprograma o que ficou pendente.'
+};
+
+/* preenche os code-blocks do Guia e das Receitas a partir de TASK_PROMPTS */
+function applyTaskPrompts() {
+  var map = {
+    'guia-prompt-reuniao': TASK_PROMPTS.reuniao,
+    'guia-prompt-reuniao-especifica': TASK_PROMPTS.reuniao_especifica,
+    'guia-prompt-dia': TASK_PROMPTS.dia,
+    'guia-prompt-semana': TASK_PROMPTS.semana,
+    'guia-prompt-mes': TASK_PROMPTS.mes,
+    'guia-prompt-revisao': TASK_PROMPTS.revisao_semana,
+    'guia-prompt-cobrancas': TASK_PROMPTS.cobrancas,
+    'recipe-task-reuniao': TASK_PROMPTS.reuniao,
+    'recipe-task-cobrancas': TASK_PROMPTS.cobrancas,
+    'recipe-task-semana': TASK_PROMPTS.semana,
+    'recipe-task-fechar-dia': TASK_PROMPTS.fechar_dia,
+    'recipe-plan-dia': TASK_PROMPTS.dia,
+    'recipe-plan-revisao': TASK_PROMPTS.revisao_semana
+  };
+  Object.keys(map).forEach(function (id) {
+    fillPromptBlock(document.getElementById(id), map[id]);
+  });
+}
+
 /* ---- navegação por hash ---- */
 var VIEWS = ['inicio', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
 
@@ -118,15 +154,17 @@ function go(view) {
   try { history.replaceState(null, '', '#' + view); } catch (e) { /* sandbox */ }
 }
 
-/* deep-link/ação: ir ao Guia e rolar até "Conectar sua IA" */
-function goGuiaConectar() {
+/* deep-link/ação: ir ao Guia e rolar até uma seção (guia-conectar, guia-tarefas) */
+function goGuiaSection(anchorId) {
   go('guia');
-  var anchor = document.getElementById('guia-conectar');
+  var anchor = document.getElementById(anchorId);
   if (anchor) setTimeout(function () {
     var top = anchor.getBoundingClientRect().top + document.scrollingElement.scrollTop - 20;
     document.scrollingElement.scrollTo({ top: top, behavior: 'smooth' });
   }, 60);
 }
+
+function goGuiaConectar() { goGuiaSection('guia-conectar'); }
 
 /* ==================== INÍCIO (v2: painel vivo + onboarding) ====================
    Estado derivado de /portal/me + /portal/status:
@@ -338,6 +376,8 @@ function renderOnboarding() {
   var srcDone = hasAnySource(me);
   var idxDone = totalChunks(st) > 0;
   var aiDone = assistants.length > 0;
+  /* passo Tarefas: done quando activation.items.tasks (003-tasks-v1) */
+  var tasksDone = _actTasksDone;
   var steps = [
     {
       done: true,
@@ -349,6 +389,15 @@ function renderOnboarding() {
       st: 'Conectar a primeira fonte',
       sd: 'Comece pelo Notion — é de onde vem a maior parte do conhecimento. Granola e agendas podem vir depois.',
       cta: '<button class="btn btn-primary btn-sm" type="button" data-nav="fontes">Conectar Notion →</button>'
+    },
+    {
+      done: tasksDone,
+      st: 'Onde suas tarefas vivem',
+      sd: 'Aponte a base de tarefas que você já tem no Notion — o Zinom se adapta aos seus campos — ou crie o Kanban padrão Zinom: status, prioridade, prazo, tempo estimado, tipo (fazer ou cobrar), quem e origem, tudo que a IA precisa para planejar seu dia.',
+      cta: '<div class="task-choice js-tasks-actions">' +
+        '<button class="btn btn-primary btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
+        '</div><p class="muted js-tasks-msg" style="font-size:12.5px;margin:7px 0 0"></p>'
     },
     {
       done: idxDone,
@@ -1959,12 +2008,16 @@ async function loadActivation(sources) {
     var res = await api('/portal/activation');
     if (!res.ok) return;
     var st = await res.json();
+    /* estado de tarefas/notion antes de qualquer early-return: o onboarding
+       (estado novo) também depende de _actTasksDone */
+    _actNotionConnected = !!(sources && sources.notion && sources.notion.connected);
+    _actTasksDone = !!(st.items && st.items.tasks);
+    /* base configurada: busca nome/link/missing para o passo Tarefas e o diagnóstico */
+    if (_actTasksDone) await loadTasksInfo();
     var wrap = document.getElementById('activation');
     if (!wrap) return;
     if (st.complete || st.dismissed) { wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
-    _actNotionConnected = !!(sources && sources.notion && sources.notion.connected);
-    _actTasksDone = !!(st.items && st.items.tasks);
     /* mapear os itens do backend (tasks, granola, ical, ask) para os 4 passos */
     _actDone = [
       true, /* convite = sempre feito */
@@ -1997,32 +2050,42 @@ function renderActivation() {
       '<span>' + st.label + '</span>' +
       '<span class="go">' + goLabel + '</span></button>';
 
-    /* Sub-fluxo inline de Tarefas: aparece apenas quando passo 2 incompleto */
+    /* Sub-fluxo inline de Tarefas: escolha dupla quando incompleto */
     if (isTasksStep && !_actDone[i]) {
       var inner = '';
       if (!_actNotionConnected) {
         inner = '<p class="muted" style="margin:0 0 0 28px;font-size:13px">Conecte seu Notion em Fontes primeiro.</p>';
       } else {
         inner = '<div style="margin:6px 0 2px 28px;display:flex;flex-direction:column;gap:6px">' +
-          '<p class="muted" id="act-tasks-msg" style="margin:0;font-size:13px">Vou procurar (ou criar) uma base de Tarefas no seu Notion.</p>' +
-          '<div id="act-tasks-actions" style="display:flex;gap:8px;flex-wrap:wrap">' +
-            '<button class="btn btn-ghost btn-sm" type="button" id="act-tasks-detect-btn">Detectar minha base de Tarefas</button>' +
-            '<button class="btn btn-ghost btn-sm" type="button" id="act-tasks-create-btn">Criar base de Tarefas para mim</button>' +
+          '<p class="muted js-tasks-msg" style="margin:0;font-size:13px">Aponte uma base que você já tem ou crie o Kanban padrão Zinom (status, prioridade, prazo, tipo fazer/cobrar).</p>' +
+          '<div class="task-choice js-tasks-actions">' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
           '</div>' +
         '</div>';
       }
       btn += inner;
+    }
+
+    /* Passo Tarefas configurado: nome/link da base + upgrade do template (003-tasks-v1) */
+    if (isTasksStep && _actDone[i]) {
+      var info = window._tasksInfo;
+      if (info && info.configured) {
+        var baseLink = isHttpUrl(info.url)
+          ? '<a href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">' + escapeHtml(info.title || 'Tarefas') + '</a>'
+          : '<strong>' + escapeHtml(info.title || 'Tarefas') + '</strong>';
+        var upgradeBtn = (info.is_standard && info.missing && info.missing.length)
+          ? '<button class="btn btn-ghost btn-sm" type="button" data-tasks-upgrade>Atualizar para o template novo</button>'
+          : '';
+        btn += '<div class="act-tasks-info">Base configurada: ' + baseLink + upgradeBtn + '</div>';
+      }
     }
     return btn;
   }).join('');
 
   stepsEl.innerHTML = html + '<p class="muted" style="font-size:12px;margin:10px 0 0;padding-top:8px;border-top:1px solid var(--line);display:flex;gap:12px;flex-wrap:wrap">Dúvida de como usar? <button class="link-quiet" type="button" data-nav="guia" style="font-size:12px">Entenda como usar no Guia →</button><button class="link-quiet" type="button" id="activation-dismiss-btn" style="font-size:12px;margin-left:auto">dispensar checklist</button></p>';
 
-  /* Wiring dos botoes do sub-fluxo de Tarefas (existem apenas quando step 2 incompleto e notion conectado) */
-  var detectBtn = document.getElementById('act-tasks-detect-btn');
-  if (detectBtn) detectBtn.addEventListener('click', function (e) { e.stopPropagation(); runDetectTasks(); });
-  var createBtn = document.getElementById('act-tasks-create-btn');
-  if (createBtn) createBtn.addEventListener('click', function (e) { e.stopPropagation(); runCreateTasks(); });
+  /* Botões de detect/create/use/upgrade usam delegação global (wireGlobal) */
   var dismissBtn = document.getElementById('activation-dismiss-btn');
   if (dismissBtn) dismissBtn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -2311,6 +2374,17 @@ function buildDiagRows() {
     fix: chunks > 0 ? null : { nav: 'fontes', text: 'Rode "Indexar agora" em Fontes →' }
   });
 
+  /* Base de tarefas (003-tasks-v1): ok = configured via /portal/tasks/info;
+     sem o endpoint (backend antigo), cai no item de ativação */
+  var ti = window._tasksInfo;
+  var tasksOk = ti ? !!ti.configured : _actTasksDone;
+  rows.push({
+    label: 'Base de tarefas',
+    result: tasksOk ? 'ok' : 'warn',
+    meta: tasksOk ? ((ti && ti.title) || 'configurada') : 'não configurada',
+    fix: tasksOk ? null : { nav: 'inicio', text: 'Configure sua base de tarefas no Início →' }
+  });
+
   var used = assistants.filter(function (t) { return !!t.last_used_at; }).length;
   rows.push({
     label: 'Conexão MCP',
@@ -2353,7 +2427,8 @@ function wireDiag() {
       var results = await Promise.allSettled([
         api('/portal/me').then(function (r) { return r.ok ? r.json() : null; }),
         api('/portal/status').then(function (r) { return r.ok ? r.json() : null; }),
-        loadMcpTokens()
+        loadMcpTokens(),
+        loadTasksInfo()
       ]);
       if (results[0].status === 'fulfilled' && results[0].value) window._lastMe = Object.assign({}, window._lastMe, results[0].value);
       if (results[1].status === 'fulfilled' && results[1].value) window._lastStatus = results[1].value;
@@ -2452,7 +2527,10 @@ async function generateToken() {
   var data = await res.json();
   var token = data.token;
   var mcpUrl = data.mcp_url || 'https://zinom.ai/mcp';
-  var cmd = 'claude mcp add --transport http zinom \\\n  ' + mcpUrl + ' \\\n  --header "Authorization: Bearer ' + token + '"';
+  /* -s user: o Zinom fica disponível em todas as pastas, não só na atual */
+  var cmd = 'claude mcp add -s user --transport http zinom \\\n  ' + mcpUrl + ' \\\n  --header "Authorization: Bearer ' + token + '"';
+  var cmdBlock = '<div class="code-block">' + escapeHtml(cmd).replace('claude', '<span class="hl">claude</span>') +
+    '<button class="copy-btn" type="button" data-copy="' + escapeHtml(cmd.replace(/\n/g, ' ').replace(/\\ /g, '')) + '">copiar</button></div>';
   var area = document.getElementById('token-area');
   if (area) {
     area.innerHTML =
@@ -2460,11 +2538,15 @@ async function generateToken() {
       '<div class="meter-head" style="margin-bottom:7px"><strong>Seu token pessoal</strong><span class="tag warn">aparece so uma vez</span></div>' +
       '<div class="tk">' + escapeHtml(token) + '</div>' +
       '<button class="btn btn-ghost btn-sm mt-sm" type="button" data-copy-token="' + escapeHtml(token) + '">Copiar token</button>' +
-      '</div>' +
-      '<label class="mt-md">Claude Code — cole no terminal:</label>' +
-      '<div class="code-block">' + escapeHtml(cmd).replace('claude', '<span class="hl">claude</span>') +
-      '<button class="copy-btn" type="button" data-copy="' + escapeHtml(cmd.replace(/\n/g, ' ').replace(/\\ /g, '')) + '">copiar</button></div>' +
-      '<p class="muted mt-sm">Outros clientes MCP (Cursor etc.): use o endereco acima com o cabecalho <code>Authorization: Bearer &lt;token&gt;</code>.</p>';
+      '</div>';
+  }
+  /* comando real no passo "Colar no terminal" (substitui o exemplo com <token>) */
+  var cmdArea = document.getElementById('cc-cmd-area');
+  if (cmdArea) {
+    cmdArea.innerHTML = cmdBlock;
+  } else if (area) {
+    /* fallback: layout antigo sem o passo dedicado */
+    area.innerHTML += '<label class="mt-md">Claude Code — cole no terminal:</label>' + cmdBlock;
   }
   /* Atualiza endpoints nos demais painéis guiados */
   fillGuidedEndpoints(mcpUrl);
@@ -3021,16 +3103,30 @@ function wireGlobal(me) {
     }
   });
 
-  /* navegacao (com suporte a deep-link data-guia="conectar") */
+  /* navegacao (com suporte a deep-link data-guia="conectar" | "tarefas") */
   document.body.addEventListener('click', function (e) {
     var nav = e.target.closest('[data-nav]');
     if (!nav) return;
     e.preventDefault();
-    if (nav.getAttribute('data-nav') === 'guia' && nav.getAttribute('data-guia') === 'conectar') {
-      goGuiaConectar();
+    var guia = nav.getAttribute('data-guia');
+    if (nav.getAttribute('data-nav') === 'guia' && guia) {
+      goGuiaSection('guia-' + guia);
     } else {
       go(nav.getAttribute('data-nav'));
     }
+  });
+
+  /* tarefas: escolha dupla + usar base detectada + upgrade do template —
+     delegação global porque os botões existem no onboarding E na ativação */
+  document.body.addEventListener('click', function (e) {
+    var td = e.target.closest('[data-tasks-detect]');
+    if (td) { e.stopPropagation(); runDetectTasks(); return; }
+    var tc = e.target.closest('[data-tasks-create]');
+    if (tc) { e.stopPropagation(); runCreateTasks(); return; }
+    var tu = e.target.closest('[data-use-tasks]');
+    if (tu) { e.stopPropagation(); runUseTasks(tu.getAttribute('data-use-tasks')); return; }
+    var up = e.target.closest('[data-tasks-upgrade]');
+    if (up) { e.stopPropagation(); runUpgradeTasks(up); return; }
   });
 
   /* revogar token MCP (Início + Conta) e encerrar sessão (Conta) — delegação global */
@@ -3204,31 +3300,31 @@ function wireGlobal(me) {
   }
 }
 
-/* ==================== TASKS (ativacao) ====================
+/* ==================== TASKS (ativacao + onboarding) ====================
    Endpoints preservados do fluxo de ativacao original:
    /portal/tasks/detect, /portal/tasks/create, /portal/tasks/use,
    /portal/activation/ask, /portal/activation/dismiss
+   Novos (003-tasks-v1): GET /portal/tasks/info, POST /portal/tasks/upgrade.
+   A escolha dupla existe em duas superfícies (onboarding estado-novo e
+   checklist de ativação) — os helpers escrevem em todas via classe.
    ===================================================================== */
 
 function _tasksMsg(txt) {
-  var el = document.getElementById('act-tasks-msg');
-  if (el) el.textContent = txt;
+  document.querySelectorAll('.js-tasks-msg').forEach(function (el) { el.textContent = txt; });
 }
 
 function _tasksActions(html) {
-  var el = document.getElementById('act-tasks-actions');
-  if (el) el.innerHTML = html;
+  document.querySelectorAll('.js-tasks-actions').forEach(function (el) { el.innerHTML = html; });
 }
 
-function _tasksActionsWire() {
-  /* Botoes dinamicos gerados apos detectar: "Usar esta" e "Criar nova" */
-  var el = document.getElementById('act-tasks-actions');
-  if (!el) return;
-  el.querySelectorAll('[data-use-tasks]').forEach(function (b) {
-    b.addEventListener('click', function () { runUseTasks(b.getAttribute('data-use-tasks')); });
-  });
-  var cb = el.querySelector('[data-create-tasks]');
-  if (cb) cb.addEventListener('click', function () { runCreateTasks(); });
+/* GET /portal/tasks/info → {configured, title, url, mapped, missing, is_standard}.
+   Degrada para null quando o endpoint não existe/falha (backend antigo). */
+async function loadTasksInfo() {
+  try {
+    var res = await api('/portal/tasks/info');
+    if (!res.ok) { window._tasksInfo = null; return; }
+    window._tasksInfo = await res.json();
+  } catch (e) { window._tasksInfo = null; }
 }
 
 async function runDetectTasks() {
@@ -3247,9 +3343,8 @@ async function runDetectTasks() {
     return;
   }
   if (det.status === 'none' || det.status === 'error' || !det.candidates || !det.candidates.length) {
-    _tasksMsg('Nao encontrei base de tarefas. Quer que eu crie uma ("Zinom › Tarefas")?');
-    _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-create-tasks>Criar base de Tarefas para mim</button>');
-    _tasksActionsWire();
+    _tasksMsg('Não encontrei base de tarefas. Quer que eu crie o Kanban padrão ("Zinom › Tarefas")?');
+    _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>');
     return;
   }
   /* candidatos encontrados */
@@ -3257,9 +3352,8 @@ async function runDetectTasks() {
   var btns = det.candidates.map(function (c) {
     return '<button class="btn btn-ghost btn-sm" type="button" data-use-tasks="' + escHtml(c.id) + '">Usar "' + escHtml(c.title) + '"</button>';
   }).join('');
-  btns += '<button class="btn btn-ghost btn-sm" type="button" data-create-tasks>Criar nova</button>';
+  btns += '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar nova</button>';
   _tasksActions(btns);
-  _tasksActionsWire();
 }
 
 async function runCreateTasks() {
@@ -3284,10 +3378,52 @@ async function runUseTasks(dataSourceId) {
   _tasksMsg('Configurando…');
   _tasksActions('');
   try {
-    await apiJSON('/portal/tasks/use', 'POST', { data_source_id: dataSourceId });
+    var res = await apiJSON('/portal/tasks/use', 'POST', { data_source_id: dataSourceId });
+    var info = await res.json().catch(function () { return null; });
+    if (!res.ok) {
+      /* 400 {error:'unreadable', message} — backend não conseguiu ler a base */
+      var msg = (info && info.message) || (info && info.error) || 'Não consegui usar essa base. Tente novamente.';
+      _tasksMsg(msg);
+      return;
+    }
+    /* o /use retorna o shape do info: mostra o que mapeou/faltou */
+    if (info && info.configured) {
+      window._tasksInfo = info;
+      var nMapped = (info.mapped || []).length;
+      var nMissing = (info.missing || []).length;
+      if (nMapped === 0) {
+        toast('Base configurada' + (nMissing ? ' — ' + nMissing + ' campo(s) sem correspondência' : '') + '.');
+      } else {
+        toast('Base "' + (info.title || 'Tarefas') + '" configurada — ' + nMapped +
+          (nMapped === 1 ? ' campo mapeado' : ' campos mapeados') +
+          (nMissing ? ', ' + nMissing + ' sem correspondência' : '') + '.');
+      }
+    }
     load();
   } catch (e) {
     _tasksMsg('Erro ao salvar. Tente novamente.');
+  }
+}
+
+/* POST /portal/tasks/upgrade — adiciona campos do template novo ao tracker padrão */
+async function runUpgradeTasks(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Atualizando…'; }
+  try {
+    var res = await apiJSON('/portal/tasks/upgrade', 'POST');
+    var b = await res.json().catch(function () { return {}; });
+    if (res.ok && b.ok) {
+      toast(b.added && b.added.length
+        ? 'Template atualizado: ' + b.added.join(', ')
+        : 'Template já estava atualizado.');
+      await loadTasksInfo();
+      renderActivation();
+    } else {
+      toast((b && b.error) || 'Não consegui atualizar o template.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Atualizar para o template novo'; }
+    }
+  } catch (e) {
+    toast('Erro de rede ao atualizar o template.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Atualizar para o template novo'; }
   }
 }
 
@@ -3368,11 +3504,12 @@ function init() {
   wireChat();
   wireAiTabs();
   wireDiag();
+  applyTaskPrompts();
 
-  /* rota inicial (suporta rota legada #chat e deep-link #guia-conectar) */
+  /* rota inicial (suporta rota legada #chat e deep-links #guia-conectar / #guia-tarefas) */
   var hash = (location.hash || '#inicio').slice(1).split('?')[0];
-  if (hash === 'guia-conectar') {
-    goGuiaConectar();
+  if (hash === 'guia-conectar' || hash === 'guia-tarefas') {
+    goGuiaSection(hash);
   } else {
     var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
     go(validViews.includes(hash) ? hash : 'inicio');
@@ -3390,7 +3527,7 @@ function init() {
 
 window.addEventListener('hashchange', function () {
   var h = (location.hash || '#inicio').slice(1).split('?')[0];
-  if (h === 'guia-conectar') { goGuiaConectar(); return; }
+  if (h === 'guia-conectar' || h === 'guia-tarefas') { goGuiaSection(h); return; }
   var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
   if (validViews.includes(h)) go(h);
 });

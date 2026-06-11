@@ -6,15 +6,50 @@
 export const ZINOM_PARENT_TITLE = "🧠 Zinom";
 export const TARGET_DB_TITLE = "Tarefas";
 
-/** Schema-alvo da DB "Tarefas" — o mínimo que o /meu-dia espera. */
+/** Schema-alvo da DB "Tarefas" — template padrão 003-tasks-v1 (Kanban completo:
+ *  status, prioridade, prazo, estimativa, fazer/cobrar, origem, projeto).
+ *  "Frente" saiu do template novo (o sinônimo frente→projeto cobre bases
+ *  antigas); "Tempo estimado" virou "Tempo estimado (min)". Cores das options
+ *  seguem a paleta aceita pela API (gray/blue/yellow/red/green/purple). */
 export const TARGET_PROPERTIES: Record<string, any> = {
   Nome: { title: {} },
   Status: {
-    select: { options: [{ name: "A fazer" }, { name: "Fazendo" }, { name: "Feito" }] },
+    select: {
+      options: [
+        { name: "Backlog", color: "gray" },
+        { name: "A fazer", color: "blue" },
+        { name: "Em andamento", color: "yellow" },
+        { name: "Bloqueada", color: "red" },
+        { name: "Concluída", color: "green" },
+        { name: "Cancelada", color: "gray" },
+      ],
+    },
+  },
+  Prioridade: {
+    select: {
+      options: [
+        { name: "Urgente", color: "red" },
+        { name: "Alta", color: "yellow" },
+        { name: "Média", color: "blue" },
+        { name: "Baixa", color: "gray" },
+      ],
+    },
   },
   Prazo: { date: {} },
-  "Tempo estimado": { number: { format: "number" } },
-  Frente: { select: { options: [] } },
+  "Tempo estimado (min)": { number: { format: "number" } },
+  Tipo: {
+    select: {
+      options: [
+        { name: "Fazer", color: "blue" },
+        { name: "Cobrar", color: "purple" },
+      ],
+    },
+  },
+  Quem: { rich_text: {} },
+  Origem: { url: {} },
+  Projeto: { select: { options: [] } },
+  "Criada em": { created_time: {} },
+  "Concluída em": { date: {} },
 };
 
 const TASKLIKE_NAME_RE = /tarefa|task|to-?do|afazer/i;

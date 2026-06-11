@@ -177,7 +177,7 @@
           <div class="onb-hero">
             <p class="eyebrow">bem-vindo</p>
             <h1>Vamos ligar seu segundo cérebro</h1>
-            <p class="lead">Quatro passos, uns 10 minutos. No final, sua IA favorita responde com o contexto das suas notas, reuniões e agenda.</p>
+            <p class="lead">Cinco passos, uns 10 minutos. No final, sua IA favorita responde com o contexto das suas notas, reuniões, tarefas e agenda.</p>
           </div>
 
           <div class="card" id="onb-card">
@@ -607,13 +607,20 @@
             </div>
           </div>
 
-          <!-- Painel: Claude Code -->
+          <!-- Painel: Claude Code (reescrito — 003-tasks-v1) -->
           <div class="ai-panel" id="ai-panel-claudecode" role="tabpanel" hidden>
-            <p class="ai-panel-desc">Para quem usa o Claude Code no terminal (ou Cursor / Windsurf).</p>
+            <p class="ai-panel-desc">Para quem usa o Claude Code no terminal (ou Cursor / Windsurf). Do zero ao Zinom respondendo, passo a passo.</p>
             <div class="step-list">
               <div class="step-item">
                 <div class="sc">
-                  Gere seu token pessoal — ele aparece <strong>uma única vez</strong> (se perder, gere outro):
+                  <strong>Pré-requisito:</strong> ter o Claude Code instalado. Se ainda não tem:
+                  <div class="code-block mt-sm">npm install -g @anthropic-ai/claude-code<button class="copy-btn" type="button" data-copy="npm install -g @anthropic-ai/claude-code">copiar</button></div>
+                  <p class="muted mt-sm" style="font-size:12.5px">Precisa do Node.js 18+. Guia completo em <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">docs.anthropic.com</a>.</p>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  <strong>Gere seu token pessoal</strong> — ele aparece <strong>uma única vez</strong> (se perder, gere outro):
                   <div class="flex wrap mt-sm">
                     <button class="btn btn-ghost btn-sm" type="button" id="token-gen-btn">Gerar token pessoal</button>
                   </div>
@@ -623,12 +630,44 @@
                 </div>
               </div>
               <div class="step-item">
-                <div class="sc">Cole o comando no terminal (gerado automaticamente após o passo anterior).</div>
+                <div class="sc">
+                  <strong>Cole o comando no terminal.</strong> Depois de gerar o token, o comando pronto aparece aqui:
+                  <div id="cc-cmd-area" class="mt-sm">
+                    <div class="code-block">claude mcp add -s user --transport http zinom https://zinom.ai/mcp --header "Authorization: Bearer &lt;seu-token&gt;"</div>
+                  </div>
+                  <p class="muted mt-sm" style="font-size:12.5px"><code>-s user</code> deixa o Zinom disponível em todas as suas pastas, não só na atual.</p>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  <strong>Verifique a conexão:</strong>
+                  <div class="code-block mt-sm">claude mcp list<button class="copy-btn" type="button" data-copy="claude mcp list">copiar</button></div>
+                  <p class="muted mt-sm" style="font-size:12.5px">Deve mostrar <code>zinom ✓ connected</code>. Dentro do Claude Code, digite <code>/mcp</code> para ver as ferramentas do Zinom.</p>
+                </div>
               </div>
               <div class="step-item step-item-test">
                 <div class="sc">
-                  <strong>Teste:</strong> pergunte ao Claude — <em>"O que tem no meu cérebro?"</em>
-                  <button class="copy-test-prompt btn btn-ghost btn-sm mt-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar prompt de teste</button>
+                  <strong>Teste de verdade:</strong> pergunte ao Claude —
+                  <div class="flex wrap mt-sm">
+                    <button class="copy-test-prompt btn btn-ghost btn-sm" type="button" data-copy="O que tem no meu cérebro?">Copiar: "O que tem no meu cérebro?"</button>
+                    <button class="copy-test-prompt btn btn-ghost btn-sm" type="button" data-copy="O que tenho pra fazer esta semana?">Copiar: "O que tenho pra fazer esta semana?"</button>
+                  </div>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  <strong>Resolver problemas:</strong>
+                  <ul class="cc-trouble">
+                    <li><strong>Token revogado ou perdido</strong> — gere um novo acima, rode <code>claude mcp remove zinom</code> e adicione de novo com o comando atualizado.</li>
+                    <li><strong>"Não conecta"</strong> — confira se o cabeçalho <code>Authorization</code> foi colado completo e entre aspas.</li>
+                    <li><strong>Ferramentas não aparecem</strong> — reinicie a sessão do Claude Code (saia e abra de novo).</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="step-item">
+                <div class="sc">
+                  <strong>O que fazer agora:</strong> conecte suas tarefas e deixe a IA planejar seu dia.
+                  <div class="mt-sm"><button class="btn btn-primary btn-sm" type="button" data-nav="guia" data-guia="tarefas">Ver tarefas e planejamento no Guia →</button></div>
                 </div>
               </div>
             </div>
@@ -699,11 +738,82 @@
           </div>
         </div>
 
+        <!-- Tarefas e planejamento (003-tasks-v1) -->
+        <p class="guia-eyebrow" id="guia-tarefas">tarefas e planejamento</p>
+        <div class="card" id="tasks-guide">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Do board ao dia planejado</h2>
+              <p class="card-sub">Suas tarefas vivem numa base do Notion que o Zinom conhece profundamente. Reuniões viram tarefas, a IA planeja seu dia cruzando agenda e board — e mantém tudo atualizado.</p>
+            </div>
+          </div>
+          <div class="step-list">
+
+            <!-- cap. 1: Onde suas tarefas vivem -->
+            <div class="step-item">
+              <div class="sc">
+                <strong>Onde suas tarefas vivem.</strong> Você pode usar uma base que já tem — o Zinom se adapta aos seus nomes de campos e status — ou criar o Kanban padrão Zinom, que traz tudo que a IA precisa:
+                <table class="tg-table">
+                  <thead><tr><th>Campo</th><th>Tipo</th><th>Para quê</th></tr></thead>
+                  <tbody>
+                    <tr><td>Nome</td><td>título</td><td>a tarefa em si</td></tr>
+                    <tr><td>Status</td><td>select</td><td>Backlog · A fazer · Em andamento · Bloqueada · Concluída · Cancelada</td></tr>
+                    <tr><td>Prioridade</td><td>select</td><td>Urgente · Alta · Média · Baixa</td></tr>
+                    <tr><td>Prazo</td><td>data</td><td>quando precisa estar pronta</td></tr>
+                    <tr><td>Tempo estimado (min)</td><td>número</td><td>a IA encaixa a tarefa nos espaços livres da agenda</td></tr>
+                    <tr><td>Tipo</td><td>select</td><td>Fazer (sua) · Cobrar (de alguém)</td></tr>
+                    <tr><td>Quem</td><td>texto</td><td>de quem cobrar</td></tr>
+                    <tr><td>Origem</td><td>URL</td><td>link da reunião ou página que gerou a tarefa</td></tr>
+                    <tr><td>Projeto</td><td>select</td><td>agrupar por frente de trabalho</td></tr>
+                    <tr><td>Criada em</td><td>automático</td><td>quando entrou no board</td></tr>
+                    <tr><td>Concluída em</td><td>data</td><td>preenchida ao concluir</td></tr>
+                  </tbody>
+                </table>
+                <div class="mt-sm"><button class="btn btn-primary btn-sm" type="button" data-nav="inicio">Configurar minha base no Início →</button></div>
+              </div>
+            </div>
+
+            <!-- cap. 2: Da reunião para a tarefa -->
+            <div class="step-item">
+              <div class="sc">
+                <strong>Da reunião para a tarefa.</strong> Toda reunião gera dois tipos de pendência: o que <strong>você</strong> tem que fazer (tipo Fazer) e o que você tem que <strong>cobrar</strong> de alguém (tipo Cobrar, com o nome da pessoa). A IA extrai os dois da transcrição, confere o que já existe no board e cria só o que falta — com o link da reunião como origem:
+                <div class="code-block mt-sm" id="guia-prompt-reuniao"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+                <p class="muted mt-sm" style="font-size:12.5px">Variação para uma reunião específica:</p>
+                <div class="code-block" id="guia-prompt-reuniao-especifica"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+              </div>
+            </div>
+
+            <!-- cap. 3: Planejar dia, semana e mês -->
+            <div class="step-item">
+              <div class="sc">
+                <strong>Planejar dia, semana e mês.</strong> A IA enxerga as duas pontas ao mesmo tempo: sua agenda real (eventos e espaços livres) e seu board (tarefas com prazo, prioridade e tempo estimado). O plano nasce desse cruzamento — e os blocktimes que você aprovar entram direto no Google Calendar (quando há conta Google conectada) ou ficam registrados como tarefa com horário no Notion (agenda por link iCal).
+                <p class="muted mt-sm" style="font-size:12.5px">Dia:</p>
+                <div class="code-block" id="guia-prompt-dia"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+                <p class="muted mt-sm" style="font-size:12.5px">Semana:</p>
+                <div class="code-block" id="guia-prompt-semana"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+                <p class="muted mt-sm" style="font-size:12.5px">Mês:</p>
+                <div class="code-block" id="guia-prompt-mes"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+              </div>
+            </div>
+
+            <!-- cap. 4: Manter o board vivo -->
+            <div class="step-item">
+              <div class="sc">
+                <strong>Manter o board vivo.</strong> Conclua, bloqueie e reprograme pelo chat, sem abrir o Notion: "concluí a proposta", "bloqueia a tarefa X, estou esperando o jurídico". Uma vez por semana, feche o ciclo:
+                <div class="code-block mt-sm" id="guia-prompt-revisao"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+                <p class="muted mt-sm" style="font-size:12.5px">E para não deixar cobrança morrer:</p>
+                <div class="code-block" id="guia-prompt-cobrancas"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Receitas -->
         <p class="guia-eyebrow">receitas para o dia a dia</p>
         <div class="filters" id="recipe-filters">
           <button class="fchip active" type="button" data-rcat="todas">Todas</button>
           <button class="fchip" type="button" data-rcat="reunioes">Reuniões</button>
+          <button class="fchip" type="button" data-rcat="tarefas">Tarefas</button>
           <button class="fchip" type="button" data-rcat="planejamento">Planejamento</button>
           <button class="fchip" type="button" data-rcat="conhecimento">Conhecimento</button>
           <button class="fchip" type="button" data-rcat="agenda">Agenda</button>
@@ -721,23 +831,47 @@
             <p class="rc-desc">Varre as últimas reuniões e lista o que você prometeu e ainda não fez.</p>
             <div class="code-block">Liste os follow-ups que assumi nas reuniões das últimas 2 semanas e que ainda não concluí.<button class="copy-btn" type="button" data-copy="Liste os follow-ups que assumi nas reuniões das últimas 2 semanas e que ainda não concluí.">copiar</button></div>
           </div>
+          <div class="recipe-card" data-rcat="tarefas">
+            <div class="recipe-head"><span class="tag ok">tarefas</span></div>
+            <h3>Extrair tarefas da reunião</h3>
+            <p class="rc-desc">Fazer e cobrar saem da transcrição direto para o board — sem duplicar o que já existe.</p>
+            <div class="code-block" id="recipe-task-reuniao"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="tarefas">
+            <div class="recipe-head"><span class="tag ok">tarefas</span></div>
+            <h3>Cobranças pendentes</h3>
+            <p class="rc-desc">Tudo que você está esperando de alguém, agrupado por pessoa.</p>
+            <div class="code-block" id="recipe-task-cobrancas"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="tarefas">
+            <div class="recipe-head"><span class="tag ok">tarefas</span></div>
+            <h3>Planejar a semana</h3>
+            <p class="rc-desc">Distribui o board pelos dias conforme prazo, prioridade e tempo estimado.</p>
+            <div class="code-block" id="recipe-task-semana"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+          </div>
+          <div class="recipe-card" data-rcat="tarefas">
+            <div class="recipe-head"><span class="tag ok">tarefas</span></div>
+            <h3>Fechar o dia</h3>
+            <p class="rc-desc">Atualiza o board no fim do dia: concluídas marcadas, pendentes reprogramadas.</p>
+            <div class="code-block" id="recipe-task-fechar-dia"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
+          </div>
           <div class="recipe-card" data-rcat="planejamento">
             <div class="recipe-head"><span class="tag">planejamento</span></div>
             <h3>Planejar meu dia</h3>
             <p class="rc-desc">Cruza tarefas abertas no Notion com os buracos da sua agenda.</p>
-            <div class="code-block">Planeja meu dia de amanhã com base nas tarefas abertas e nos espaços livres da agenda.<button class="copy-btn" type="button" data-copy="Planeja meu dia de amanhã com base nas tarefas abertas e nos espaços livres da agenda.">copiar</button></div>
+            <div class="code-block" id="recipe-plan-dia"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
           </div>
           <div class="recipe-card" data-rcat="planejamento">
             <div class="recipe-head"><span class="tag">planejamento</span></div>
             <h3>Blocktime de uma tarefa</h3>
-            <p class="rc-desc">A IA cria o evento direto no seu Google Calendar.</p>
+            <p class="rc-desc">Com Google Calendar conectado o evento entra direto na agenda; com iCal, a IA registra o bloco como tarefa com horário no Notion.</p>
             <div class="code-block">Aloca 2h amanhã de manhã para a tarefa "Proposta comercial Q3" e cria o evento.<button class="copy-btn" type="button" data-copy="Aloca 2h amanhã de manhã para a tarefa &quot;Proposta comercial Q3&quot; e cria o evento.">copiar</button></div>
           </div>
           <div class="recipe-card" data-rcat="planejamento">
             <div class="recipe-head"><span class="tag">planejamento</span></div>
             <h3>Revisão da semana</h3>
             <p class="rc-desc">Sexta-feira: o que andou, o que travou, o que fica pra próxima.</p>
-            <div class="code-block">Faz minha revisão da semana: decisões registradas, reuniões e tarefas concluídas vs. pendentes.<button class="copy-btn" type="button" data-copy="Faz minha revisão da semana: decisões registradas, reuniões e tarefas concluídas vs. pendentes.">copiar</button></div>
+            <div class="code-block" id="recipe-plan-revisao"><button class="copy-btn" type="button" data-copy="">copiar</button></div>
           </div>
           <div class="recipe-card" data-rcat="conhecimento">
             <div class="recipe-head"><span class="tag warn">conhecimento</span></div>

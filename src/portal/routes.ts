@@ -784,7 +784,10 @@ export function createPortalRouter(): express.Router {
     const accountId: string = res.locals.accountId;
     try {
       const { createTaskTracker } = await import("./task-tracker.js");
+      const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
       const { dataSourceId } = await createTaskTracker(accountId);
+      // tasks_db mudou → o profile cacheado (5 min) não pode sobreviver.
+      invalidateTrackerProfile(accountId);
       res.status(201).json({ data_source_id: dataSourceId });
     } catch (err: any) {
       console.error(`[portal] tasks/create ${accountId}: ${err?.message ?? err}`);
@@ -792,7 +795,10 @@ export function createPortalRouter(): express.Router {
     }
   });
 
-  // Usa uma DB existente que a pessoa escolheu (grava o id; não muta schema no MVP).
+  // Usa uma DB existente que a pessoa escolheu: VALIDA a leitura ANTES de
+  // persistir (lê o schema da base candidata via o seam do adapter, sem tocar o
+  // vault). Base legível grava MESMO com campos missing — o adapter se adapta ao
+  // schema; base ilegível → 400 sem gravar nada.
   router.post("/portal/tasks/use", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     const id = typeof req.body?.data_source_id === "string" ? req.body.data_source_id.trim() : "";
@@ -800,9 +806,56 @@ export function createPortalRouter(): express.Router {
       res.status(400).json({ error: "data_source_id obrigatório" });
       return;
     }
-    const { useExistingTracker } = await import("./task-tracker.js");
-    await useExistingTracker(accountId, id);
-    res.sendStatus(200);
+    try {
+      const { getTasksInfo, invalidateTrackerProfile } = await import("../tasks/adapter.js");
+      invalidateTrackerProfile(accountId);
+      let info: Awaited<ReturnType<typeof getTasksInfo>>;
+      try {
+        info = await getTasksInfo(accountId, { getTasksDbIdImpl: async () => id });
+        if (!info.configured) throw new Error("base não legível");
+      } catch (err: any) {
+        invalidateTrackerProfile(accountId);
+        console.warn(`[portal] tasks/use validate ${accountId}: ${err?.message ?? err}`);
+        res.status(400).json({
+          error: "unreadable",
+          message: "não consegui ler essa base agora — confira o acesso e tente de novo",
+        });
+        return;
+      }
+      const { useExistingTracker } = await import("./task-tracker.js");
+      await useExistingTracker(accountId, id);
+      invalidateTrackerProfile(accountId);
+      res.json({ ...info, configured: true });
+    } catch (err: any) {
+      console.error(`[portal] tasks/use ${accountId}: ${err?.message ?? err}`);
+      res.status(400).json({ error: err?.message ?? "não consegui usar essa base" });
+    }
+  });
+
+  // 003-tasks-v1: estado da base de tarefas — o que o adapter mapeou/faltou.
+  router.get("/portal/tasks/info", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { getTasksInfo } = await import("../tasks/adapter.js");
+      res.json(await getTasksInfo(accountId));
+    } catch (err: any) {
+      console.error(`[portal] tasks/info ${accountId}: ${err?.message ?? err}`);
+      res.status(502).json({ error: "não consegui ler sua base de tarefas agora" });
+    }
+  });
+
+  // 003-tasks-v1: upgrade ADITIVO do template padrão "Tarefas" (nunca muta base
+  // arbitrária do usuário — o módulo recusa título diferente de "Tarefas").
+  router.post("/portal/tasks/upgrade", requireSession, async (_req, res) => {
+    const accountId: string = res.locals.accountId;
+    try {
+      const { upgradeStandardTracker } = await import("../tasks/upgrade.js");
+      const r = await upgradeStandardTracker(accountId);
+      res.json({ ok: true, added: r.added });
+    } catch (err: any) {
+      console.error(`[portal] tasks/upgrade ${accountId}: ${err?.message ?? err}`);
+      res.status(400).json({ ok: false, error: err?.message ?? "não consegui atualizar o template" });
+    }
   });
 
   router.post("/portal/activation/ask", requireSession, async (_req, res) => {
