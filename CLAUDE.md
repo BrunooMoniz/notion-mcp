@@ -13,6 +13,25 @@ pm2 start ecosystem.config.cjs  # production
 
 Port: 3456 (default). Health check: `GET /health`.
 
+## Change flow (dev → production)
+
+- Work on a branch. `main` is protected: CI `build-test` (build + unit tests) is a
+  required check and merges happen only via PR.
+- `gh` is not installed on this machine. Open and merge PRs through the GitHub API
+  using the token from `git credential fill` (host `github.com`). Never print the token.
+- Routine deploy after a merge to `main` (skip for docs-only changes):
+  ```bash
+  ssh zinom-vps "cd /home/moniz/notion-mcp && git pull --ff-only && npm ci && npm run build && npm run migrate && pm2 restart notion-mcp brain-indexer brain-classifier --update-env"
+  ```
+  Then verify: `GET /health` returns 200, `GET /status` (Bearer) shows no
+  `stale_or_failing`, and `https://zinom.ai/mcp` answers 401 (the 401 proves the
+  Cloudflare proxy → VPS path is alive). Ops details: `docs/RUNBOOK.md`.
+- The public entry point lives in the separate `zinom-site` repo (Cloudflare Worker).
+  There, every push to its `main` IS a production deploy (Workers Builds, no CI):
+  push only with `src/worker.js` and `wrangler.jsonc` intact, then re-check the 401 above.
+- Plans and specs live in `docs/superpowers/{plans,specs}/` (master plan:
+  `2026-06-09-plano-mestre-segundo-cerebro.md`) plus `docs/ROADMAP.md` and `specs/`.
+
 ## Project structure
 
 ```
