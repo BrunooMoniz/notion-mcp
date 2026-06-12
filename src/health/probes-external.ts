@@ -129,6 +129,20 @@ async function checkResend(f: typeof fetch): Promise<CheckResult> {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  // Chave restrita a envio (caso da produção): /domains responde 401 com
+  // name=restricted_api_key. A chave está VIVA e cumpre seu papel (enviar
+  // magic links) — é saudável. Chave inválida responde 401 com outro name.
+  const bodyName = (t.body as { name?: string } | undefined)?.name;
+  if (t.status === 401 && bodyName === "restricted_api_key") {
+    return {
+      checkId: "resend",
+      label: "Resend",
+      group: "parceiros",
+      status: "ok",
+      latencyMs: t.ms,
+      detail: { restricted: true },
+    };
+  }
   return buildResult("resend", "Resend", "parceiros", t, (s) => s >= 200 && s < 300);
 }
 
@@ -184,7 +198,15 @@ async function checkProxyPublico(f: typeof fetch): Promise<CheckResult> {
 async function checkNtfy(f: typeof fetch): Promise<CheckResult> {
   const url = process.env.NTFY_URL;
   if (!url) return { checkId: "ntfy", label: "ntfy", group: "parceiros", status: "skip" };
-  const t = await timed(f, url, { method: "HEAD" });
+  // O ntfy não aceita HEAD no tópico (404 no servidor da VPS); o endpoint
+  // canônico de saúde é GET /v1/health na raiz do servidor.
+  let healthUrl: string;
+  try {
+    healthUrl = new URL("/v1/health", url).toString();
+  } catch {
+    return { checkId: "ntfy", label: "ntfy", group: "parceiros", status: "fail", error: "NTFY_URL inválida" };
+  }
+  const t = await timed(f, healthUrl, { method: "GET" });
   return buildResult("ntfy", "ntfy", "parceiros", t, (s) => s >= 200 && s < 300);
 }
 

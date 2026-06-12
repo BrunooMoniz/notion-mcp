@@ -82,9 +82,9 @@ vs. orçamento mensal configurado** (`HEALTH_BUDGET_*`), o que dá o mesmo sinal
 | `notion:<ws>` | `GET /v1/users/me` por workspace token | `NOTION_*_TOKEN` | zero | 8s |
 | `anthropic` | `GET /v1/models` | `ANTHROPIC_API_KEY` | zero | 8s |
 | `voyage` | `POST /v1/embeddings` input `"ping"` | `VOYAGE_API_KEY` | ~1 token (≈$0,0000002) | 8s |
-| `resend` | `GET /domains` | `RESEND_API_KEY` | zero | 8s |
+| `resend` | `GET /domains` (401 `restricted_api_key` = ok: chave de envio válida) | `RESEND_API_KEY` | zero | 8s |
 | `stripe` | `GET /v1/balance` | `STRIPE_SECRET_KEY` | zero | 8s |
-| `ntfy` | `HEAD NTFY_URL` | — | zero | 5s |
+| `ntfy` | `GET <raiz do NTFY_URL>/v1/health` (o tópico não aceita HEAD) | — | zero | 8s |
 | `budget:anthropic` | `getOrgCostReport()` MTD vs env | `ANTHROPIC_ADMIN_KEY` | zero (cache 1h) | 10s |
 | `budget:voyage` | `usage_log` embed_tokens MTD × custo vs env | pool | zero | 5s |
 
