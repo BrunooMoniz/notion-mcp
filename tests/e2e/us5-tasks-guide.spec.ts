@@ -1,6 +1,7 @@
 // tests/e2e/us5-tasks-guide.spec.ts — 003-tasks-v1: the new-user onboarding
-// offers the tasks choice (use an existing Notion base vs create the standard
-// Zinom Kanban), and the Guia teaches the tasks+planning flow linearly.
+// offers the tasks choice (pick where the standard Zinom tracker is born —
+// workspace + page — create it at the workspace top, or point to an existing
+// Notion base), and the Guia teaches the tasks+planning flow linearly.
 import { test, expect } from "@playwright/test";
 import { registerAndSignIn } from "./helpers.js";
 
@@ -21,8 +22,9 @@ test("onboarding novo tem o passo de tarefas com escolha dupla; sem Notion orien
   expect(icalRes.ok()).toBeTruthy();
   await page.reload();
 
+  await expect(page.locator("#onb-steps")).toContainText("Escolher onde criar (recomendado)");
+  await expect(page.locator("#onb-steps")).toContainText("Criar no topo do workspace");
   await expect(page.locator("#onb-steps")).toContainText("Já tenho uma base no Notion");
-  await expect(page.locator("#onb-steps")).toContainText("Criar o Kanban padrão Zinom");
 
   // Without Notion connected, detect guides the user to connect it first.
   await page.click("#onb-steps [data-tasks-detect]");

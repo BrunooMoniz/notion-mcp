@@ -794,11 +794,15 @@ export function createPortalRouter(): express.Router {
   });
 
   // Detecta candidatas a Task Tracker no Notion da conta (não escreve nada).
-  router.post("/portal/tasks/detect", requireSession, async (_req, res) => {
+  // Body opcional {workspace}: conta com >1 Notion sem workspace responde
+  // {status:"workspace_required", workspaces, candidates:[]}.
+  router.post("/portal/tasks/detect", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
+    const workspace =
+      typeof req.body?.workspace === "string" && req.body.workspace.trim() ? req.body.workspace.trim() : undefined;
     try {
       const { detectTaskTracker } = await import("./task-tracker.js");
-      res.json(await detectTaskTracker(accountId));
+      res.json(await detectTaskTracker(accountId, { workspace }));
     } catch (err: any) {
       console.error(`[portal] tasks/detect ${accountId}: ${err?.message ?? err}`);
       res.status(502).json({ error: "não consegui ler seu Notion agora" });
@@ -831,21 +835,28 @@ export function createPortalRouter(): express.Router {
       res.status(201).json({ data_source_id: dataSourceId, url: info?.url ?? null, title: info?.title ?? null });
     } catch (err: any) {
       console.error(`[portal] tasks/create ${accountId}: ${err?.message ?? err}`);
+      if (err?.name === "WorkspaceRequiredError") {
+        res.status(400).json({ error: "workspace_required", workspaces: err.workspaces });
+        return;
+      }
       res.status(400).json({ error: err?.message ?? "não consegui criar as Tarefas" });
     }
   });
 
   // Busca páginas candidatas a "casa" da base de Tarefas (picker da UI).
+  // ?workspace= opcional: restringe a busca a esse Notion conectado.
   router.get("/portal/tasks/pages", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const workspace =
+      typeof req.query.workspace === "string" && req.query.workspace.trim() ? req.query.workspace.trim() : undefined;
     if (!q) {
       res.json({ pages: [] });
       return;
     }
     try {
       const { searchParentPages } = await import("./task-tracker.js");
-      res.json({ pages: await searchParentPages(accountId, q) });
+      res.json({ pages: await searchParentPages(accountId, q, { workspace }) });
     } catch (err: any) {
       console.error(`[portal] tasks/pages ${accountId}: ${err?.message ?? err}`);
       res.status(502).json({ error: "não consegui buscar páginas no seu Notion agora" });
