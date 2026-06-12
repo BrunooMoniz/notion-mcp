@@ -1962,6 +1962,36 @@ function wireGraphToolbar() {
   });
 }
 
+/* ---- últimos documentos da entidade no painel lateral ---- */
+async function loadGraphPanelDocs(entityId, docList, docItems) {
+  docList.setAttribute('data-ent', String(entityId));
+  try {
+    var r = await api('/portal/brain/entities/' + entityId + '/documents?limit=5');
+    if (!r.ok) return;
+    var d = await r.json();
+    /* resposta de outro nó já selecionado nesse meio tempo: descarta */
+    if (docList.getAttribute('data-ent') !== String(entityId)) return;
+    var docs = (d.documents || d.docs || []).slice(0, 5);
+    if (!docs.length) return;
+    docItems.innerHTML = docs.map(function(doc) {
+      var title = doc.title || doc.label || 'Sem título';
+      var dateIso = doc.date || doc.last_seen || doc.indexed_at || null;
+      var dateTxt = '';
+      if (dateIso) {
+        var dt = new Date(dateIso);
+        if (!isNaN(dt.getTime())) dateTxt = dt.toLocaleDateString('pt-BR');
+      }
+      var url = doc.parent_url || doc.url || null;
+      var inner = '<span class="panel-doc-title">' + escapeHtml(title) + '</span>' +
+        (dateTxt ? '<span class="panel-doc-date">' + dateTxt + '</span>' : '');
+      return url && isHttpUrl(url)
+        ? '<a class="panel-doc-item" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + inner + '</a>'
+        : '<div class="panel-doc-item">' + inner + '</div>';
+    }).join('');
+    docList.style.display = 'block';
+  } catch (_e) { /* lista de docs é complementar; painel segue útil sem ela */ }
+}
+
 /* ---- open the side panel for a clicked node ---- */
 function openGraphPanel(nodeData) {
   var panel = document.getElementById('graph-panel');
@@ -1982,6 +2012,10 @@ function openGraphPanel(nodeData) {
 
   panel.classList.add('open');
   nameEl.textContent = nodeData.label;
+
+  var docList = document.getElementById('graph-panel-doclist');
+  var docItems = document.getElementById('graph-panel-doclist-items');
+  if (docList && docItems) { docList.style.display = 'none'; docItems.innerHTML = ''; }
 
   if (nodeData.kind === 'entity') {
     var TYPE_PT = { pessoa: 'Pessoa', empresa: 'Empresa', projeto: 'Projeto' };
@@ -2018,6 +2052,9 @@ function openGraphPanel(nodeData) {
 
     if (renameBtn) renameBtn.style.display = '';
     if (mergeBtn) mergeBtn.style.display = '';
+
+    var entId = parseInt(nodeData.id.slice(2), 10);
+    if (docList && docItems && !isNaN(entId)) loadGraphPanelDocs(entId, docList, docItems);
   } else {
     // doc node
     metaEl.textContent = (nodeData.type || '') + ' · ' + nodeData.weight + ' menções';
