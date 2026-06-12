@@ -1163,6 +1163,9 @@ export function createPortalRouter(): express.Router {
   //   ?entity_id=N          legacy single entity_id (still supported)
   //   ?include_docs=true    include doc nodes in focus mode (default false)
   //   ?max_nodes=N          cap (overview default 40, focus default 60, max 150)
+  //   ?days=N               janela temporal em dias (clamp 1..3650; lixo = sem janela)
+  //   ?group_by=community|type  agrupamento por nó (default none; lixo = none)
+  //   ?min_edge_weight=N    mínimo de co-ocorrência por aresta (default 2, clamp 1..50)
   router.get("/portal/brain/graph", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
     if (process.env.ENTITIES_ENABLED !== "true") {
@@ -1195,6 +1198,27 @@ export function createPortalRouter(): express.Router {
           ? parseInt(req.query.max_nodes, 10) || undefined
           : undefined;
 
+      // v2: days / group_by / min_edge_weight — lixo é ignorado silenciosamente
+      // (vira default); clamp espelhado em buildBrainGraph.
+      const daysRaw =
+        typeof req.query.days === "string" ? parseInt(req.query.days, 10) : NaN;
+      const days = Number.isFinite(daysRaw)
+        ? Math.min(Math.max(daysRaw, 1), 3650)
+        : undefined;
+
+      const group_by =
+        req.query.group_by === "community" || req.query.group_by === "type"
+          ? req.query.group_by
+          : undefined;
+
+      const mewRaw =
+        typeof req.query.min_edge_weight === "string"
+          ? parseInt(req.query.min_edge_weight, 10)
+          : NaN;
+      const min_edge_weight = Number.isFinite(mewRaw)
+        ? Math.min(Math.max(mewRaw, 1), 50)
+        : undefined;
+
       const graph = await buildBrainGraph(accountId, {
         mode,
         type,
@@ -1202,6 +1226,9 @@ export function createPortalRouter(): express.Router {
         entity_id,
         include_docs,
         max_nodes,
+        days,
+        group_by,
+        min_edge_weight,
       });
       res.json(graph);
     } catch (err: any) {
