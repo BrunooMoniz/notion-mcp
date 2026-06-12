@@ -97,6 +97,36 @@ test("Notion workspace with a failed run → erro, error truncated", () => {
   assert.ok(entry.error!.endsWith("…"));
 });
 
+test("workspace sintético (sem credencial Notion) não vira fonte Notion", () => {
+  // Bug #96 (1): quando um friend conecta Granola/iCal, ensureAccountWorkspace
+  // registra o workspace "personal" em account_workspaces SEM credencial Notion.
+  // Esse workspace sintético não pode aparecer como fonte Notion fantasma.
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [
+      { workspace: "ws-real", name: "Caderno", hasCredential: true },
+      { workspace: "personal", name: null, hasCredential: false },
+    ],
+    hasGranola: true,
+  };
+  const result = buildActivitySources(creds, [], false);
+  const notion = result.filter((e) => e.source_type === "notion");
+  assert.equal(notion.length, 1);
+  assert.equal(notion[0].source, "notion-ws-real");
+  // Granola continua com a própria entrada
+  assert.equal(result.filter((e) => e.source_type === "granola").length, 1);
+});
+
+test("workspace sem o campo hasCredential continua aparecendo (compat)", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [{ workspace: "ws-legacy", name: "Legacy" }],
+  };
+  const result = buildActivitySources(creds, [], false);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "notion-ws-legacy");
+});
+
 test("multiple Notion workspaces → one entry each", () => {
   const creds: ActivityCredentials = {
     ...NO_CREDS,

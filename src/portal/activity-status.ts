@@ -54,6 +54,11 @@ export interface LiveCountsEntry {
 export interface NotionWorkspaceInput {
   workspace: string; // Notion workspace id
   name: string | null;
+  /** Whether the workspace has a Notion credential in the vault
+   *  (notion_pat:<ws> or notion_access:<ws>). Workspaces registered only as a
+   *  bearer-scope tag for Granola/iCal (e.g. the synthetic FRIEND_WORKSPACE)
+   *  have none and must NOT appear as a Notion source. Absent = true (compat). */
+  hasCredential?: boolean;
 }
 
 export interface IcalLinkInput {
@@ -143,6 +148,10 @@ export function buildActivitySources(
 
   // ---- Notion workspaces ----
   for (const ws of credentials.notionWorkspaces) {
+    // Bug #96 (1): skip credential-less workspaces (synthetic Granola/iCal scope
+    // tags) — they are not Notion sources and would show a ghost
+    // "aguardando_primeira_indexacao" entry forever.
+    if (ws.hasCredential === false) continue;
     const sourceKey = `notion-${ws.workspace}`;
     const run = runMap.get(sourceKey) ?? null;
     const estado = stateFromRun(run, running, runningSince);

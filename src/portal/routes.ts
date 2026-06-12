@@ -601,7 +601,13 @@ export function createPortalRouter(): express.Router {
       );
       activitySources = buildActivitySources(
         {
-          notionWorkspaces: notionWs.map((w) => ({ workspace: w.workspace, name: w.name })),
+          notionWorkspaces: notionWs.map((w) => ({
+            workspace: w.workspace,
+            name: w.name,
+            // sem credencial Notion no vault (workspace sintético do Granola/iCal)
+            // → não é fonte Notion (bug #96)
+            hasCredential: w.connection_type !== null,
+          })),
           hasGranola: granolaState.set,
           icalLinks: icalLinks.map((l) => ({ id: l.id, label: l.label })),
           googleAccounts: googleAccounts.map((g) => ({ email: g.email })),
