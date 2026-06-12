@@ -8,9 +8,12 @@ import {
   accountIdForWorkspace,
   exchangeCodeForToken,
   onboardAccount,
+  associateNotionToAccount,
+  associatePatToAccount,
   type NotionTokenResponse,
 } from "../../notion-oauth.js";
 import { __setPoolForTest } from "../storage.js";
+import { warmAccount, isWarmed, __clearAccountTokenCache } from "../../account-tokens.js";
 
 const HEXKEY = "ab".repeat(32);
 afterEach(() => __setPoolForTest(null));
@@ -222,4 +225,34 @@ test("onboardPat creates a notion-pat account and stores the PAT encrypted", asy
   assert.match(String(secret.params[1]), /^notion_pat:/);
   assert.match(String(secret.params[2]), /^v1:/);
   assert.doesNotMatch(String(secret.params[2]), /ntn_secret_pat/);
+});
+
+// Bug #96 (2b): conectar um workspace novo precisa derrubar o cache de tokens
+// da conta para o próximo run enxergar a credencial fresca.
+test("associateNotionToAccount invalida o cache de tokens da conta", async () => {
+  process.env.SECRETS_KEY = HEXKEY;
+  __setPoolForTest({ query: async () => ({ rows: [] }) } as never);
+  await warmAccount("friend:f1");
+  assert.equal(isWarmed("friend:f1"), true);
+
+  await associateNotionToAccount("friend:f1", {
+    access_token: "ntn_access",
+    workspace_id: "ws-new",
+    workspace_name: "WS Nova",
+  } as NotionTokenResponse);
+
+  assert.equal(isWarmed("friend:f1"), false);
+  __clearAccountTokenCache();
+});
+
+test("associatePatToAccount invalida o cache de tokens da conta", async () => {
+  process.env.SECRETS_KEY = HEXKEY;
+  __setPoolForTest({ query: async () => ({ rows: [] }) } as never);
+  await warmAccount("friend:f2");
+  assert.equal(isWarmed("friend:f2"), true);
+
+  await associatePatToAccount("friend:f2", "ntn_pat_token", { id: "ws-pat", name: "WS PAT" });
+
+  assert.equal(isWarmed("friend:f2"), false);
+  __clearAccountTokenCache();
 });

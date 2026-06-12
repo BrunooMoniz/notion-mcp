@@ -97,6 +97,36 @@ test("Notion workspace with a failed run → erro, error truncated", () => {
   assert.ok(entry.error!.endsWith("…"));
 });
 
+test("workspace sintético (sem credencial Notion) não vira fonte Notion", () => {
+  // Bug #96 (1): quando um friend conecta Granola/iCal, ensureAccountWorkspace
+  // registra o workspace "personal" em account_workspaces SEM credencial Notion.
+  // Esse workspace sintético não pode aparecer como fonte Notion fantasma.
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [
+      { workspace: "ws-real", name: "Caderno", hasCredential: true },
+      { workspace: "personal", name: null, hasCredential: false },
+    ],
+    hasGranola: true,
+  };
+  const result = buildActivitySources(creds, [], false);
+  const notion = result.filter((e) => e.source_type === "notion");
+  assert.equal(notion.length, 1);
+  assert.equal(notion[0].source, "notion-ws-real");
+  // Granola continua com a própria entrada
+  assert.equal(result.filter((e) => e.source_type === "granola").length, 1);
+});
+
+test("workspace sem o campo hasCredential continua aparecendo (compat)", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [{ workspace: "ws-legacy", name: "Legacy" }],
+  };
+  const result = buildActivitySources(creds, [], false);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "notion-ws-legacy");
+});
+
 test("multiple Notion workspaces → one entry each", () => {
   const creds: ActivityCredentials = {
     ...NO_CREDS,
@@ -354,6 +384,46 @@ test("all four source types present → four entries in correct order", () => {
   assert.equal(result[1].source_type, "granola");
   assert.equal(result[2].source_type, "calendar");
   assert.equal(result[3].source_type, "gcal");
+});
+
+// ---- plan limit (bug #96 3) --------------------------------------------------
+
+test("run com error=plan_limit → plan_limit:true, estado indisponivel_no_plano, sem error cru", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [{ workspace: "ws-a", name: "W" }],
+  };
+  const runs = [
+    makeRun("notion-ws-a", { ok: false, error: "plan_limit", counts: { documents: 3, chunks: 10 } }),
+  ];
+  const [entry] = buildActivitySources(creds, runs, false);
+  assert.equal(entry.plan_limit, true);
+  assert.equal(entry.estado, "indisponivel_no_plano");
+  // o front renderiza o chip de upgrade a partir de plan_limit; não vaza "plan_limit" como erro
+  assert.equal(entry.error, null);
+  // counts parciais preservados
+  assert.deepEqual(entry.counts, { documents: 3, chunks: 10 });
+});
+
+test("run com counts skipped=plan_limit → plan_limit:true (fonte pulada após o teto)", () => {
+  const creds: ActivityCredentials = { ...NO_CREDS, hasGranola: true };
+  const runs = [makeRun("granola-personal", { counts: { skipped: "plan_limit" } })];
+  const [entry] = buildActivitySources(creds, runs, false);
+  assert.equal(entry.plan_limit, true);
+  assert.equal(entry.estado, "indisponivel_no_plano");
+});
+
+test("fontes normais → plan_limit:false", () => {
+  const creds: ActivityCredentials = {
+    ...NO_CREDS,
+    notionWorkspaces: [{ workspace: "ws-a", name: "W" }],
+    hasGranola: true,
+  };
+  const runs = [makeRun("notion-ws-a"), makeRun("granola-friend", { ok: false, error: "boom" })];
+  const result = buildActivitySources(creds, runs, false);
+  for (const e of result) {
+    assert.equal(e.plan_limit, false);
+  }
 });
 
 test("error field is null when estado is ok (no leak)", () => {

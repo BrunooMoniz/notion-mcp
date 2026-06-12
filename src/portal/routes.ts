@@ -575,6 +575,7 @@ export function createPortalRouter(): express.Router {
     const running = reindexInFlight.has(accountId);
     let activitySources: unknown[] = [];
     let counts: unknown = { bySource: [], totals: { documents: 0, chunks: 0 } };
+    let planLimit = false;
     try {
       const { getStatus, getBrainCounts, getActivitySourceCounts } = await import("../rag/storage.js");
       const { summarizeStatus } = await import("../rag/status.js");
@@ -589,7 +590,9 @@ export function createPortalRouter(): express.Router {
           getStatus(accountId),
           getBrainCounts(accountId),
           getActivitySourceCounts(accountId).catch(() => []),
-          lnw(accountId).catch(() => [] as { workspace: string; name: string | null }[]),
+          lnw(accountId).catch(
+            () => [] as { workspace: string; name: string | null; connection_type: string | null }[],
+          ),
           lim(accountId).catch(() => [] as { id: string; label: string }[]),
           ggm(accountId).catch(() => ({ set: false, masked: null })),
           lgam(accountId).catch(() => [] as { email: string }[]),
@@ -601,7 +604,13 @@ export function createPortalRouter(): express.Router {
       );
       activitySources = buildActivitySources(
         {
-          notionWorkspaces: notionWs.map((w) => ({ workspace: w.workspace, name: w.name })),
+          notionWorkspaces: notionWs.map((w) => ({
+            workspace: w.workspace,
+            name: w.name,
+            // sem credencial Notion no vault (workspace sintético do Granola/iCal)
+            // → não é fonte Notion (bug #96)
+            hasCredential: w.connection_type !== null,
+          })),
           hasGranola: granolaState.set,
           icalLinks: icalLinks.map((l) => ({ id: l.id, label: l.label })),
           googleAccounts: googleAccounts.map((g) => ({ email: g.email })),
@@ -611,11 +620,16 @@ export function createPortalRouter(): express.Router {
         { liveCounts, runningSince: reindexInFlight.get(accountId) ?? null },
       );
       counts = brainCounts;
+      // bug #96 (3): alguma fonte bateu no teto de chunks do plano → o front
+      // mostra o aviso de upgrade.
+      planLimit = (activitySources as Array<{ plan_limit?: boolean }>).some(
+        (s) => s.plan_limit === true,
+      );
     } catch (err: any) {
       // light dev server / no pgvector — still report the running flag.
       console.warn(`[portal] status unavailable: ${err?.message ?? err}`);
     }
-    res.json({ running, sources: activitySources, counts });
+    res.json({ running, plan_limit: planLimit, sources: activitySources, counts });
   });
 
   // GET /portal/brain/documents — browse the account's indexed documents (one row

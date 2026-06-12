@@ -8,6 +8,7 @@
 // which would break unit tests) — the OAuth token endpoint needs no Notion-Version.
 import { setAccountSecret } from "./secrets.js";
 import { getPool } from "./rag/storage.js";
+import { invalidateAccountTokens } from "./account-tokens.js";
 
 const AUTHORIZE_URL = "https://api.notion.com/v1/oauth/authorize";
 const TOKEN_URL = "https://api.notion.com/v1/oauth/token";
@@ -140,6 +141,9 @@ export async function associateNotionToAccount(
   if (tok.refresh_token) {
     await setAccountSecret(accountId, `notion_refresh:${workspace}`, tok.refresh_token);
   }
+  // Bug #96 (2b): drop the stale token cache so the next run sees the fresh
+  // credential without waiting for a restart/warm.
+  invalidateAccountTokens(accountId);
   return { accountId, workspace };
 }
 
@@ -164,6 +168,9 @@ export async function associatePatToAccount(
     [accountId, workspace, identity.name ?? null],
   );
   await setAccountSecret(accountId, `notion_pat:${workspace}`, pat);
+  // Bug #96 (2b): drop the stale token cache so the next run sees the fresh
+  // credential without waiting for a restart/warm.
+  invalidateAccountTokens(accountId);
   return { workspace };
 }
 
