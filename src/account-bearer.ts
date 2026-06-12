@@ -61,6 +61,21 @@ export async function accountWorkspaces(accountId: string): Promise<string[]> {
   return rows.map((r) => r.workspace);
 }
 
+/** Like accountWorkspaces, but with the human display name (0010) of each
+ *  workspace. Feeds the per-session brain_index_url schema (#97) so a friend's
+ *  AI sees "<uuid> = <Nome>" for ITS workspaces instead of the operator's
+ *  private workspace names. Same created_at ASC ordering. */
+export async function accountWorkspacesWithNames(
+  accountId: string,
+): Promise<{ workspace: string; name: string | null }[]> {
+  const p = getPool();
+  const { rows } = await p.query<{ workspace: string; name: string | null }>(
+    `SELECT workspace, name FROM account_workspaces WHERE account_id=$1 ORDER BY created_at ASC`,
+    [accountId],
+  );
+  return rows;
+}
+
 /** True iff the account already has at least one MCP bearer issued. Lets the
  *  portal show "token gerado" vs "gerar token" without revealing the token. */
 export async function accountHasBearer(accountId: string): Promise<boolean> {

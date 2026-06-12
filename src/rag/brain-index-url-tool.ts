@@ -5,7 +5,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getClient, notionFetch, type Workspace } from "../clients.js";
-import { assertWorkspaceScope, getAccountId } from "../context.js";
+import { assertWorkspaceScope, getAccountId, getContext } from "../context.js";
+import { isOwnerContext } from "../mcp-account-config.js";
+import { accountWorkspacesWithNames } from "../account-bearer.js";
 import { chunkText } from "./chunker.js";
 import { batchEmbed } from "./embeddings.js";
 import { deleteBySource, upsertChunks } from "./storage.js";
@@ -114,10 +116,76 @@ async function indexDataSource(
   return { pages, truncated };
 }
 
-export function registerBrainIndexUrlTool(server: McpServer): void {
-  server.tool(
-    "brain_index_url",
-    `Index a Notion page, database, or data_source into Bruno's brain RAG on demand.
+// ---------- per-session workspace schema (Frente B #97, multi-tenant) ----------
+
+/** One connected Notion workspace of an account (account_workspaces row). */
+export interface AccountWorkspaceEntry {
+  workspace: string;
+  name: string | null;
+}
+
+/** Injectable registration deps. Ownership and the account come ONLY from the
+ *  trusted request context (the per-session registration in index.ts runs
+ *  inside the auth middleware's scope), never from tool input. */
+export interface BrainIndexUrlRegistrationDeps {
+  isOwner(): boolean;
+  getAccountId(): string;
+  listWorkspaces(accountId: string): Promise<AccountWorkspaceEntry[]>;
+}
+
+const defaultRegistrationDeps: BrainIndexUrlRegistrationDeps = {
+  isOwner: () => isOwnerContext(getContext()),
+  getAccountId,
+  listWorkspaces: accountWorkspacesWithNames,
+};
+
+export const NO_NOTION_WORKSPACE_MESSAGE =
+  "Esta conta não tem nenhum workspace Notion conectado — conecte um Notion no portal primeiro e tente de novo.";
+
+/** The operator keeps the original fixed enum of his three workspaces. */
+const OPERATOR_WORKSPACE_SCHEMA = z
+  .enum(["personal", "globalcripto", "nora"])
+  .describe("Which Notion workspace's PAT to use for the read");
+
+export interface FriendWorkspaceParam {
+  /** Session-scoped zod schema for the `workspace` argument. */
+  schema: z.ZodTypeAny;
+  /** False when the account has no Notion connected — the handler must answer
+   *  a clear runtime error instead of indexing. */
+  hasWorkspaces: boolean;
+}
+
+/** Build the `workspace` schema a FRIEND session sees: an enum with the
+ *  account's OWN workspace ids (UUIDs) plus the display names in the
+ *  description ("313d872b… = Global Cripto"). The operator's private workspace
+ *  names never appear on a friend's tool surface. */
+export function buildFriendWorkspaceParam(
+  workspaces: AccountWorkspaceEntry[],
+): FriendWorkspaceParam {
+  if (workspaces.length === 0) {
+    return {
+      schema: z
+        .string()
+        .optional()
+        .describe(
+          "Nenhum workspace Notion conectado nesta conta — conecte um Notion no portal primeiro.",
+        ),
+      hasWorkspaces: false,
+    };
+  }
+  const ids = workspaces.map((w) => w.workspace) as [string, ...string[]];
+  const legend = workspaces
+    .map((w) => (w.name ? `${w.workspace} = ${w.name}` : w.workspace))
+    .join("; ");
+  return {
+    schema: z
+      .enum(ids)
+      .describe(`Workspace Notion desta conta a usar na leitura. Conectados: ${legend}`),
+    hasWorkspaces: true,
+  };
+}
+
+const OWNER_DESCRIPTION = `Index a Notion page, database, or data_source into Bruno's brain RAG on demand.
 
 Accepts a full notion.so URL or a raw 32-hex ID. Tries page → data_source → database (which expands to its data_sources).
 
@@ -127,11 +195,38 @@ Use cases:
 
 The page/data_source must be accessible by the workspace's PAT — the tool will return an error otherwise.
 
-Returns counts and per-page indexing stats.`,
+Returns counts and per-page indexing stats.`;
+
+const FRIEND_DESCRIPTION = `Indexa uma página, database ou data_source do Notion no cérebro desta conta, sob demanda.
+
+Aceita uma URL notion.so completa ou um ID de 32 hex. Tenta page → data_source → database (que expande para seus data_sources).
+
+Use quando a pessoa compartilhar um link do Notion e quiser que ele fique pesquisável no brain_search imediatamente.
+
+A página precisa estar acessível pelo Notion conectado desta conta — caso contrário a tool retorna erro.
+
+Retorna contadores e estatísticas de indexação por página.`;
+
+export async function registerBrainIndexUrlTool(
+  server: McpServer,
+  deps: BrainIndexUrlRegistrationDeps = defaultRegistrationDeps,
+): Promise<void> {
+  // #97 — the tool surface is built PER SESSION: the operator keeps the fixed
+  // 3-workspace enum; a friend account gets an enum with ITS workspaces only.
+  const owner = deps.isOwner();
+  let workspaceSchema: z.ZodTypeAny = OPERATOR_WORKSPACE_SCHEMA;
+  let hasWorkspaces = true;
+  if (!owner) {
+    const param = buildFriendWorkspaceParam(await deps.listWorkspaces(deps.getAccountId()));
+    workspaceSchema = param.schema;
+    hasWorkspaces = param.hasWorkspaces;
+  }
+
+  server.tool(
+    "brain_index_url",
+    owner ? OWNER_DESCRIPTION : FRIEND_DESCRIPTION,
     {
-      workspace: z
-        .enum(["personal", "globalcripto", "nora"])
-        .describe("Which Notion workspace's PAT to use for the read"),
+      workspace: workspaceSchema,
       url: z
         .string()
         .min(1)
@@ -145,8 +240,27 @@ Returns counts and per-page indexing stats.`,
         .describe("Cap for data_source/database expansion (default 50)"),
     },
     async ({ workspace, url, max_pages }) => {
+      // Friend without a connected Notion: clear runtime error (the schema
+      // accepts the call so the user gets guidance instead of a zod failure).
+      if (!hasWorkspaces) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                ok: false,
+                error: "no_notion_workspace",
+                message: NO_NOTION_WORKSPACE_MESSAGE,
+              }),
+            },
+          ],
+        };
+      }
+
       // Security gate: enforce token workspace scope before any work.
       // No-op for bearer ("all") and for non-HTTP contexts (startup/cron/tests).
+      // For a friend this also re-checks the workspace against the account's
+      // scopes resolved by the auth layer (defense in depth vs the enum).
       assertWorkspaceScope(workspace as Workspace);
 
       // Fase 3 billing — on-demand indexing gated by plan (Free = off) + daily

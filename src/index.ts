@@ -526,7 +526,7 @@ app.post("/mcp", async (req, res) => {
   if (owner) {
     registerTools(server);
     registerBrainSearchTool(server);
-    registerBrainIndexUrlTool(server);
+    await registerBrainIndexUrlTool(server);
     registerBrainIndexWebTool(server);
     registerRememberTool(server);
     registerRecallTool(server);
@@ -539,7 +539,7 @@ app.post("/mcp", async (req, res) => {
     registerBrainFeedbackTool(server);
   } else {
     registerBrainSearchTool(server);
-    registerBrainIndexUrlTool(server);
+    await registerBrainIndexUrlTool(server);
     registerBrainIndexWebTool(server);
     registerRememberTool(server);
     registerRecallTool(server);
