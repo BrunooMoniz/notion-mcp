@@ -392,8 +392,10 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
   let route: IntentRoute;
   try {
     route = await classifyFn(raw);
-  } catch {
-    route = "search"; // fallback: always search on classifier error
+  } catch (e) {
+    // Frente C (#98): fallback continua sendo "search", mas agora com log.
+    console.error("[portal/ask] classify error:", e instanceof Error ? e.message : e);
+    route = "search";
   }
 
   // --- Meta route: answer directly without brain_search ---
@@ -418,7 +420,9 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
       // F2: meter usage best-effort.
       const meterFn = deps.meter ?? recordLlmUsage;
       meterFn(accountId, { input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens }, "ask:meta").catch(() => {/* swallowed */});
-    } catch {
+    } catch (e) {
+      // Frente C (#98): logar a causa real também no caminho meta.
+      console.error("[portal/ask] llm error (meta):", e instanceof Error ? e.stack ?? e.message : e);
       answer = "Sou o Zinom, seu assistente pessoal. Indexo seu Notion, reuniões Granola e Google Calendar para você encontrar informações rapidamente.";
     }
     res.json({ answer, sources: [], route: "meta" });
@@ -518,8 +522,25 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
       const meterFn = deps.meter ?? recordLlmUsage;
       meterFn(accountId, { input_tokens: resp.usage.input_tokens, output_tokens: resp.usage.output_tokens }, "ask:search").catch(() => {/* swallowed */});
     }
-  } catch {
-    res.status(502).json({ error: "llm" });
+  } catch (e) {
+    // Frente C (#98): logar a causa real (antes ficava silencioso).
+    console.error("[portal/ask] llm error:", e instanceof Error ? e.stack ?? e.message : e);
+    if (filteredHits.length > 0) {
+      // Modo degradado: a busca funcionou — devolve as fontes mesmo sem resposta
+      // da IA. HTTP 200 de propósito: o Cloudflare substitui 502/504 da origem
+      // pela página de erro HTML dele e o front não consegue parsear o JSON.
+      const cited = filteredHits.slice(0, 5).map((_, i) => i + 1);
+      res.json({
+        answer: null,
+        degraded: true,
+        reason: "llm_unavailable",
+        sources: toAskSources(filteredHits, cited),
+        route: "search",
+      });
+      return;
+    }
+    // Sem hits para degradar: 500 (nunca 502 — Cloudflare mastiga 502/504).
+    res.status(500).json({ error: "llm" });
     return;
   }
 
