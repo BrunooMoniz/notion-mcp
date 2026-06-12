@@ -901,9 +901,20 @@ export function createPortalRouter(): express.Router {
   // 10 requisições/min por conta.
   const askLimiter = makeRateLimiter();
 
+  // Frente C (#98): catch global — nenhum caminho pode rejeitar sem resposta
+  // (handleAsk relança erros não-quota; em Express 4 isso vira unhandled
+  // rejection e o cliente fica pendurado sem resposta).
   router.post("/portal/ask", requireSession, askLimiter, async (req, res) => {
-    const { handleAsk } = await import("./ask.js");
-    await handleAsk(req, res);
+    try {
+      const { handleAsk } = await import("./ask.js");
+      await handleAsk(req, res);
+    } catch (err) {
+      console.error(
+        "[portal/ask] unexpected:",
+        err instanceof Error ? err.stack ?? err.message : err,
+      );
+      if (!res.headersSent) res.status(500).json({ error: "unexpected" });
+    }
   });
 
   // POST /portal/feedback {chunk_id, value: "up"|"down", query?}

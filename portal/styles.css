@@ -550,6 +550,9 @@ details.tutorial ol { color: var(--muted); font-size: 13.5px; padding-left: 18px
 .fb-btn:disabled { cursor: default; opacity: .3; }
 .cite-card.fb-up { border-color: var(--accent); }
 .cite-card.fb-down { border-color: #e57373; }
+/* Frente C (#98): barra "Essa resposta foi útil?" por resposta gerada */
+.answer-fb { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.answer-fb-label { font-size: 12.5px; color: var(--muted); }
 
 /* digitando */
 .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
@@ -571,6 +574,8 @@ details.tutorial ol { color: var(--muted); font-size: 13.5px; padding-left: 18px
 .chat-block .bh { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
 .chat-block.limit { background: var(--warn-soft); border: 1px solid var(--warn-line); color: var(--warn); }
 .chat-block.neterr { background: var(--bad-soft); border: 1px solid var(--bad-line); color: var(--bad); }
+/* Frente C (#98): aviso de modo degradado (LLM indisponível, fontes da busca) */
+.chat-block.degraded { background: var(--warn-soft); border: 1px solid var(--warn-line); color: var(--warn); }
 .chat-block .meter-inline { width: 100%; max-width: 300px; }
 
 /* ---- compositor ---- */

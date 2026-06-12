@@ -84,6 +84,35 @@ if (process.env.VOYAGE_API_KEY) {
   }
 }
 
+// --- Anthropic (LLM do POST /portal/ask) — chamada mínima a /v1/messages (1 token).
+// Pega o que ficava silencioso: chave inválida (401 → auth), conta sem créditos
+// (400 "credit balance too low" → credit) e falha de rede (→ conn).
+if (!process.env.ANTHROPIC_API_KEY) {
+  add("anthropic", "warn", "ANTHROPIC_API_KEY not set");
+} else {
+  const askModel = process.env.ASK_MODEL ?? "claude-haiku-4-5-20251001";
+  try {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const client = new Anthropic({ maxRetries: 0 });
+    await timed(() =>
+      client.messages.create({
+        model: askModel,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "ping" }],
+      }),
+    );
+    add("anthropic", "ok", `${askModel} responde (1 token)`);
+  } catch (err) {
+    const status = (err as { status?: number })?.status;
+    const full = err instanceof Error ? err.message : String(err);
+    const msg = full.slice(0, 120);
+    if (status === 401) add("anthropic", "fail", `auth: chave inválida — ${msg}`);
+    else if (status === 400 && /credit/i.test(full)) add("anthropic", "fail", `credit: sem créditos — ${msg}`);
+    else if (typeof status === "number") add("anthropic", "fail", `HTTP ${status}: ${msg}`);
+    else add("anthropic", "fail", `conn: ${msg}`);
+  }
+}
+
 // --- Notion tokens (per workspace) — catches an invalid PAT that silently indexes 0 ---
 // Direct fetch to /v1/users/me (NOT via src/clients.ts, which process.exit(1)s on a
 // missing token — a diagnostic must never be killed by the thing it diagnoses).

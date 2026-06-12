@@ -194,8 +194,10 @@ test("handler: 200 com answer e sources, cited correto", async () => {
   }
 });
 
-test("handler: 502 quando complete (LLM) lança erro", async () => {
-  const fakeHit = makeHit();
+// Frente C (#98): LLM falhou mas a busca achou resultados → 200 degradado,
+// nunca 502 (o Cloudflare substitui 502/504 da origem pela página HTML dele).
+test("handler: LLM falha com hits → 200 degradado com fontes (nunca 502)", async () => {
+  const fakeHit = makeHit({ chunk_id: "chunk-degraded-1" } as any);
   __setAskDepsForTest({
     search: async () => [fakeHit],
     complete: async () => { throw new Error("LLM unavailable"); },
@@ -204,9 +206,71 @@ test("handler: 502 quando complete (LLM) lança erro", async () => {
   res.locals.accountId = "friend:test";
   try {
     await handleAsk(mockReq({ question: "Pergunta qualquer aqui" }, "friend:test"), res);
-    assert.equal(res._calls.status, 502);
-    assert.deepEqual(res._calls.json, { error: "llm" });
+    assert.equal(res._calls.status, undefined, "deve ser 200 (status implícito), nunca 502");
+    const body = res._calls.json as any;
+    assert.equal(body.answer, null);
+    assert.equal(body.degraded, true);
+    assert.equal(body.reason, "llm_unavailable");
+    assert.equal(body.route, "search");
+    assert.equal(body.sources.length, 1);
+    assert.equal(body.sources[0].chunk_id, "chunk-degraded-1", "fonte deve ter chunk_id para feedback");
+    assert.equal(body.sources[0].cited, true);
   } finally {
+    __setAskDepsForTest(null);
+  }
+});
+
+test("handler: modo degradado marca cited só nas top min(5, N) fontes", async () => {
+  // 6 hits com source_url distintos (sem dedup) e score acima do corte
+  const hits = Array.from({ length: 6 }, (_, i) =>
+    makeHit({
+      chunk_id: `chunk-${i}`,
+      score: 0.9 - i * 0.05,
+      source_url: `https://notion.so/page-${i}`,
+      notion_url: `https://notion.so/page-${i}`,
+    } as any),
+  );
+  __setAskDepsForTest({
+    search: async () => hits,
+    complete: async () => { throw new Error("LLM unavailable"); },
+  });
+  const res = mockRes();
+  res.locals.accountId = "friend:test";
+  try {
+    await handleAsk(mockReq({ question: "Pergunta qualquer aqui" }, "friend:test"), res);
+    const body = res._calls.json as any;
+    assert.equal(body.degraded, true);
+    assert.equal(body.sources.length, 6, "todas as fontes filtradas voltam");
+    assert.deepEqual(
+      body.sources.map((s: any) => s.cited),
+      [true, true, true, true, true, false],
+      "apenas as top 5 ficam cited=true",
+    );
+  } finally {
+    __setAskDepsForTest(null);
+  }
+});
+
+test("handler: falha de LLM loga '[portal/ask] llm error:' com a causa real", async () => {
+  const realConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  __setAskDepsForTest({
+    search: async () => [makeHit()],
+    complete: async () => { throw new Error("credit balance too low"); },
+  });
+  const res = mockRes();
+  res.locals.accountId = "friend:test";
+  try {
+    await handleAsk(mockReq({ question: "Pergunta qualquer aqui" }, "friend:test"), res);
+    const hit = logged.find((args) => String(args[0]).includes("[portal/ask] llm error:"));
+    assert.ok(hit, "deve logar [portal/ask] llm error:");
+    assert.ok(
+      hit!.some((a) => String(a).includes("credit balance too low")),
+      "log deve conter a mensagem real do erro",
+    );
+  } finally {
+    console.error = realConsoleError;
     __setAskDepsForTest(null);
   }
 });
