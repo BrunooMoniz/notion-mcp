@@ -15,6 +15,7 @@ import { QuotaExceededError, assertCreditsWithinLimit } from "../billing/usage.j
 import { requestContext } from "../context.js";
 import { recordLlmUsage } from "../llm-usage.js";
 import { recordUsage } from "../rag/usage.js";
+import { alertLlmFailure } from "./ask-alerts.js";
 
 // ---------------------------------------------------------------------------
 // Model config (env-injectable, analogous to CLASSIFIER_MODEL)
@@ -423,6 +424,7 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
     } catch (e) {
       // Frente C (#98): logar a causa real também no caminho meta.
       console.error("[portal/ask] llm error (meta):", e instanceof Error ? e.stack ?? e.message : e);
+      alertLlmFailure("meta", e);
       answer = "Sou o Zinom, seu assistente pessoal. Indexo seu Notion, reuniões Granola e Google Calendar para você encontrar informações rapidamente.";
     }
     res.json({ answer, sources: [], route: "meta" });
@@ -525,6 +527,7 @@ export async function handleAsk(req: Request, res: Response): Promise<void> {
   } catch (e) {
     // Frente C (#98): logar a causa real (antes ficava silencioso).
     console.error("[portal/ask] llm error:", e instanceof Error ? e.stack ?? e.message : e);
+    alertLlmFailure("search", e);
     if (filteredHits.length > 0) {
       // Modo degradado: a busca funcionou — devolve as fontes mesmo sem resposta
       // da IA. HTTP 200 de propósito: o Cloudflare substitui 502/504 da origem
