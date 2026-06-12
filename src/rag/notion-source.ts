@@ -4,10 +4,11 @@ import { createHash } from "node:crypto";
 import {
   NOTION_API_VERSION,
   notionFetch,
-  getClient,
-  getSearchClient,
+  getClientAsync,
+  getSearchClientAsync,
   getExtraDataSources,
 } from "../clients.js";
+import { isMissingTokenError } from "../account-tokens.js";
 import type { IndexableDocument, Workspace } from "./types.js";
 
 interface FetchOpts {
@@ -59,8 +60,10 @@ async function fetchDataSourceName(workspace: Workspace, dataSourceId: string): 
 export async function* fetchWorkspaceDocuments(
   opts: FetchOpts,
 ): AsyncGenerator<IndexableDocument> {
-  const readClient = getClient(opts.workspace);
-  const searchClient = getSearchClient(opts.workspace);
+  // Async client resolution: onboarded accounts get a vault fallback on a
+  // token-cache miss (bug #96 2a) instead of failing the whole workspace pass.
+  const readClient = await getClientAsync(opts.workspace);
+  const searchClient = await getSearchClientAsync(opts.workspace);
 
   let dbs: DiscoveredDb[];
   if (opts.databaseIds) {
@@ -79,6 +82,10 @@ export async function* fetchWorkspaceDocuments(
   }
 
   console.log(`[notion-source] workspace=${opts.workspace} data_sources=${dbs.length}`);
+
+  // Bug #96 (2c): aggregate missing-token skips into ONE summary log per
+  // workspace per run instead of one warn per database.
+  let skippedNoToken = 0;
 
   for (const db of dbs) {
     try {
@@ -128,8 +135,18 @@ export async function* fetchWorkspaceDocuments(
         cursor = resp.next_cursor ?? undefined;
       } while (cursor);
     } catch (dbErr: any) {
+      if (isMissingTokenError(dbErr)) {
+        skippedNoToken++;
+        continue;
+      }
       console.warn(`[notion-source] skipped database "${db.name}" (${db.id}): ${dbErr.message ?? dbErr}`);
     }
+  }
+
+  if (skippedNoToken > 0) {
+    console.warn(
+      `[notion-source] workspace=${opts.workspace} skipped ${skippedNoToken} databases (sem token)`,
+    );
   }
 }
 

@@ -59,6 +59,60 @@ export function getAccountToken(
   return cache.get(accountId)?.get(`${kind}:${workspace}`);
 }
 
+/**
+ * Bug #96 (2a) — cache-miss fallback. Returns the cached token when present;
+ * otherwise fetches the secret straight from the vault (notion_access first,
+ * then notion_pat), populates the cache for both kinds, and returns it.
+ * undefined when the vault has nothing — the caller throws as before.
+ * 'bruno' never resolves here (env tokens in clients.ts).
+ */
+export async function ensureAccountToken(
+  accountId: string,
+  workspace: string,
+  kind: "pat" | "search" = "pat",
+): Promise<string | undefined> {
+  if (accountId === DEFAULT_ACCOUNT_ID) return undefined;
+  const cached = cache.get(accountId)?.get(`${kind}:${workspace}`);
+  if (cached) return cached;
+  const access = await getAccountSecret(accountId, `notion_access:${workspace}`);
+  const token = access ?? (await getAccountSecret(accountId, `notion_pat:${workspace}`));
+  if (!token) return undefined;
+  let m = cache.get(accountId);
+  if (!m) {
+    m = new Map();
+    cache.set(accountId, m);
+  }
+  m.set(`pat:${workspace}`, token);
+  m.set(`search:${workspace}`, token);
+  return token;
+}
+
+// Bug #96 (2b) — invalidation hooks. clients.ts registers one to also purge its
+// per-account Client cache (we can't import clients.ts here: it process.exit()s
+// without NOTION_* env).
+type InvalidateHook = (accountId: string) => void;
+const invalidateHooks: InvalidateHook[] = [];
+
+/** Register a callback fired whenever an account's tokens are invalidated. */
+export function onAccountTokensInvalidated(hook: InvalidateHook): void {
+  invalidateHooks.push(hook);
+}
+
+/** Drop an account's cached tokens (call when a workspace is connected or
+ *  disconnected so stale tokens/clients never outlive the credential). */
+export function invalidateAccountTokens(accountId: string): void {
+  cache.delete(accountId);
+  for (const hook of invalidateHooks) hook(accountId);
+}
+
+/** Bug #96 (2c) — true iff the error is the cache-miss "no <kind> token ..."
+ *  thrown by clients.ts. Lets notion-source aggregate these skips into one
+ *  summary log per workspace instead of one line per database. */
+export function isMissingTokenError(err: unknown): boolean {
+  const msg = (err as { message?: unknown })?.message;
+  return typeof msg === "string" && /^no (pat|search) token for account /.test(msg);
+}
+
 /** Workspaces of a warmed account (empty if not warmed). */
 export function getWarmedWorkspaces(accountId: string): string[] {
   const m = cache.get(accountId);

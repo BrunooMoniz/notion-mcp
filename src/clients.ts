@@ -1,6 +1,6 @@
 import { Client } from "@notionhq/client";
 import { assertWorkspaceScope, getAccountId, DEFAULT_ACCOUNT_ID } from "./context.js";
-import { getAccountToken } from "./account-tokens.js";
+import { getAccountToken, ensureAccountToken, onAccountTokensInvalidated } from "./account-tokens.js";
 
 // PAT tokens — used for ALL operations except /v1/search.
 // PATs inherit the creator user's permissions (full read/write by ID) but
@@ -102,16 +102,29 @@ export type TokenKind = "pat" | "search";
 // from vault tokens warmed by account-tokens.ts. 'bruno' uses the env singletons.
 const accountClientCache = new Map<string, Client>();
 
+// Bug #96 (2b): when an account's tokens are invalidated (workspace connected or
+// disconnected), purge its cached Clients too — otherwise a stale Client built
+// from the removed credential survives until the process restarts.
+onAccountTokensInvalidated((accountId) => {
+  for (const key of accountClientCache.keys()) {
+    if (key.startsWith(`${accountId}:`)) accountClientCache.delete(key);
+  }
+});
+
 function resolveAccountClient(accountId: string, workspace: string, kind: TokenKind): Client {
   const key = `${accountId}:${kind}:${workspace}`;
-  const cached = accountClientCache.get(key);
-  if (cached) return cached;
+  // Bug #96 (2): validate against the token cache BEFORE trusting the Client
+  // cache — a Client for a workspace whose token is gone (disconnected, or
+  // dropped by a warmAccount reset) must not outlive the credential.
   const token = getAccountToken(accountId, workspace, kind);
   if (!token) {
+    accountClientCache.delete(key);
     throw new Error(
       `no ${kind} token for account "${accountId}" workspace "${workspace}" (warmAccount first)`,
     );
   }
+  const cached = accountClientCache.get(key);
+  if (cached) return cached;
   const client = new Client({ auth: token, notionVersion: NOTION_API_VERSION });
   accountClientCache.set(key, client);
   return client;
@@ -133,6 +146,19 @@ export function getClient(workspace: Workspace, accountId: string = getAccountId
   }
 }
 
+/** Async getClient: on a cache-miss for an onboarded account it falls back to
+ *  the vault (ensureAccountToken) before failing — covers tokens connected after
+ *  the account was last warmed (bug #96 2a). */
+export async function getClientAsync(
+  workspace: Workspace,
+  accountId: string = getAccountId(),
+): Promise<Client> {
+  if (accountId !== DEFAULT_ACCOUNT_ID && !getAccountToken(accountId, workspace, "pat")) {
+    await ensureAccountToken(accountId, workspace, "pat");
+  }
+  return getClient(workspace, accountId);
+}
+
 export function getSearchClient(workspace: Workspace, accountId: string = getAccountId()): Client {
   assertWorkspaceScope(workspace);
   if (accountId !== DEFAULT_ACCOUNT_ID) return resolveAccountClient(accountId, workspace, "search");
@@ -146,6 +172,17 @@ export function getSearchClient(workspace: Workspace, accountId: string = getAcc
     default:
       throw new Error(`Unknown workspace: ${workspace}`);
   }
+}
+
+/** Async getSearchClient with the same vault fallback as getClientAsync. */
+export async function getSearchClientAsync(
+  workspace: Workspace,
+  accountId: string = getAccountId(),
+): Promise<Client> {
+  if (accountId !== DEFAULT_ACCOUNT_ID && !getAccountToken(accountId, workspace, "search")) {
+    await ensureAccountToken(accountId, workspace, "search");
+  }
+  return getSearchClient(workspace, accountId);
 }
 
 export function getToken(
@@ -228,7 +265,26 @@ export async function notionFetch(
   path: string,
   init: NotionFetchInit = {}
 ): Promise<unknown> {
-  const token = getToken(workspace, init.tokenKind ?? "pat");
+  // Bug #96 (2a): for onboarded accounts, a token-cache miss falls back to the
+  // vault (ensureAccountToken) before failing — getToken alone would throw on
+  // a workspace connected after the last warmAccount.
+  const kind = init.tokenKind ?? "pat";
+  const accountId = getAccountId();
+  let token: string;
+  if (accountId !== DEFAULT_ACCOUNT_ID) {
+    assertWorkspaceScope(workspace);
+    const resolved =
+      getAccountToken(accountId, workspace, kind) ??
+      (await ensureAccountToken(accountId, workspace, kind));
+    if (!resolved) {
+      throw new Error(
+        `no ${kind} token for account "${accountId}" workspace "${workspace}" (warmAccount first)`,
+      );
+    }
+    token = resolved;
+  } else {
+    token = getToken(workspace, kind);
+  }
   const base = path.startsWith("http") ? path : `https://api.notion.com${path}`;
   let url = base;
   if (init.query) {

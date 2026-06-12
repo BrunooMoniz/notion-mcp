@@ -8,6 +8,7 @@
 // chunks). Account scope ALWAYS comes from the caller's session, NEVER input.
 import { deleteAccountSecret } from "../secrets.js";
 import { getPool, deleteByAccountWorkspaceSource } from "../rag/storage.js";
+import { invalidateAccountTokens } from "../account-tokens.js";
 import { connectionTypeFromKind, type NotionConnectionType } from "./connection-type.js";
 
 export interface NotionWorkspaceEntry {
@@ -112,6 +113,10 @@ export async function disconnectNotionWorkspace(
 
   // 3. Indexed Notion chunks for this exact (account, workspace) — never another's.
   await deleteByAccountWorkspaceSource(accountId, workspace, "notion");
+
+  // 4. Bug #96 (2b): drop the account's cached tokens (and, via hook, its cached
+  // Notion clients) so the indexer stops using the removed credential at once.
+  invalidateAccountTokens(accountId);
 
   return true;
 }

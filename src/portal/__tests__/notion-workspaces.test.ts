@@ -18,6 +18,7 @@ import {
   type NotionWorkspaceEntry,
 } from "../notion-workspaces.js";
 import { __setPoolForTest } from "../../rag/storage.js";
+import { warmAccount, isWarmed, __clearAccountTokenCache } from "../../account-tokens.js";
 
 // In-memory model of the two tables this code touches.
 interface Row {
@@ -86,7 +87,10 @@ beforeEach(() => {
   chunks = [];
   __setPoolForTest(memPool() as never);
 });
-afterEach(() => __setPoolForTest(null));
+afterEach(() => {
+  __setPoolForTest(null);
+  __clearAccountTokenCache();
+});
 
 function seedConnected(account: string, ws: string, name: string | null, when: Date, kinds: string[]) {
   workspaces.push({ account_id: account, workspace: ws, name, created_at: when });
@@ -188,4 +192,16 @@ test("listNotionWorkspaces connection_type is null when no relevant secret exist
   workspaces.push({ account_id: "friend:a", workspace: "ws-bare", name: null, created_at: new Date() });
   const list = await listNotionWorkspaces("friend:a");
   assert.equal(list[0].connection_type, null);
+});
+
+// Bug #96 (2b): desconectar um workspace precisa derrubar o cache de tokens da
+// conta — senão o indexer segue usando o token antigo até o restart.
+test("disconnect invalida o cache de tokens da conta", async () => {
+  seedConnected("friend:a", "ws-1", "A", new Date(), ["notion_pat:ws-1"]);
+  await warmAccount("friend:a");
+  assert.equal(isWarmed("friend:a"), true);
+
+  const ok = await disconnectNotionWorkspace("friend:a", "ws-1");
+  assert.equal(ok, true);
+  assert.equal(isWarmed("friend:a"), false);
 });
