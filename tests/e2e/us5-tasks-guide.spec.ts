@@ -36,17 +36,19 @@ test("Guia tem a seção Tarefas e planejamento com os 4 capítulos e prompts co
   request,
 }) => {
   await registerAndSignIn(page, request);
+  // A seção Tarefas agora é uma subpágina própria do Guia (#guia/tarefas).
   await page.click('.sidebar-nav [data-nav="guia"]');
+  await page.click('#guia-hub [data-guia="tarefas"]');
 
   const sec = page.locator("#guia-tarefas");
   await expect(sec).toBeAttached();
-  await expect(page.locator("#view-guia")).toContainText("Onde suas tarefas vivem");
-  await expect(page.locator("#view-guia")).toContainText("Da reunião para a tarefa");
-  await expect(page.locator("#view-guia")).toContainText("Planejar dia, semana e mês");
-  await expect(page.locator("#view-guia")).toContainText("manter o board vivo", {
+  await expect(page.locator("#view-guia-tarefas")).toContainText("Onde suas tarefas vivem");
+  await expect(page.locator("#view-guia-tarefas")).toContainText("Da reunião para a tarefa");
+  await expect(page.locator("#view-guia-tarefas")).toContainText("Planejar dia, semana e mês");
+  await expect(page.locator("#view-guia-tarefas")).toContainText("manter o board vivo", {
     ignoreCase: true,
   });
 
   // The meeting→tasks prompt is copyable (fazer vs cobrar flow).
-  await expect(page.locator("#view-guia [data-copy*='COBRAR']").first()).toBeAttached();
+  await expect(page.locator("#view-guia-tarefas [data-copy*='COBRAR']").first()).toBeAttached();
 });
