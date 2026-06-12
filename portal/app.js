@@ -1362,54 +1362,72 @@ function highlightNode(nodeId) {
   updateLabels();
 }
 
-/* ---- init or re-init Cytoscape ---- */
-function initCy(data) {
+/* ---- layout central: fcose animado (cose como último recurso) ---- */
+var _layoutRun = null; // layout em execução (para stop/freeze)
+
+function stopLayout() {
+  if (_layoutRun) { try { _layoutRun.stop(); } catch (_e) {} _layoutRun = null; }
+}
+
+function runLayout(opts) {
+  if (!_cy || _cy.nodes().length === 0) return;
+  opts = opts || {};
+  stopLayout();
   ensureFcose();
-  var container = document.getElementById('brain-graph-cy');
-  if (!container) return;
-
-  if (_cy) { _cy.destroy(); _cy = null; }
-
-  var useFcose = _fcoseRegistered;
-  var layoutConfig = useFcose
+  var cfg = _fcoseRegistered
     ? {
         name: 'fcose',
-        quality: 'proof',
-        animate: true,
-        animationDuration: 600,
-        randomize: true,
+        quality: 'default',
+        animate: 'during',
+        animationDuration: 800,
+        randomize: opts.randomize === true,
+        fit: false,
         nodeRepulsion: function() { return 12000; },
         idealEdgeLength: function() { return 90; },
         edgeElasticity: function() { return 0.45; },
         numIter: 2500,
         packComponents: true,
-        componentSpacing: 50,
         nodeSeparation: 75,
         gravityRange: 3.8,
         gravity: 0.25,
         tile: true,
-        tilingPaddingVertical: 10,
-        tilingPaddingHorizontal: 10,
         initialEnergyOnIncremental: 0.5,
-        stop: function() { updateLabels(); },
       }
     : {
         name: 'cose',
         animate: true,
         animationDuration: 600,
+        randomize: opts.randomize === true,
+        fit: false,
         nodeRepulsion: function() { return 800000; },
         idealEdgeLength: function() { return 90; },
-        componentSpacing: 80,
         gravity: 0.25,
         numIter: 1500,
-        stop: function() { updateLabels(); },
       };
+  var fitAfter = opts.fit !== false;
+  var lay = _cy.layout(cfg);
+  _layoutRun = lay;
+  lay.one('layoutstop', function() {
+    if (_layoutRun === lay) _layoutRun = null;
+    updateLabels();
+    if (fitAfter && _cy) _cy.animate({ fit: { eles: _cy.elements(), padding: 40 }, duration: 300 });
+  });
+  lay.run();
+}
+
+/* ---- init Cytoscape (só quando não existe; mudanças são incrementais) ---- */
+function initCy(data) {
+  ensureFcose();
+  var container = document.getElementById('brain-graph-cy');
+  if (!container) return;
+
+  if (_cy) { stopLayout(); _cy.destroy(); _cy = null; }
 
   _cy = window.cytoscape({
     container: container,
     elements: toCyElements(data),
     style: cyStyle(),
-    layout: layoutConfig,
+    layout: { name: 'preset' }, // posições reais vêm de runLayout()
     minZoom: 0.1,
     maxZoom: 6,
     wheelSensitivity: 0.3,
@@ -1451,10 +1469,40 @@ function initCy(data) {
     }
   });
 
-  _cy.one('layoutstop', function() {
-    _cy.fit(_cy.elements(), 40);
-    updateLabels();
+  runLayout({ randomize: true });
+}
+
+/* ---- atualização incremental: diff de elementos por id, sem destruir o cy ---- */
+function updateCyElements(data) {
+  var els = toCyElements(data);
+  var incoming = {};
+  els.forEach(function(e) { incoming[e.data.id] = true; });
+  _cy.batch(function() {
+    /* remove o que saiu (arestas penduradas caem junto com o nó) */
+    _cy.elements().forEach(function(el) {
+      if (!incoming[el.id()]) el.remove();
+    });
+    /* atualiza data de quem ficou, adiciona quem chegou (nós antes de arestas,
+       ordem preservada de toCyElements) */
+    var toAdd = [];
+    els.forEach(function(e) {
+      var existing = _cy.getElementById(e.data.id);
+      if (existing.nonempty()) {
+        var d = Object.assign({}, e.data);
+        delete d.id; delete d.source; delete d.target; // imutáveis no cytoscape
+        existing.data(d);
+      } else {
+        toAdd.push(e);
+      }
+    });
+    if (toAdd.length) _cy.add(toAdd);
   });
+  updateLabels();
+  runLayout({ fit: true });
+}
+
+function renderGraph(data) {
+  if (_cy) updateCyElements(data); else initCy(data);
 }
 
 /* ---- empty state: distingue "sem chunks" de "chunks sem entidades ainda" ---- */
@@ -1532,7 +1580,7 @@ async function reloadGraph(overrideParams) {
     if (legendDoc) legendDoc.style.display = _graphIncludeDocs && mode === 'focus' ? '' : 'none';
     updateGraphLegend();
 
-    initCy(data);
+    renderGraph(data);
     _graphLoaded = true;
   } catch (e) {
     empty.style.display = 'block'; wrap.style.display = 'none';
@@ -1858,6 +1906,9 @@ function switchBrainView(view) {
     listaEl.style.display = 'block';
     if (btnLista) btnLista.classList.add('active');
     if (btnGrafo) btnGrafo.classList.remove('active');
+    /* destrói o cy só ao sair da view; troca de preset/filtro é incremental */
+    if (_cy) { stopLayout(); _cy.destroy(); _cy = null; }
+    _graphLoaded = false;
   }
 }
 
