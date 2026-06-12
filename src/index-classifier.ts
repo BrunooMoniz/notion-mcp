@@ -110,23 +110,17 @@ cron.schedule(BRIEFING_CRON, () => {
 
 // E4 entities extraction — runs on the same schedule as the classifier, gated
 // by ENTITIES_ENABLED. Errors are caught inside the tick, never crash the process.
+// Frente D (#99): a seleção de contas e os orçamentos (por conta e global) vivem
+// em runEntityExtraction — cobre TODAS as contas com chunks pendentes (friend:*
+// incluído), prioriza contas com 0 entidades e agrega erros em 1 linha por conta.
 async function tickEntities(label: string): Promise<void> {
   if (process.env.ENTITIES_ENABLED !== "true") return;
   const start = Date.now();
   try {
-    const { extractEntitiesForAccount } = await import("./rag/entity-extractor.js");
-    const { getPool } = await import("./rag/storage.js");
-    const p = getPool();
-    const { rows } = await p.query<{ id: string }>(`SELECT id FROM account ORDER BY id`);
-    let totalChunks = 0;
-    let totalErrors = 0;
-    for (const row of rows) {
-      const stats = await extractEntitiesForAccount(row.id);
-      totalChunks += stats.chunksProcessed;
-      totalErrors += stats.errors;
-    }
+    const { runEntityExtraction } = await import("./rag/entity-extractor.js");
+    const run = await runEntityExtraction();
     console.log(
-      `[${new Date().toISOString()}] [entities:${label}] chunks=${totalChunks} errors=${totalErrors} took=${Date.now() - start}ms`,
+      `[${new Date().toISOString()}] [entities:${label}] accounts=${run.accounts} chunks=${run.chunksProcessed} errors=${run.errors} took=${Date.now() - start}ms`,
     );
   } catch (err) {
     console.error(
