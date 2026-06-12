@@ -169,6 +169,14 @@ body:not([data-zstate]) .z-ativo, body:not([data-zstate]) .z-novo { display: non
 .guia-eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 26px 0 10px; }
 .guia-eyebrow:first-child { margin-top: 0; }
 
+/* ---- guia paginado: hub de seções + subpáginas ---- */
+.guia-hub-card { color: var(--ink); cursor: pointer; transition: border-color .15s ease; }
+.guia-hub-card:hover { border-color: var(--accent); }
+.guia-hub-card .hub-go { font-size: 12.5px; color: var(--muted); margin-top: auto; }
+.guia-hub-card:hover .hub-go { color: var(--accent-strong); }
+.guia-back { display: inline-block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.guia-back:hover { color: var(--ink); }
+
 /* ---- tarefas (003-tasks-v1): escolha dupla + info da base configurada ---- */
 .task-choice { display: flex; gap: 8px; flex-wrap: wrap; }
 .act-tasks-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px 28px; font-size: 13px; color: var(--ink-soft); }

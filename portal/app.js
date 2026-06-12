@@ -134,22 +134,27 @@ function applyTaskPrompts() {
   });
 }
 
-/* ---- navegação por hash ---- */
-var VIEWS = ['inicio', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
+/* ---- navegação por hash ----
+   O Guia é um hub (#guia) com subpáginas próprias (#guia/conectar etc.);
+   nas subpáginas a sidebar continua marcando "Guia" ativo. */
+var VIEWS = ['inicio', 'fontes', 'atividade', 'consultar', 'guia',
+  'guia/conectar', 'guia/tarefas', 'guia/receitas', 'guia/problemas',
+  'guia/como-funciona', 'conta'];
 
 function go(view) {
   // plano vai para /plano.html (link externo)
   if (view === 'plano') { location.href = '/plano.html'; return; }
   if (view === 'chat') view = 'consultar'; // rota legada
   if (!VIEWS.includes(view)) view = 'inicio';
+  var navKey = view.split('/')[0]; // 'guia/conectar' -> sidebar marca 'guia'
   document.querySelectorAll('.view').forEach(function (v) {
-    v.classList.toggle('active', v.id === 'view-' + view);
+    v.classList.toggle('active', v.id === 'view-' + view.replace('/', '-'));
   });
   document.querySelectorAll('[data-nav]').forEach(function (b) {
-    b.classList.toggle('active', b.getAttribute('data-nav') === view);
+    b.classList.toggle('active', b.getAttribute('data-nav') === navKey);
   });
   var mn = document.getElementById('mobile-view-name');
-  if (mn) mn.textContent = view;
+  if (mn) mn.textContent = navKey;
   /* Conta: a lista de sessões era carregada só no boot e ficava stale —
      recarrega ao entrar na view */
   if (view === 'conta' && typeof loadSessions === 'function') loadSessions();
@@ -157,14 +162,19 @@ function go(view) {
   try { history.replaceState(null, '', '#' + view); } catch (e) { /* sandbox */ }
 }
 
-/* deep-link/ação: ir ao Guia e rolar até uma seção (guia-conectar, guia-tarefas) */
+/* deep-link/ação: as seções do Guia viraram subpáginas próprias — mapeia o
+   anchor antigo (guia-conectar, guia-tarefas, …) para a view nova */
+var GUIA_SECTION_VIEW = {
+  'guia-conectar': 'guia/conectar',
+  'guia-tarefas': 'guia/tarefas',
+  'guia-receitas': 'guia/receitas',
+  'guia-problemas': 'guia/problemas',
+  'guia-troubleshooting': 'guia/problemas',
+  'guia-como-funciona': 'guia/como-funciona'
+};
+
 function goGuiaSection(anchorId) {
-  go('guia');
-  var anchor = document.getElementById(anchorId);
-  if (anchor) setTimeout(function () {
-    var top = anchor.getBoundingClientRect().top + document.scrollingElement.scrollTop - 20;
-    document.scrollingElement.scrollTo({ top: top, behavior: 'smooth' });
-  }, 60);
+  go(GUIA_SECTION_VIEW[anchorId] || 'guia');
 }
 
 function goGuiaConectar() { goGuiaSection('guia-conectar'); }
@@ -3235,7 +3245,7 @@ function wireGlobal(me) {
     }
   });
 
-  /* navegacao (com suporte a deep-link data-guia="conectar" | "tarefas") */
+  /* navegacao (data-guia="conectar" | "tarefas" | … abre a subpágina do Guia) */
   document.body.addEventListener('click', function (e) {
     var nav = e.target.closest('[data-nav]');
     if (!nav) return;
@@ -3639,13 +3649,13 @@ function init() {
   wireDiag();
   applyTaskPrompts();
 
-  /* rota inicial (suporta rota legada #chat e deep-links #guia-conectar / #guia-tarefas) */
+  /* rota inicial (suporta rota legada #chat, subpáginas #guia/* e deep-links
+     antigos #guia-conectar / #guia-tarefas, que redirecionam à subpágina nova) */
   var hash = (location.hash || '#inicio').slice(1).split('?')[0];
-  if (hash === 'guia-conectar' || hash === 'guia-tarefas') {
+  if (GUIA_SECTION_VIEW[hash]) {
     goGuiaSection(hash);
   } else {
-    var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
-    go(validViews.includes(hash) ? hash : 'inicio');
+    go(VIEWS.includes(hash) || hash === 'chat' ? hash : 'inicio');
   }
 
   load();
@@ -3660,9 +3670,8 @@ function init() {
 
 window.addEventListener('hashchange', function () {
   var h = (location.hash || '#inicio').slice(1).split('?')[0];
-  if (h === 'guia-conectar' || h === 'guia-tarefas') { goGuiaSection(h); return; }
-  var validViews = ['inicio', 'chat', 'fontes', 'atividade', 'consultar', 'guia', 'conta'];
-  if (validViews.includes(h)) go(h);
+  if (GUIA_SECTION_VIEW[h]) { goGuiaSection(h); return; }
+  if (VIEWS.includes(h) || h === 'chat') go(h);
 });
 
 /* 1.1: Refetch when the user returns from the OAuth tab (visibilitychange). */

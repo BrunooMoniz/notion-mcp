@@ -571,8 +571,47 @@
           <div class="notice warn hidden" id="diag-fix"></div>
         </div>
 
-        <!-- Conectar sua IA -->
-        <p class="guia-eyebrow" id="guia-conectar">conectar sua ia</p>
+        <!-- Hub: uma subpágina por seção do Guia -->
+        <p class="guia-eyebrow">seções do guia</p>
+        <div class="recipe-grid" id="guia-hub">
+          <a class="recipe-card guia-hub-card" href="#guia/conectar" data-nav="guia" data-guia="conectar">
+            <h3>Conectar sua IA</h3>
+            <p class="rc-desc">Plugue o Zinom no Claude, no ChatGPT ou em qualquer cliente MCP.</p>
+            <span class="hub-go">Abrir →</span>
+          </a>
+          <a class="recipe-card guia-hub-card" href="#guia/tarefas" data-nav="guia" data-guia="tarefas">
+            <h3>Tarefas e Planejamento</h3>
+            <p class="rc-desc">Da reunião para o board, do board para o dia planejado.</p>
+            <span class="hub-go">Abrir →</span>
+          </a>
+          <a class="recipe-card guia-hub-card" href="#guia/receitas" data-nav="guia" data-guia="receitas">
+            <h3>Receitas para o dia a dia</h3>
+            <p class="rc-desc">Prompts prontos para copiar e usar na sua IA conectada.</p>
+            <span class="hub-go">Abrir →</span>
+          </a>
+          <a class="recipe-card guia-hub-card" href="#guia/problemas" data-nav="guia" data-guia="problemas">
+            <h3>Resolver Problemas</h3>
+            <p class="rc-desc">Soluções para os tropeços mais comuns: índice, permissões e conexão.</p>
+            <span class="hub-go">Abrir →</span>
+          </a>
+          <a class="recipe-card guia-hub-card" href="#guia/como-funciona" data-nav="guia" data-guia="como-funciona">
+            <h3>Como o Zinom Funciona</h3>
+            <p class="rc-desc">O caminho do conteúdo: das suas fontes até a resposta da IA.</p>
+            <span class="hub-go">Abrir →</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ GUIA · CONECTAR SUA IA ============ -->
+    <section class="view" id="view-guia-conectar" data-screen-label="Guia · Conectar sua IA">
+      <div class="view-inner">
+        <div class="page-head">
+          <a class="guia-back" href="#guia" data-nav="guia">← Guia</a>
+          <p class="eyebrow" id="guia-conectar">guia · conectar sua ia</p>
+          <h1>Conectar sua IA</h1>
+          <p class="lead">Plugue o Zinom no Claude, no ChatGPT ou em qualquer cliente MCP.</p>
+        </div>
         <div class="card" id="connect-guided">
           <div class="card-head">
             <div>
@@ -756,8 +795,18 @@
           </div>
         </div>
 
-        <!-- Tarefas e planejamento (003-tasks-v1) -->
-        <p class="guia-eyebrow" id="guia-tarefas">tarefas e planejamento</p>
+      </div>
+    </section>
+
+    <!-- ============ GUIA · TAREFAS E PLANEJAMENTO (003-tasks-v1) ============ -->
+    <section class="view" id="view-guia-tarefas" data-screen-label="Guia · Tarefas e Planejamento">
+      <div class="view-inner">
+        <div class="page-head">
+          <a class="guia-back" href="#guia" data-nav="guia">← Guia</a>
+          <p class="eyebrow" id="guia-tarefas">guia · tarefas e planejamento</p>
+          <h1>Tarefas e Planejamento</h1>
+          <p class="lead">Da reunião para o board, do board para o dia planejado.</p>
+        </div>
         <div class="card" id="tasks-guide">
           <div class="card-head">
             <div>
@@ -826,8 +875,18 @@
           </div>
         </div>
 
-        <!-- Receitas -->
-        <p class="guia-eyebrow">receitas para o dia a dia</p>
+      </div>
+    </section>
+
+    <!-- ============ GUIA · RECEITAS ============ -->
+    <section class="view" id="view-guia-receitas" data-screen-label="Guia · Receitas para o dia a dia">
+      <div class="view-inner">
+        <div class="page-head">
+          <a class="guia-back" href="#guia" data-nav="guia">← Guia</a>
+          <p class="eyebrow">guia · receitas para o dia a dia</p>
+          <h1>Receitas para o dia a dia</h1>
+          <p class="lead">Prompts prontos para copiar e usar na sua IA conectada.</p>
+        </div>
         <div class="filters" id="recipe-filters">
           <button class="fchip active" type="button" data-rcat="todas">Todas</button>
           <button class="fchip" type="button" data-rcat="reunioes">Reuniões</button>
@@ -917,8 +976,18 @@
           </div>
         </div>
 
-        <!-- Troubleshooting -->
-        <p class="guia-eyebrow">resolver problemas</p>
+      </div>
+    </section>
+
+    <!-- ============ GUIA · RESOLVER PROBLEMAS ============ -->
+    <section class="view" id="view-guia-problemas" data-screen-label="Guia · Resolver Problemas">
+      <div class="view-inner">
+        <div class="page-head">
+          <a class="guia-back" href="#guia" data-nav="guia">← Guia</a>
+          <p class="eyebrow" id="guia-troubleshooting">guia · resolver problemas</p>
+          <h1>Resolver Problemas</h1>
+          <p class="lead">Soluções para os tropeços mais comuns: índice, permissões e conexão.</p>
+        </div>
         <details class="faq">
           <summary>Minha IA não encontra nada no cérebro<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
           <div class="faq-body">Na maioria das vezes é uma destas três causas:
@@ -953,8 +1022,18 @@
           <div class="faq-body">Nomes escritos de formas diferentes ("Marina" e "Marina Souza") viram entidades distintas. Em <a href="#atividade" data-nav="atividade">Atividade → Grafo</a>, clique na entidade e use <strong>Mesclar com…</strong>. Dica: nomeie pessoas e empresas de forma consistente nas suas notas.</div>
         </details>
 
-        <!-- Como funciona -->
-        <p class="guia-eyebrow">como o zinom funciona</p>
+      </div>
+    </section>
+
+    <!-- ============ GUIA · COMO O ZINOM FUNCIONA ============ -->
+    <section class="view" id="view-guia-como-funciona" data-screen-label="Guia · Como o Zinom Funciona">
+      <div class="view-inner">
+        <div class="page-head">
+          <a class="guia-back" href="#guia" data-nav="guia">← Guia</a>
+          <p class="eyebrow" id="guia-como-funciona">guia · como o zinom funciona</p>
+          <h1>Como o Zinom Funciona</h1>
+          <p class="lead">O caminho do conteúdo: das suas fontes até a resposta da IA.</p>
+        </div>
         <div class="card">
           <p class="muted" style="line-height:1.65">O Zinom lê suas fontes (Notion, Granola, agendas, web) e transforma tudo em memória pesquisável. Quando você pergunta algo no Claude ou no ChatGPT, o assistente consulta esse índice antes de responder — com busca semântica, sem precisar da palavra exata — e cita a fonte original. O Zinom não gera texto: ele entrega o contexto certo para a IA que você já usa.</p>
           <div class="pipeline" style="margin-top:16px">
