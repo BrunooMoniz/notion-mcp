@@ -39,6 +39,55 @@ sudo -u postgres dropdb brain_restore_test && rm -f /tmp/rt.dump
 - Tokens por conta ficam no vault (`account_secrets`, kind `google_oauth`), isolados por `account_id`. Para revogar a conexão de um usuário: ele remove no portal (`POST /portal/google/disconnect`) ou apaga-se a linha do vault. Revogar do lado Google: o usuário em myaccount.google.com → Segurança → apps com acesso.
 - Tools: `list_calendars`, `list_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` (esta exige `confirm:true`). Escrita registrada no audit log.
 
+## Painel de saúde (admin → Sistema)
+
+A seção "Sistema" em `/admin` exibe o estado de saúde do engine em tempo real, agrupado em seis categorias: VPS (disco/memória), Processos (PM2), Banco (Postgres), Entrada pública (zinom.ai/mcp), Parceiros (Notion/Anthropic/Voyage/Resend/Stripe/ntfy) e Orçamento de IA (créditos mensais). Granola e iCal não têm probe direto: a saúde deles aparece no painel de fontes (`/status`).
+
+### Estados
+
+| Estado | Significado |
+|--------|-------------|
+| `ok`   | Serviço respondendo dentro dos limites esperados |
+| `warn` | Degradado ou aproximando-se de limite (ex.: disco > 80%, orçamento > 80%) |
+| `fail` | Falha confirmada: timeout, erro HTTP, limite estourado |
+| `skip` | Credencial ou variável de ambiente não configurada — check desabilitado |
+
+### Coleta automática
+
+Intervalo configurado por `HEALTH_CRON` (default `*/5 * * * *`; `off` desliga). O processo `notion-mcp` também roda uma coleta inicial 30 s após subir. Histórico mantido por 7 dias na tabela `health_samples`.
+
+### Coleta manual
+
+- **Botão "Atualizar agora"** na seção Sistema do `/admin` — dispara `POST /admin/health/run` (requer Bearer).
+- Via curl (responde com redirect para `/admin#sistema`):
+  ```bash
+  curl -s -o /dev/null -w '%{http_code}' -X POST https://zinom.ai/admin/health/run \
+    -H "Authorization: Bearer $BEARER_TOKEN"
+  ```
+
+### Alertas (ntfy)
+
+Enviados via `NTFY_URL` (no-op se não configurada):
+
+- **ok|warn → fail**: prioridade `high` — "✗ <label> falhou: <detalhe>"
+- **fail → ok**: prioridade `default` — "✓ <label> recuperou"
+
+Orçamento (checks `budget:*`):
+- **80% do limite** (`warn`, sem warn/fail anterior hoje): "⚠ <label> passou de 80% do orçamento"
+- **100% do limite** (`fail`, sem fail anterior hoje): "✗ <label> estourou o orçamento"
+
+Cada limiar dispara no máximo 1 alerta por dia (UTC). Transições de checks `budget:*` não geram alertas de transição genéricos; apenas os alertas de orçamento acima.
+
+### Variáveis de ambiente relevantes
+
+| Variável | Default | Descrição |
+|----------|---------|-----------|
+| `HEALTH_CRON` | `*/5 * * * *` | Expressão cron da coleta; `off` ou vazio desliga |
+| `HEALTH_PUBLIC_URL` | `https://zinom.ai/mcp` | URL verificada no check de entrada pública |
+| `HEALTH_BUDGET_ANTHROPIC_USD` | — | Orçamento mensal Anthropic em USD; sem ela o card mostra só o gasto |
+| `HEALTH_BUDGET_VOYAGE_USD` | — | Orçamento mensal Voyage em USD; sem ela o card mostra só o gasto |
+| `NTFY_URL` | — | Endpoint ntfy para alertas push; sem ela alertas são silenciosos |
+
 ## Recuperação completa (VPS nova)
 1. Provisionar box (Node 20+, Postgres 16+pgvector) **ou** `docker compose up` (ver README).
 2. Restaurar o último dump no banco `brain` (extensões + `pg_restore`).
