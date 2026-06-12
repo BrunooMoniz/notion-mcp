@@ -13,9 +13,10 @@ import { DEFAULT_ACCOUNT_ID } from "../context.js";
 import { getAccountSecret, setAccountSecret } from "../secrets.js";
 import {
   classifyResults,
-  findReusableTrackerId,
+  isZinomStandardSchema,
   buildParentPagePayload,
   buildCreateDbPayload,
+  TARGET_DB_TITLE,
   type Detection,
   type DataSourceLite,
 } from "./task-tracker-schema.js";
@@ -225,7 +226,18 @@ export async function createTaskTracker(
     const hits: Array<{ id: string; title: string }> = (out.results ?? [])
       .filter((r: any) => r?.id)
       .map((r: any) => ({ id: r.id, title: plainTitle(r.title) }));
-    const reuse = findReusableTrackerId(hits);
+    // Reuse APENAS de base com o fingerprint do template Zinom: título "Tarefas"
+    // não basta (um board alheio homônimo não pode ser adotado — bug 2026-06-12).
+    // Máx. 3 GETs de schema para limitar custo.
+    const normTitle = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const titleHits = hits.filter((h) => normTitle(h.title ?? "") === normTitle(TARGET_DB_TITLE)).slice(0, 3);
+    let reuse: string | null = null;
+    for (const h of titleHits) {
+      try {
+        const ds = await notionFetch(conn.token, `/v1/data_sources/${h.id}`, { method: "GET" }, fetchImpl);
+        if (isZinomStandardSchema(ds?.properties ?? {})) { reuse = h.id; break; }
+      } catch { /* candidata ilegível não é reuse */ }
+    }
     if (reuse) {
       await setTasksDbId(accountId, reuse);
       // 003-tasks-v1: a reused "Tarefas" may predate the new template — bring it

@@ -85,6 +85,53 @@ test("WorkspaceRequiredError: contrato por name + workspaces", () => {
   assert.deepEqual(err.workspaces, ["personal", "globalcripto"]);
 });
 
+// --- Task 1.3: reuse-guard restrito ao template Zinom ------------------------
+
+const ZINOM_SCHEMA = {
+  Nome: { type: "title" },
+  "Tempo estimado (min)": { type: "number" },
+  Tipo: { type: "select", select: { options: [{ name: "Fazer" }, { name: "Cobrar" }] } },
+};
+
+const SCRUM_SCHEMA = {
+  Nome: { type: "title" },
+  "Story Points": { type: "number" },
+  Tipo: { type: "select", select: { options: [{ name: "📁 Projetos" }, { name: "☑️ Tarefas" }] } },
+};
+
+async function seedNotion(accountId: string, ws = "ws-1") {
+  const { setAccountSecret } = await import("../../secrets.js");
+  await setAccountSecret(accountId, `notion_pat:${ws}`, "ntn_fake");
+  workspaces = [ws];
+}
+
+test("create: base alheia chamada 'Tarefas' SEM fingerprint → cria nova em vez de adotar", async () => {
+  await seedNotion("friend:guard");
+  const calls: string[] = [];
+  const fetchImpl = (async (url: string, init?: any) => {
+    const u = String(url);
+    calls.push(`${init?.method ?? "POST"} ${u}`);
+    let body: any = {};
+    if (u.includes("/v1/search")) {
+      body = { results: [{ id: "ds-alheia", object: "data_source", title: [{ plain_text: "Tarefas" }] }] };
+    } else if (u.includes("/v1/data_sources/ds-alheia")) {
+      body = { id: "ds-alheia", title: [{ plain_text: "Tarefas" }], properties: SCRUM_SCHEMA };
+    } else if (u.includes("/v1/pages")) {
+      body = { id: "page-1" };
+    } else if (u.includes("/v1/databases")) {
+      body = { id: "db-1", data_sources: [{ id: "ds-nova" }] };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+  }) as any;
+
+  const res = await createTaskTracker("friend:guard", { workspace: "ws-1", fetchImpl });
+  assert.equal(res.dataSourceId, "ds-nova");
+  assert.equal(res.created, true);
+  assert.ok(calls.some((c) => c.includes("GET") && c.includes("/v1/data_sources/ds-alheia")), "inspecionou o schema da candidata");
+  assert.ok(calls.some((c) => c.includes("/v1/pages")), "criou a página-mãe nova");
+  assert.ok(calls.some((c) => c.includes("/v1/databases")), "criou a DB nova");
+});
+
 test("create sem workspace em conta friend com 2 Notion → lança WorkspaceRequiredError", async () => {
   const { setAccountSecret } = await import("../../secrets.js");
   await setAccountSecret("friend:multi", "notion_pat:ws-1", "ntn_um");
