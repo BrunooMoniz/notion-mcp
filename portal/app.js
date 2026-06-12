@@ -955,16 +955,22 @@ function renderTasksCard(notionConnected) {
         '</div>';
     }
     _tasksMsg('');
-    _tasksActions('<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Trocar de base</button>');
+    _tasksActions(
+      (isHttpUrl(info.url)
+        ? '<a class="btn btn-primary btn-sm" href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">Abrir no Notion ↗</a> '
+        : '') +
+      '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Trocar de base</button>'
+    );
     return;
   }
 
   if (tag) { tag.textContent = 'não configurada'; tag.className = 'tag warn'; }
   if (state) state.innerHTML = '';
-  _tasksMsg('Aponte uma base que você já tem ou crie o Kanban padrão Zinom — a página "🧠 Zinom" com a base "Tarefas" é criada no topo do seu workspace do Notion.');
+  _tasksMsg('Aponte uma base que você já tem, crie o Kanban padrão (página "🧠 Zinom" no topo do workspace) ou escolha em qual página do seu Notion ele nasce.');
   _tasksActions(
     '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
-    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>'
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-choose>Escolher onde criar…</button>'
   );
 }
 
@@ -3344,6 +3350,12 @@ function wireGlobal(me) {
     if (tu) { e.stopPropagation(); runUseTasks(tu.getAttribute('data-use-tasks')); return; }
     var up = e.target.closest('[data-tasks-upgrade]');
     if (up) { e.stopPropagation(); runUpgradeTasks(up); return; }
+    var tch = e.target.closest('[data-tasks-choose]');
+    if (tch) { e.stopPropagation(); runChooseTasks(); return; }
+    var ts = e.target.closest('[data-tasks-search]');
+    if (ts) { e.stopPropagation(); runSearchTasksPages(ts); return; }
+    var th = e.target.closest('[data-tasks-create-here]');
+    if (th) { e.stopPropagation(); runCreateTasksHere(th); return; }
   });
 
   /* revogar token MCP (Início + Conta) e encerrar sessão (Conta) — delegação global */
@@ -3534,6 +3546,12 @@ function _tasksActions(html) {
   document.querySelectorAll('.js-tasks-actions').forEach(function (el) { el.innerHTML = html; });
 }
 
+/* Variante HTML do _tasksMsg — só para markup montado AQUI; tudo que vem do
+   Notion passa por escapeHtml antes de entrar. */
+function _tasksMsgHtml(html) {
+  document.querySelectorAll('.js-tasks-msg').forEach(function (el) { el.innerHTML = html; });
+}
+
 /* GET /portal/tasks/info → {configured, title, url, mapped, missing, is_standard}.
    Degrada para null quando o endpoint não existe/falha (backend antigo). */
 async function loadTasksInfo() {
@@ -3588,6 +3606,78 @@ async function runCreateTasks() {
   } else {
     var b = await res.json().catch(function () { return {}; });
     _tasksMsg(b.error || 'Nao consegui criar. Tente configurar o token (PAT) em Fontes.');
+  }
+}
+
+/* Picker "Escolher onde criar…": mini-form de busca de páginas do Notion.
+   GET /portal/tasks/pages?q=… → botões data-tasks-create-here por página. */
+function runChooseTasks() {
+  _tasksMsgHtml(
+    'Em qual página do seu Notion a base "Tarefas" deve nascer? ' +
+    '<input type="text" class="js-tasks-page-q" placeholder="Nome da página (ex.: Projetos)" ' +
+      'style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;max-width:220px" ' +
+      'aria-label="Nome da página no Notion"> ' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-search>Buscar</button>' +
+    '<span class="js-tasks-pick-results"></span>'
+  );
+}
+
+async function runSearchTasksPages(btn) {
+  var wrap = btn.closest('.js-tasks-msg');
+  if (!wrap) return;
+  var inp = wrap.querySelector('.js-tasks-page-q');
+  var out = wrap.querySelector('.js-tasks-pick-results');
+  var q = inp ? inp.value.trim() : '';
+  if (!q) { if (out) out.textContent = ' Digite o nome de uma página para buscar.'; return; }
+  if (out) out.textContent = ' Buscando…';
+  var res, body;
+  try {
+    res = await api('/portal/tasks/pages?q=' + encodeURIComponent(q));
+    body = await res.json();
+  } catch (e) {
+    if (out) out.textContent = ' Erro de rede. Tente novamente.';
+    return;
+  }
+  if (!res.ok) {
+    if (out) out.textContent = ' ' + ((body && body.error) || 'Não consegui buscar agora. Tente novamente.');
+    return;
+  }
+  var pages = (body && body.pages) || [];
+  if (!pages.length) {
+    if (out) out.textContent = ' Não achei nenhuma página com esse nome. Ela existe e a integração do Zinom tem acesso a ela?';
+    return;
+  }
+  if (out) out.innerHTML = '<span style="display:block;margin-top:6px">Criar a base "Tarefas" dentro de:</span>' +
+    pages.map(function (p) {
+      return '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create-here ' +
+        'data-page-id="' + escapeHtml(p.id) + '" data-workspace="' + escapeHtml(p.workspace || '') + '">' +
+        escapeHtml(p.title || '(sem título)') + '</button>';
+    }).join(' ');
+}
+
+/* POST /portal/tasks/create com destino explícito (página escolhida no picker). */
+async function runCreateTasksHere(btn) {
+  var pageId = btn.getAttribute('data-page-id');
+  var workspace = btn.getAttribute('data-workspace');
+  if (!pageId) return;
+  _tasksMsg('Criando a base "Tarefas" dentro da página escolhida…');
+  _tasksActions('');
+  var res;
+  try {
+    res = await apiJSON('/portal/tasks/create', 'POST', {
+      parent_page_id: pageId,
+      workspace: workspace || undefined,
+    });
+  } catch (e) {
+    _tasksMsg('Erro de rede. Tente novamente.');
+    return;
+  }
+  var b = await res.json().catch(function () { return {}; });
+  if (res.ok) {
+    toast('Base "' + (b.title || 'Tarefas') + '" criada.');
+    load();
+  } else {
+    _tasksMsg((b && b.error) || 'Não consegui criar a base nessa página. Tente outra.');
   }
 }
 
