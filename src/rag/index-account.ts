@@ -65,6 +65,35 @@ export interface IndexAccountDeps {
     accountId: string,
     workspace: string,
   ): Promise<{ documents: number; chunks: number }>;
+  /** Grafo para todos: dispara a extração de entidades da conta logo após a
+   *  indexação (fire-and-forget, orçada por ENTITY_BUDGET_ONBOARD); o cron do
+   *  classifier completa o restante. Opcional para não quebrar fixtures. */
+  kickEntityExtraction?(accountId: string): void;
+}
+
+/** Default do gatilho pós-indexação. Nunca lança: o grafo é best-effort e a
+ *  indexação não pode falhar por causa dele. ENTITIES_ENABLED é checado dentro
+ *  de extractEntitiesForAccount (sem flag, retorna sem tocar o banco). */
+function defaultKickEntityExtraction(accountId: string): void {
+  void (async () => {
+    try {
+      const { extractEntitiesForAccount } = await import("./entity-extractor.js");
+      const budget = parseInt(process.env.ENTITY_BUDGET_ONBOARD ?? "300", 10);
+      const stats = await requestContext.run(
+        { authType: "bearer", scopes: "all", accountId },
+        () => extractEntitiesForAccount(accountId, { budget }),
+      );
+      if (stats.chunksProcessed > 0 || stats.errors > 0) {
+        console.log(
+          `[index-account] ${accountId} entity kick: chunks=${stats.chunksProcessed} errors=${stats.errors}`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `[index-account] ${accountId} entity kick failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  })();
 }
 
 // Lazy real deps — loaded on demand so tests that inject don't boot clients.ts.
@@ -403,6 +432,11 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
       accountId,
     });
   }
+
+  // Grafo para todos os usuários: a indexação (onboarding ou /reindex) já
+  // dispara a extração de entidades desta conta, sem esperar o próximo tick
+  // do classifier. Fire-and-forget: não atrasa nem falha a indexação.
+  (deps.kickEntityExtraction ?? defaultKickEntityExtraction)(accountId);
 
   return { documents, chunks };
 }
