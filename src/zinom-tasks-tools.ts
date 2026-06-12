@@ -39,15 +39,24 @@ function fail(error: string, message: string) {
 const NO_NOTION_MSG =
   "Você ainda não conectou um Notion. Abra o portal (zinom.ai) e conecte seu Notion para eu poder trabalhar com suas tarefas.";
 const NO_TRACKER_MSG =
-  "Você ainda não tem uma base de tarefas configurada. Duas saídas: (1) peça para eu criar sua primeira tarefa — eu crio a base padrão \"Tarefas\" no seu Notion automaticamente; ou (2) configure uma base existente no portal (zinom.ai → Início → Tarefas).";
+  "Você ainda não tem uma base de tarefas configurada. Duas saídas: (1) use zinom_setup_tasks escolhendo o workspace e, se quiser, a página onde a base padrão \"Tarefas\" deve nascer (com um único Notion conectado, criar a primeira tarefa também cria a base automaticamente); ou (2) configure uma base existente no portal (zinom.ai → Início → Tarefas).";
 
-function taskError(e: unknown, genericCode = "task_failed"): ReturnType<typeof fail> {
+export function taskError(e: unknown, genericCode = "task_failed"): ReturnType<typeof fail> {
   if (e instanceof NoNotionError) return fail("no_notion", NO_NOTION_MSG);
   if (e instanceof NoTrackerError) return fail("no_tracker", NO_TRACKER_MSG);
   if (e instanceof TaskNotFoundError) {
     return fail(
       "not_found",
       "Não encontrei essa tarefa na sua base (task_id inválido ou de outra base). Use zinom_list_tasks para pegar o id certo.",
+    );
+  }
+  // Contrato do Épico 1 (detectado por name, nunca instanceof): conta com mais
+  // de um Notion conectado não cria base às cegas — a pessoa escolhe o destino.
+  if (e instanceof Error && e.name === "WorkspaceRequiredError") {
+    const ws = ((e as any).workspaces as string[]) ?? [];
+    return fail(
+      "workspace_required",
+      `Você tem mais de um Notion conectado (${ws.join(", ")}). Use zinom_setup_tasks com o workspace (e página, se quiser) onde a base de Tarefas deve nascer.`,
     );
   }
   const msg = e instanceof Error ? e.message : String(e);
@@ -74,6 +83,7 @@ export interface SetupTasksDeps {
   getTasksInfo: (accountId: string) => Promise<{ title: string | null; url: string | null }>;
   invalidateTrackerProfile: (accountId: string) => void;
   extractNotionPageId: (s: string) => string | null;
+  listWorkspaces: (accountId: string) => Promise<string[]>;
 }
 
 export interface SetupTasksArgs { pagina?: string; workspace?: string; confirmar?: boolean }
@@ -141,6 +151,20 @@ export async function setupTasksFlow(
     }
   }
 
+  if (!targetWorkspace && !parentPageId) {
+    const ws = await deps.listWorkspaces(accountId);
+    if (ws.length > 1) {
+      return {
+        ok: false,
+        error: "workspace_required",
+        workspaces: ws,
+        message:
+          "Você tem mais de um Notion conectado. Em qual workspace devo criar a base de Tarefas? " +
+          `Opções: ${ws.join(", ")}. Me diga e eu chamo de novo com esse workspace (e, se quiser, a página).`,
+      };
+    }
+  }
+
   const r = await deps.createTaskTracker(accountId, { workspace: targetWorkspace, parentPageId });
   deps.invalidateTrackerProfile(accountId);
   let info: { title: string | null; url: string | null } = { title: null, url: null };
@@ -166,7 +190,7 @@ export function registerZinomTasksTools(server: McpServer): void {
     "zinom_create_task",
     `Cria uma tarefa, evento, compromisso ou lembrete no Notion da pessoa (na base de tarefas dela), com data opcional.
 
-Use SEMPRE que a pessoa pedir para "criar uma tarefa", "agendar", "marcar", "me lembrar de", "anotar pra fazer", ou quando você extrair tarefas de uma reunião. Se ela ainda não tiver base de tarefas, o Zinom cria a padrão automaticamente na primeira vez.
+Use SEMPRE que a pessoa pedir para "criar uma tarefa", "agendar", "marcar", "me lembrar de", "anotar pra fazer", ou quando você extrair tarefas de uma reunião. Se ela ainda não tiver base de tarefas: com um único Notion conectado o Zinom cria a base padrão automaticamente; com mais de um, ele pergunta o workspace (zinom_setup_tasks).
 
 ANTES de criar, rode zinom_list_tasks com q (busca por título) para não duplicar uma tarefa que já existe no board.
 
@@ -264,6 +288,8 @@ Parâmetros:
 - workspace: opcional; restringe a busca/criação a um workspace específico (para quem tem mais de um Notion conectado).
 - confirmar: obrigatório =true quando JÁ existe uma base configurada — cria a nova no destino e passa a usá-la (a antiga continua no Notion; as tarefas NÃO são migradas automaticamente).
 
+Conta com mais de um Notion conectado e sem 'workspace' nem 'pagina': a resposta é {error: "workspace_required", workspaces: [...]} — mostre as opções à pessoa, pergunte qual usar e chame de novo com o workspace escolhido.
+
 Se a resposta trouxer candidates (mais de uma página com o nome), mostre as opções com os links e pergunte qual usar. Responda SEMPRE com o link clicável do board (tracker_url).`,
     {
       pagina: z.string().optional().describe("URL/ID da página, ou nome para buscar"),
@@ -284,6 +310,7 @@ Se a resposta trouxer candidates (mais de uma página com o nome), mostre as op�
           getTasksInfo: (a) => adapter.getTasksInfo(a),
           invalidateTrackerProfile: adapter.invalidateTrackerProfile,
           extractNotionPageId: schema.extractNotionPageId,
+          listWorkspaces: async (a) => (await tracker.listAccountNotionTokens(a)).map((t) => t.workspace),
         });
         if ((out as any).ok) {
           auditWrite("zinom_setup_tasks", "tasks",
