@@ -118,6 +118,15 @@ export function findReusableTrackerId(
   return null;
 }
 
+/** Extrai o id de página de uma URL notion.so ou de um id cru (32-hex, com ou sem
+ *  hífens). null quando o texto não contém id no fim — é um NOME para busca. */
+export function extractNotionPageId(input: string): string | null {
+  const s = (input ?? "").trim();
+  const tail = /notion\.(so|site)/i.test(s) ? (s.split("?")[0].split("/").pop() ?? "") : s;
+  const m = tail.replace(/-/g, "").match(/([0-9a-f]{32})$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 /** Payload de POST /v1/pages: página-mãe "🧠 Zinom" no topo do workspace. */
 export function buildParentPagePayload(): {
   parent: { type: "workspace"; workspace: true };
