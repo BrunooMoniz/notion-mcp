@@ -185,7 +185,9 @@ Parâmetros:
 - projeto: nome do projeto/frente.
 - nota: detalhe livre no corpo da página.
 
-Responde em português confirmando o que foi criado, com o link da página.`,
+Responde em português confirmando o que foi criado, com o link da página.
+
+SEMPRE mostre o link clicável da tarefa (url) na resposta e ofereça o link do board (tracker_url) para abrir as tarefas no Notion.`,
     {
       titulo: z.string().min(1).describe("Nome da tarefa/evento"),
       data: z
@@ -239,6 +241,7 @@ Responde em português confirmando o que foi criado, com o link da página.`,
           titulo,
           data: data ?? null,
           url: r.url,
+          tracker_url: r.trackerUrl,
           message: r.created
             ? "Criei sua base de Tarefas no Notion e adicionei este item."
             : "Tarefa criada no seu Notion.",
@@ -308,7 +311,7 @@ Parâmetros:
 - q: busca por substring no título (use para deduplicar antes de criar).
 - limit: máximo de tarefas (default 25, máx 100).
 
-Retorna {tasks, board, tracker_url, truncated}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count. truncated=true significa que a base tem mais linhas do que o scan cobriu — os números do board são um piso.`,
+Retorna {tasks, board, tracker_url, truncated}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count. truncated=true significa que a base tem mais linhas do que o scan cobriu — os números do board são um piso. Mostre tracker_url como link clicável ("abrir no Notion") quando apresentar o board.`,
     {
       status: z
         .array(z.string())
@@ -457,12 +460,14 @@ Retorna:
         let estimado_min = 0;
         let tasks_truncated = false;
         let tracker_note: string | null = null;
+        let tracker_url: string | null = null;
         try {
           const r = await listTasks(accountId, { limit: 100 });
           tasksSection = groupOpenTasks(r.tasks, todayISO);
           abertos = r.board.abertos;
           estimado_min = r.board.estimado_min;
           tasks_truncated = r.truncated;
+          tracker_url = r.tracker_url;
         } catch (e) {
           if (e instanceof NoNotionError) {
             tracker_note = NO_NOTION_MSG;
@@ -482,6 +487,7 @@ Retorna:
           free_slots,
           tasks: tasksSection.by_status,
           overdue: tasksSection.overdue,
+          tracker_url,
           // tasks_truncated=true → abertos/estimado/overdue são um PISO (a base
           // tem mais linhas do que o scan cobriu).
           totals: { free_min, abertos, estimado_min, overdue: tasksSection.overdue.length, tasks_truncated },
