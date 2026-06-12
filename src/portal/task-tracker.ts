@@ -27,7 +27,21 @@ const TASKS_DB_KIND = "tasks_db";
 // custo/latência; workspaces com mais que isso são truncados (logado).
 const MAX_INSPECT = 40;
 
-export type DetectResult = Detection | { status: "no-notion"; candidates: [] };
+export type DetectResult =
+  | Detection
+  | { status: "no-notion"; candidates: [] }
+  | { status: "workspace_required"; workspaces: string[]; candidates: [] };
+
+/** Conta com mais de um Notion conectado precisa ESCOLHER onde agir. Detectada
+ *  por `name` (não instanceof) nos outros módulos. */
+export class WorkspaceRequiredError extends Error {
+  readonly workspaces: string[];
+  constructor(workspaces: string[]) {
+    super(`escolha um workspace do Notion: ${workspaces.join(", ")}`);
+    this.name = "WorkspaceRequiredError";
+    this.workspaces = workspaces;
+  }
+}
 
 function ownerEnvTokens(): Array<{ workspace: string; token: string }> {
   const pairs: Array<[string, string | undefined]> = [
@@ -52,8 +66,10 @@ export async function listAccountNotionTokens(
   return out;
 }
 
-/** Token + workspace da conta. Sem `preferred`: o primeiro com token (comportamento
- *  histórico). Com `preferred`: SÓ esse workspace; sem token nele → erro nominal. */
+/** Token + workspace da conta. Com `preferred`: SÓ esse workspace; sem token
+ *  nele → erro nominal. Sem `preferred`: único workspace conectado, ou
+ *  WorkspaceRequiredError quando há mais de um (fim do `all[0]` silencioso —
+ *  causa do bug 2026-06-12). */
 async function resolveAccountNotion(
   accountId: string,
   preferred?: string,
@@ -64,6 +80,7 @@ async function resolveAccountNotion(
     if (!hit) throw new Error(`sem Notion conectado no workspace "${preferred}"`);
     return hit;
   }
+  if (all.length > 1) throw new WorkspaceRequiredError(all.map((t) => t.workspace));
   return all[0] ?? null;
 }
 
@@ -105,10 +122,18 @@ function plainTitle(title: unknown): string {
  *  search dá id+title; um GET por candidata (até MAX_INSPECT) busca o schema. */
 export async function detectTaskTracker(
   accountId: string,
-  opts: { fetchImpl?: typeof fetch } = {},
+  opts: { fetchImpl?: typeof fetch; workspace?: string } = {},
 ): Promise<DetectResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const conn = await resolveAccountNotion(accountId);
+  let conn;
+  try {
+    conn = await resolveAccountNotion(accountId, opts.workspace);
+  } catch (err: any) {
+    if (err?.name === "WorkspaceRequiredError") {
+      return { status: "workspace_required", workspaces: err.workspaces, candidates: [] };
+    }
+    throw err;
+  }
   if (!conn) return { status: "no-notion", candidates: [] };
 
   const out = await notionFetch(
