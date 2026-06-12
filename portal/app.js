@@ -3049,6 +3049,42 @@ function wireFeedbackBtns(scope, currentQuery) {
   });
 }
 
+// Frente C (#98): barra de feedback por resposta gerada — "Essa resposta foi
+// útil?" vota em todos os chunks citados de uma vez via POST /portal/feedback.
+// Reusa o mesmo votedChunks (1 voto por chunk por sessão de chat); desabilita
+// após o voto; a consulta não é persistida em lugar nenhum além do POST.
+function renderAnswerFeedback(sources) {
+  var cited = (sources || []).filter(function (s) { return s.cited && s.chunk_id; });
+  if (!cited.length) return '';
+  return '<div class="answer-fb" data-answer-fb>' +
+    '<span class="answer-fb-label">Essa resposta foi útil?</span>' +
+    '<button class="fb-btn" type="button" data-afb-up title="Util" aria-label="Resposta util">&#128077;</button>' +
+    '<button class="fb-btn" type="button" data-afb-down title="Nao util" aria-label="Resposta nao util">&#128078;</button>' +
+    '</div>';
+}
+
+function wireAnswerFeedback(scope, sources, currentQuery) {
+  var bar = scope.querySelector('[data-answer-fb]');
+  if (!bar) return;
+  var cited = (sources || []).filter(function (s) { return s.cited && s.chunk_id; });
+  function vote(isUp) {
+    bar.querySelectorAll('.fb-btn').forEach(function (b) { b.disabled = true; });
+    cited.forEach(function (s) {
+      if (votedChunks[s.chunk_id]) return; // 1 voto por chunk por sessão
+      votedChunks[s.chunk_id] = true;
+      apiJSON('/portal/feedback', 'POST', {
+        chunk_id: s.chunk_id,
+        value: isUp ? 'up' : 'down',
+        query: currentQuery || ''
+      }).catch(function () {});
+    });
+  }
+  var up = bar.querySelector('[data-afb-up]');
+  var down = bar.querySelector('[data-afb-down]');
+  if (up) up.addEventListener('click', function () { vote(true); });
+  if (down) down.addEventListener('click', function () { vote(false); });
+}
+
 function scrollBottom() {
   var se = document.scrollingElement;
   se.scrollTo({ top: se.scrollHeight, behavior: 'smooth' });
@@ -3117,6 +3153,19 @@ async function ask(q) {
     var sources = data.sources || [];
     var route = data.route || 'search';
 
+    // Frente C (#98): modo degradado — LLM indisponível, mas a busca achou
+    // fontes. Mostra o aviso + as fontes (com feedback por fonte).
+    if (data.degraded) {
+      stack.innerHTML = '<div class="chat-block degraded">' +
+        '<span class="bh">A IA está temporariamente indisponível — aqui está o que encontrei no seu cérebro:</span>' +
+        '</div>' + renderAskAnswer('', sources);
+      wireCiteRefs(stack);
+      wireFeedbackBtns(stack, q);
+      scrollBottom();
+      appendToCurrentConv(q, stack.innerHTML);
+      return;
+    }
+
     // E3: action route — show confirmation card
     if (route === 'action' && data.proposed_action) {
       renderActionCard(data.proposed_action, stack, q);
@@ -3126,9 +3175,11 @@ async function ask(q) {
     }
 
     // meta or search route
-    stack.innerHTML = renderAskAnswer(answer, route === 'meta' ? [] : sources);
+    stack.innerHTML = renderAskAnswer(answer, route === 'meta' ? [] : sources) +
+      (route === 'meta' ? '' : renderAnswerFeedback(sources)); // Frente C: "Essa resposta foi útil?"
     wireCiteRefs(stack);
     wireFeedbackBtns(stack, q); // Spec 004: wire 👍/👎 buttons
+    wireAnswerFeedback(stack, sources, q);
     scrollBottom();
 
     // E3: atualiza histórico
