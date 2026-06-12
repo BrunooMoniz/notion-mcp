@@ -4,7 +4,7 @@
 // Tarefas. Núcleo puro, deps fake, sem rede/DB.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { setupTasksFlow, type SetupTasksDeps } from "../../zinom-tasks-tools.js";
+import { setupTasksFlow, taskError, type SetupTasksDeps } from "../../zinom-tasks-tools.js";
 
 function deps(over: Partial<SetupTasksDeps> = {}): SetupTasksDeps {
   return {
@@ -39,4 +39,14 @@ test("workspace explícito → cria nele", async () => {
   }));
   assert.equal(out.ok, true);
   assert.equal(usado, "globalcripto");
+});
+
+test("taskError: WorkspaceRequiredError vira workspace_required com a lista", () => {
+  const err = Object.assign(new Error("escolha um workspace"), {
+    name: "WorkspaceRequiredError",
+    workspaces: ["personal", "globalcripto"],
+  });
+  const out = JSON.parse((taskError(err) as any).content[0].text);
+  assert.equal(out.error, "workspace_required");
+  assert.match(out.message, /personal/);
 });
