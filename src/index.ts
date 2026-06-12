@@ -24,6 +24,10 @@ import { createGoogleRouter } from "./google/routes.js";
 import { createNotionOnboardRouter } from "./notion-routes.js";
 import { createPortalRouter } from "./portal/routes.js";
 import { createAdminRouter } from "./admin/routes.js";
+import { startHealthCollector, registerProbe } from "./health/collector.js";
+import { vpsProbe, pm2Probe, postgresProbe } from "./health/probes-local.js";
+import { makeExternalProbes } from "./health/probes-external.js";
+import { anthropicBudgetCheck, voyageBudgetCheck, llmTokensCheck } from "./health/budgets.js";
 import { createStripeWebhookRouter } from "./billing/webhook.js";
 import { resolveBearer, accountWorkspaces } from "./account-bearer.js";
 import { isAccountActive } from "./account-status.js";
@@ -528,3 +532,20 @@ app.listen(Number(PORT), BIND_HOST, () => {
   console.log(`notion-mcp listening on ${BIND_HOST}:${PORT}`);
   console.log(`OAuth base URL: ${BASE_URL}`);
 });
+
+// Painel de saúde (admin → Sistema): coleta periódica de amostras em
+// health_samples. Precisa do Postgres; sem POSTGRES_URL (ex.: dev portal-only)
+// o collector simplesmente não sobe.
+if (process.env.POSTGRES_URL) {
+  const healthProbes = [
+    vpsProbe,
+    pm2Probe,
+    postgresProbe,
+    ...makeExternalProbes(),
+    anthropicBudgetCheck,
+    voyageBudgetCheck,
+    llmTokensCheck,
+  ];
+  for (const p of healthProbes) registerProbe(p);
+  startHealthCollector();
+}

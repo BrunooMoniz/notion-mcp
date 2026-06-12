@@ -38,6 +38,10 @@ import {
 } from "./business.js";
 import { getStripe } from "../billing/stripe.js";
 import { getOrgCostReport } from "./anthropic-cost.js";
+import { latestSamples, seriesSince, type SampleRow } from "../health/storage.js";
+import { runHealthCollection } from "../health/collector.js";
+import { worstStatus } from "../health/types.js";
+import { renderSystemSection, type HealthView } from "./system-section.js";
 
 interface AccountRow {
   id: string;
@@ -228,6 +232,12 @@ async function gather() {
   // F2: Anthropic org-level cost report (cached 1h; null when ANTHROPIC_ADMIN_KEY absent).
   const orgCostReport: CostReportResponse | null = await getOrgCostReport().catch(() => null);
 
+  // Painel de saúde (seção Sistema): última amostra de cada check + séries de 24h.
+  // Graceful: qualquer falha (tabela ausente, collector nunca rodou) → vazio.
+  const health: HealthView = await buildHealthView().catch(
+    (): HealthView => ({ collectedAt: null, checks: [], series: new Map() }),
+  );
+
   const byAcct = <T extends { account_id: string }>(rows: T[]) => {
     const m = new Map<string, T[]>();
     for (const r of rows) {
@@ -267,7 +277,46 @@ async function gather() {
     chatUsage,
     storageRows,
     wsNames,
+    // Painel de saúde (seção Sistema)
+    health,
   };
+}
+
+/**
+ * Monta o HealthView para a seção Sistema: última amostra por check e, por check,
+ * a série numérica de 24h para a sparkline. Para vps usamos o gauge diskPct
+ * (mais legível que latência); para os demais, latency_ms. Pontos não-numéricos
+ * viram NaN e são filtrados na renderização.
+ */
+async function buildHealthView(): Promise<HealthView> {
+  const [checks, series] = await Promise.all([latestSamples(), seriesSince(24)]);
+  const collectedAt = checks.length
+    ? checks.reduce<Date | null>((max, c) => (!max || c.ts > max ? c.ts : max), null)
+    : null;
+
+  // Agrupa a série crua por check_id e extrai o valor numérico relevante por ponto.
+  const byCheck = new Map<string, { ts: Date; latency_ms: number | null; detail: Record<string, unknown> | null }[]>();
+  for (const p of series) {
+    const arr = byCheck.get(p.check_id) ?? [];
+    arr.push(p);
+    byCheck.set(p.check_id, arr);
+  }
+
+  const seriesMap = new Map<string, number[]>();
+  for (const [checkId, points] of byCheck) {
+    points.sort((a, b) => a.ts.getTime() - b.ts.getTime());
+    const isVps = checkId === "vps";
+    const nums = points.map((p) => {
+      if (isVps) {
+        const d = p.detail?.diskPct;
+        return typeof d === "number" && Number.isFinite(d) ? d : NaN;
+      }
+      return typeof p.latency_ms === "number" && Number.isFinite(p.latency_ms) ? p.latency_ms : NaN;
+    });
+    seriesMap.set(checkId, nums);
+  }
+
+  return { collectedAt: collectedAt ? collectedAt.toISOString() : null, checks, series: seriesMap };
 }
 
 function sourceFlags(kinds: string[] | undefined): string {
@@ -1190,6 +1239,7 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
     Zinom <span class="sidebar-sub">Admin</span>
   </a>
   <nav class="sidebar-nav" aria-label="Seções do admin">
+    <a class="nav-item" href="#sistema" data-section="sistema">Sistema</a>
     <a class="nav-item" href="#resumo" data-section="resumo">Resumo</a>
     <a class="nav-item" href="#receita" data-section="receita">Receita</a>
     <a class="nav-item" href="#funil" data-section="funil">Funil</a>
@@ -1215,6 +1265,7 @@ input[type=email]:focus,input[type=text]:focus{outline:none;border-color:var(--a
 
 <!-- Mobile tabbar -->
 <nav class="tabbar-mobile" aria-label="Seções">
+  <a href="#sistema">Sistema</a>
   <a href="#resumo">Resumo</a>
   <a href="#receita">Receita</a>
   <a href="#funil">Funil</a>
@@ -1237,6 +1288,9 @@ ${msg ? `
   <button class="banner-close" onclick="document.getElementById('admin-banner').remove()" aria-label="Fechar">&times;</button>
 </div>
 ` : ""}
+
+<!-- ============================== SISTEMA ============================== -->
+${renderSystemSection(data.health, token)}
 
 <!-- ============================== RESUMO ============================== -->
 <section class="section" id="resumo">
@@ -1355,14 +1409,14 @@ ${rows}
 
 <script>
 /* View router (same pattern as portal/app.js): one section visible at a time,
-   hash-addressable, unknown hash falls back to #resumo. With JS off the
+   hash-addressable, unknown hash falls back to #sistema. With JS off the
    .js-views class is never added and the page degrades to the full scroll. */
 (function() {
-  var VIEWS = ['resumo','receita','funil','engajamento','custo','qualidade-memoria','uso-chat','armazenamento','leads','contas'];
+  var VIEWS = ['sistema','resumo','receita','funil','engajamento','custo','qualidade-memoria','uso-chat','armazenamento','leads','contas'];
   document.documentElement.classList.add('js-views');
   function go() {
-    var h = (location.hash || '#resumo').slice(1);
-    if (VIEWS.indexOf(h) === -1) h = 'resumo';
+    var h = (location.hash || '#sistema').slice(1);
+    if (VIEWS.indexOf(h) === -1) h = 'sistema';
     VIEWS.forEach(function(id) {
       var sec = document.getElementById(id);
       if (sec) sec.classList.toggle('view-active', id === h);
@@ -1404,6 +1458,59 @@ ${rows}
     btn.textContent = open ? '\\u25BE' : '\\u25B8'; /* ▾ / ▸ */
   });
 })();
+
+/* Sistema: refresh ao vivo (60s) dos textos [data-field] e da cor do dot de
+   cada [data-check]. Só busca quando a view Sistema está ativa (location.hash),
+   pra não martelar o servidor nas outras telas. Usa o token da própria página. */
+(function() {
+  var HEALTH_URL = '/admin/health.json?token=${encodeURIComponent(token)}';
+  var DOT = { ok: 'var(--accent)', warn: '#c98a00', fail: '#b3261e', skip: 'var(--muted)' };
+  var STATE = { ok: 'ok', warn: 'atenção', fail: 'falha', skip: 'não configurado' };
+  function sysActive() {
+    var h = (location.hash || '#sistema').slice(1);
+    return h === 'sistema' || h === '';
+  }
+  function setField(scope, name, value) {
+    var el = scope.querySelector('[data-field="' + name + '"]');
+    if (el && value != null) el.textContent = value;
+  }
+  function fmtLatency(ms) {
+    return (typeof ms === 'number' && isFinite(ms)) ? Math.round(ms) + ' ms' : '—';
+  }
+  function applyCheck(c) {
+    var tile = document.querySelector('[data-check="' + (window.CSS && CSS.escape ? CSS.escape(c.checkId) : c.checkId) + '"]');
+    if (!tile) return;
+    var dot = tile.querySelector('[data-field="dot"]');
+    if (dot) dot.style.background = DOT[c.status] || DOT.skip;
+    var st = tile.querySelector('.hp-tile-state[data-field="state"]');
+    if (st) st.textContent = STATE[c.status] || c.status;
+    if (typeof c.latencyMs !== 'undefined') setField(tile, 'latencyMs', fmtLatency(c.latencyMs));
+  }
+  function applyOverall(data) {
+    var ov = document.querySelector('[data-check="__overall__"]');
+    if (!ov) return;
+    var dot = ov.querySelector('[data-field="dot"]');
+    if (dot) dot.style.background = DOT[data.overall] || DOT.skip;
+    setField(ov, 'state', STATE[data.overall] || data.overall);
+    var counts = { ok: 0, warn: 0, fail: 0, skip: 0 };
+    (data.checks || []).forEach(function(c) { if (counts[c.status] != null) counts[c.status]++; });
+    var when = data.collectedAt ? new Date(data.collectedAt).toLocaleString('pt-BR') : 'nunca';
+    var cEl = ov.querySelector('[data-field="counts"]');
+    if (cEl) cEl.textContent = counts.ok + ' ok · ' + counts.warn + ' atenção · ' + counts.fail + ' falha · ' + counts.skip + ' não conf.';
+  }
+  function refresh() {
+    if (!sysActive()) return;
+    fetch(HEALTH_URL, { headers: { 'accept': 'application/json' } })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data) return;
+        applyOverall(data);
+        (data.checks || []).forEach(applyCheck);
+      })
+      .catch(function() { /* silencioso: refresh é best-effort */ });
+  }
+  setInterval(refresh, 60000);
+})();
 </script>
 </body>
 </html>`;
@@ -1438,6 +1545,47 @@ export function createAdminRouter(bearerToken?: string): express.Router {
       res.type("html").send(renderHtml(data, new Date().toISOString(), token, msg, msgKind));
     } catch (err: any) {
       res.status(500).type("html").send(`<!doctype html><meta charset=utf-8><p>500 — ${escapeHtml(err?.message ?? "erro")}</p>`);
+    }
+  });
+
+  // Health JSON: payload do refresh ao vivo da seção Sistema. Mesma gate dos
+  // outros handlers. overall = worstStatus dos checks. Nunca expõe segredos:
+  // só checkId/status/label/latência (detail fica no server-render).
+  router.get("/admin/health.json", async (req, res) => {
+    const token = gate(req, res);
+    if (!token) return;
+    try {
+      const checks = await latestSamples();
+      const collectedAt = checks.length
+        ? checks.reduce<Date | null>((max, c) => (!max || c.ts > max ? c.ts : max), null)
+        : null;
+      const overall = worstStatus(checks.map((c) => c.status));
+      res.json({
+        overall,
+        collectedAt: collectedAt ? collectedAt.toISOString() : null,
+        checks: checks.map((c: SampleRow) => ({
+          checkId: c.check_id,
+          label: typeof c.detail?.label === "string" ? c.detail.label : c.check_id,
+          status: c.status,
+          latencyMs: c.latency_ms,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "erro" });
+    }
+  });
+
+  // Atualizar agora: força uma coleta de saúde e volta pra seção Sistema.
+  router.post("/admin/health/run", async (req, res) => {
+    const token = gate(req, res);
+    if (!token) return;
+    const back = `/admin?token=${encodeURIComponent(token)}`;
+    try {
+      await runHealthCollection();
+      res.redirect(`${back}&msg=${encodeURIComponent("Coleta executada.")}#sistema`);
+    } catch (err: any) {
+      console.error(`[admin] health run failed: ${err?.message ?? err}`);
+      res.redirect(`${back}&msg=${encodeURIComponent(`Falha na coleta: ${err?.message ?? "erro"}`)}&kind=err#sistema`);
     }
   });
 

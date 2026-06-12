@@ -186,6 +186,7 @@ untouched.
 Required: `NOTION_PERSONAL_TOKEN`, `NOTION_GLOBALCRIPTO_TOKEN`, `NOTION_NORA_TOKEN`, `OAUTH_PASSWORD_HASH`.
 Optional: `BEARER_TOKEN`, `BASE_URL`, `PORT`, `NORA_READONLY`, `AUDIT_LOG_PATH`, `ENROLLMENT_WINDOW_MINUTES`.
 Portal: `RESEND_API_KEY`, `PORTAL_EMAIL_FROM` (magic-link email), `NOTION_OAUTH_CLIENT_ID`/`NOTION_OAUTH_CLIENT_SECRET` (Notion connect). Dev/test: `PORTAL_EMAIL_DEV=1` (capture link, no send), `PORTAL_PORT`, `PORTAL_TEST_MODE=1`. Cross-origin (future Pages): `PORTAL_SESSION_COOKIE_DOMAIN`, `PORTAL_PAGES_ORIGIN`, `PORTAL_COOKIE_SECURE`.
+Painel de saúde: `HEALTH_CRON` (expressão cron da coleta, default `*/5 * * * *`; `off` desliga), `HEALTH_PUBLIC_URL` (URL verificada no check de entrada pública, default `https://zinom.ai/mcp`), `HEALTH_BUDGET_ANTHROPIC_USD` (orçamento mensal Anthropic em USD; sem ela o card mostra só o gasto), `HEALTH_BUDGET_VOYAGE_USD` (orçamento mensal Voyage em USD; sem ela o card mostra só o gasto). Alertas ntfy: `NTFY_URL` (endpoint ntfy; sem ela alertas são silenciosos).
 
 Generate password hash: `node scripts/hash-password.mjs 'password'`
 
