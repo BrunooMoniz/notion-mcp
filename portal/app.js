@@ -424,10 +424,11 @@ function renderOnboarding() {
     {
       done: tasksDone,
       st: 'Onde suas tarefas vivem',
-      sd: 'Aponte a base de tarefas que você já tem no Notion — o Zinom se adapta aos seus campos — ou crie o Kanban padrão Zinom (a página "🧠 Zinom" com a base "Tarefas" no topo do seu workspace): status, prioridade, prazo, tempo estimado, tipo (fazer ou cobrar), quem e origem. Dá para trocar a base depois em Fontes.',
+      sd: 'Escolha em qual workspace e página do seu Notion o Gestor de Tarefas (template Zinom) deve nascer: status, prioridade, prazo, tempo estimado, tipo (fazer ou cobrar), quem e origem. Se preferir, aponte uma base que você já tem — o Zinom se adapta aos seus campos. Dá para trocar a base depois em Fontes.',
       cta: '<div class="task-choice js-tasks-actions">' +
-        '<button class="btn btn-primary btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
-        '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
+        '<button class="btn btn-primary btn-sm" type="button" data-tasks-choose>Escolher onde criar (recomendado)</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar no topo do workspace</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
         '</div><p class="muted js-tasks-msg" style="font-size:12.5px;margin:7px 0 0"></p>'
     },
     {
@@ -959,18 +960,18 @@ function renderTasksCard(notionConnected) {
       (isHttpUrl(info.url)
         ? '<a class="btn btn-primary btn-sm" href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">Abrir no Notion ↗</a> '
         : '') +
-      '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Trocar de base</button>'
+      '<button class="btn btn-ghost btn-sm" type="button" data-tasks-switch>Trocar de base…</button>'
     );
     return;
   }
 
   if (tag) { tag.textContent = 'não configurada'; tag.className = 'tag warn'; }
   if (state) state.innerHTML = '';
-  _tasksMsg('Aponte uma base que você já tem, crie o Kanban padrão (página "🧠 Zinom" no topo do workspace) ou escolha em qual página do seu Notion ele nasce.');
+  _tasksMsg('Escolha em qual workspace e página o seu Gestor de Tarefas (template Zinom) deve nascer. Depois dá para migrar tarefas antigas pedindo ao Zinom.');
   _tasksActions(
-    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
-    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
-    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-choose>Escolher onde criar…</button>'
+    '<button class="btn btn-primary btn-sm" type="button" data-tasks-choose>Escolher onde criar (recomendado)</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar no topo do workspace</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>'
   );
 }
 
@@ -2556,10 +2557,11 @@ function renderActivation() {
         inner = '<p class="muted" style="margin:0 0 0 28px;font-size:13px">Conecte seu Notion em Fontes primeiro.</p>';
       } else {
         inner = '<div style="margin:6px 0 2px 28px;display:flex;flex-direction:column;gap:6px">' +
-          '<p class="muted js-tasks-msg" style="margin:0;font-size:13px">Aponte uma base que você já tem ou crie o Kanban padrão Zinom (status, prioridade, prazo, tipo fazer/cobrar).</p>' +
+          '<p class="muted js-tasks-msg" style="margin:0;font-size:13px">Escolha em qual workspace e página o Gestor de Tarefas (template Zinom) deve nascer, ou aponte uma base que você já tem.</p>' +
           '<div class="task-choice js-tasks-actions">' +
+            '<button class="btn btn-primary btn-sm" type="button" data-tasks-choose>Escolher onde criar (recomendado)</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar no topo do workspace</button>' +
             '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Já tenho uma base no Notion</button>' +
-            '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar o Kanban padrão Zinom</button>' +
           '</div>' +
         '</div>';
       }
@@ -3703,6 +3705,12 @@ function wireGlobal(me) {
     if (ts) { e.stopPropagation(); runSearchTasksPages(ts); return; }
     var th = e.target.closest('[data-tasks-create-here]');
     if (th) { e.stopPropagation(); runCreateTasksHere(th); return; }
+    var tcw = e.target.closest('[data-tasks-create-ws]');
+    if (tcw) { e.stopPropagation(); runCreateTasks(_tasksSelectedWorkspace(tcw.closest('.js-tasks-msg'))); return; }
+    var tdw = e.target.closest('[data-tasks-detect-ws]');
+    if (tdw) { e.stopPropagation(); runDetectTasks(_tasksSelectedWorkspace(tdw.closest('.js-tasks-msg'))); return; }
+    var tsw = e.target.closest('[data-tasks-switch]');
+    if (tsw) { e.stopPropagation(); runSwitchTasks(); return; }
   });
 
   /* revogar token MCP (Início + Conta) e encerrar sessão (Conta) — delegação global */
@@ -3899,6 +3907,32 @@ function _tasksMsgHtml(html) {
   document.querySelectorAll('.js-tasks-msg').forEach(function (el) { el.innerHTML = html; });
 }
 
+/* Lista de workspaces Notion conectados, para os fluxos de Tarefas. */
+function _tasksWorkspaces() {
+  var me = window._lastMe || {};
+  var s = me.sources || {};
+  var ws = (s.notion && s.notion.workspaces) || [];
+  return ws.map(function (w) { return { id: w.workspace || w.name, name: w.name || w.workspace }; });
+}
+
+/* Render de um <select> de workspace quando há mais de um; vazio quando 0 ou 1. */
+function _tasksWorkspacePickerHtml(selectedId) {
+  var ws = _tasksWorkspaces();
+  if (ws.length <= 1) return '';
+  return '<select class="js-tasks-ws" aria-label="Workspace do Notion" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">' +
+    ws.map(function (w) {
+      return '<option value="' + escapeHtml(w.id) + '"' + (w.id === selectedId ? ' selected' : '') + '>' + escapeHtml(w.name) + '</option>';
+    }).join('') + '</select> ';
+}
+
+/* Workspace escolhido no seletor (escopo opcional); com um só conectado, ele mesmo. */
+function _tasksSelectedWorkspace(scopeEl) {
+  var sel = (scopeEl || document).querySelector('.js-tasks-ws');
+  if (sel && sel.value) return sel.value;
+  var ws = _tasksWorkspaces();
+  return ws.length === 1 ? ws[0].id : undefined;
+}
+
 /* GET /portal/tasks/info → {configured, title, url, mapped, missing, is_standard}.
    Degrada para null quando o endpoint não existe/falha (backend antigo). */
 async function loadTasksInfo() {
@@ -3909,12 +3943,12 @@ async function loadTasksInfo() {
   } catch (e) { window._tasksInfo = null; }
 }
 
-async function runDetectTasks() {
+async function runDetectTasks(workspace) {
   _tasksMsg('Procurando no seu Notion…');
   _tasksActions('');
   var res, det;
   try {
-    res = await apiJSON('/portal/tasks/detect', 'POST');
+    res = await apiJSON('/portal/tasks/detect', 'POST', workspace ? { workspace: workspace } : undefined);
     det = await res.json();
   } catch (e) {
     _tasksMsg('Erro de rede. Tente novamente.');
@@ -3922,6 +3956,13 @@ async function runDetectTasks() {
   }
   if (det.status === 'no-notion') {
     _tasksMsg('Conecte seu Notion em Fontes primeiro.');
+    return;
+  }
+  /* {status:'workspace_required', workspaces} — conta com mais de um Notion:
+     pergunta onde procurar e re-chama com a escolha. */
+  if (det.status === 'workspace_required') {
+    _tasksMsgHtml('Em qual workspace devo procurar? ' + _tasksWorkspacePickerHtml() +
+      '<button class="btn btn-primary btn-sm" type="button" data-tasks-detect-ws>Buscar neste workspace</button>');
     return;
   }
   if (det.status === 'none' || det.status === 'error' || !det.candidates || !det.candidates.length) {
@@ -3938,29 +3979,47 @@ async function runDetectTasks() {
   _tasksActions(btns);
 }
 
-async function runCreateTasks() {
+async function runCreateTasks(workspace) {
   _tasksMsg('Criando a página "🧠 Zinom" no topo do seu workspace do Notion, com a base "Tarefas" dentro…');
   _tasksActions('');
   var res;
   try {
-    res = await apiJSON('/portal/tasks/create', 'POST');
+    res = await apiJSON('/portal/tasks/create', 'POST', workspace ? { workspace: workspace } : {});
   } catch (e) {
     _tasksMsg('Erro de rede. Tente novamente.');
     return;
   }
   if (res.ok) {
     load();
-  } else {
-    var b = await res.json().catch(function () { return {}; });
-    _tasksMsg(b.error || 'Nao consegui criar. Tente configurar o token (PAT) em Fontes.');
+    return;
   }
+  var b = await res.json().catch(function () { return {}; });
+  /* 400 {error:'workspace_required', workspaces} — conta com mais de um Notion:
+     pergunta em qual workspace criar e re-chama com a escolha. */
+  if (b && b.error === 'workspace_required') {
+    _tasksMsgHtml('Em qual workspace? ' + _tasksWorkspacePickerHtml() +
+      '<button class="btn btn-primary btn-sm" type="button" data-tasks-create-ws>Criar aqui</button>');
+    return;
+  }
+  _tasksMsg(b.error || 'Nao consegui criar. Tente configurar o token (PAT) em Fontes.');
+}
+
+/* "Trocar de base…" (estado configurado): aviso + as mesmas opções de destino
+   do estado não-configurado. A base atual fica intacta no Notion. */
+function runSwitchTasks() {
+  _tasksMsg('A base atual continua no seu Notion; as tarefas não migram automaticamente (peça ao Zinom depois, se quiser).');
+  _tasksActions(
+    '<button class="btn btn-primary btn-sm" type="button" data-tasks-choose>Criar em outro lugar…</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar no topo do workspace</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Apontar uma base existente</button>'
+  );
 }
 
 /* Picker "Escolher onde criar…": mini-form de busca de páginas do Notion.
    GET /portal/tasks/pages?q=… → botões data-tasks-create-here por página. */
 function runChooseTasks() {
   _tasksMsgHtml(
-    'Em qual página do seu Notion a base "Tarefas" deve nascer? ' +
+    'Onde a base "Tarefas" deve nascer? ' + _tasksWorkspacePickerHtml() +
     '<input type="text" class="js-tasks-page-q" placeholder="Nome da página (ex.: Projetos)" ' +
       'style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;max-width:220px" ' +
       'aria-label="Nome da página no Notion"> ' +
@@ -3977,9 +4036,10 @@ async function runSearchTasksPages(btn) {
   var q = inp ? inp.value.trim() : '';
   if (!q) { if (out) out.textContent = ' Digite o nome de uma página para buscar.'; return; }
   if (out) out.textContent = ' Buscando…';
+  var ws = _tasksSelectedWorkspace(wrap);
   var res, body;
   try {
-    res = await api('/portal/tasks/pages?q=' + encodeURIComponent(q));
+    res = await api('/portal/tasks/pages?q=' + encodeURIComponent(q) + (ws ? '&workspace=' + encodeURIComponent(ws) : ''));
     body = await res.json();
   } catch (e) {
     if (out) out.textContent = ' Erro de rede. Tente novamente.';
