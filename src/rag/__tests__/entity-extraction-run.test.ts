@@ -331,3 +331,91 @@ test("extractEntitiesForAccount respeita gate em runtime (sem flag não consulta
   assert.equal(stats.chunksProcessed, 0);
   assert.equal(queried, false);
 });
+
+// ---------------------------------------------------------------------------
+// Marcador entity_extraction_done — extração com zero entidades não cria
+// entity_mention, então sem o marcador o chunk era re-selecionado (e re-pago
+// no LLM) em todo run e o loop do backfill nunca terminava.
+// ---------------------------------------------------------------------------
+
+test("chunk processado com sucesso é marcado em entity_extraction_done (mesmo com zero entidades)", async () => {
+  process.env.ENTITIES_ENABLED = "true";
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  __setPoolForTest({
+    query: async (sql: string, params: unknown[]) => {
+      calls.push({ sql, params });
+      if (sql.includes("SELECT bc.id")) {
+        return {
+          rows: [
+            { id: "c1", text: "t", metadata: {} },
+            { id: "c2", text: "t", metadata: {} },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as never);
+
+  const stats = await extractEntitiesForAccount("friend:a", { extractChunk: async () => {} });
+
+  const dones = calls.filter(
+    (c) => c.sql.includes("INSERT INTO entity_extraction_done"),
+  );
+  assert.equal(stats.chunksProcessed, 2);
+  assert.deepEqual(
+    dones.map((c) => c.params),
+    [["c1", "friend:a"], ["c2", "friend:a"]],
+  );
+});
+
+test("chunk com erro de LLM NÃO é marcado como done (fica pendente para o próximo run)", async () => {
+  process.env.ENTITIES_ENABLED = "true";
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  __setPoolForTest({
+    query: async (sql: string, params: unknown[]) => {
+      calls.push({ sql, params });
+      if (sql.includes("SELECT bc.id")) {
+        return {
+          rows: [
+            { id: "ok1", text: "t", metadata: {} },
+            { id: "boom", text: "t", metadata: {} },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as never);
+
+  const stats = await extractEntitiesForAccount("friend:a", {
+    extractChunk: async (chunkId: string) => {
+      if (chunkId === "boom") throw new Error("llm down");
+    },
+  });
+
+  const doneIds = calls
+    .filter((c) => c.sql.includes("INSERT INTO entity_extraction_done"))
+    .map((c) => c.params[0]);
+  assert.equal(stats.chunksProcessed, 1);
+  assert.equal(stats.errors, 1);
+  assert.deepEqual(doneIds, ["ok1"]);
+});
+
+test("seleção de chunks e de contas excluem chunks já marcados como done", async () => {
+  process.env.ENTITIES_ENABLED = "true";
+  const selects: string[] = [];
+  __setPoolForTest({
+    query: async (sql: string) => {
+      selects.push(sql);
+      return { rows: [] };
+    },
+  } as never);
+
+  await extractEntitiesForAccount("friend:a", { extractChunk: async () => {} });
+  const chunkSelect = selects.find((s) => s.includes("SELECT bc.id"));
+  assert.match(chunkSelect ?? "", /NOT EXISTS[\s\S]*entity_extraction_done/);
+
+  selects.length = 0;
+  await runEntityExtraction();
+  const accountSelect = selects.find((s) => s.includes("GROUP BY bc.account_id"));
+  assert.match(accountSelect ?? "", /NOT EXISTS[\s\S]*entity_extraction_done/);
+});

@@ -203,7 +203,10 @@ export async function extractEntitiesForAccount(
   const extract = opts.extractChunk ?? extractFromChunk;
   const p = getPool();
 
-  // Get chunks not yet processed (no entity_mention at all)
+  // Get chunks not yet processed. A extração bem-sucedida que encontra ZERO
+  // entidades não cria entity_mention nenhuma — sem o marcador em
+  // entity_extraction_done esses chunks seriam re-selecionados (e re-pagos no
+  // LLM) em todo run, e o loop do backfill nunca terminaria.
   const { rows: chunks } = await p.query<{
     id: string;
     text: string;
@@ -215,6 +218,9 @@ export async function extractEntitiesForAccount(
        AND NOT EXISTS (
          SELECT 1 FROM entity_mentions em WHERE em.chunk_id = bc.id
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM entity_extraction_done d WHERE d.chunk_id = bc.id
+       )
      ORDER BY bc.indexed_at DESC
      LIMIT $2`,
     [accountId, budget],
@@ -224,6 +230,11 @@ export async function extractEntitiesForAccount(
   for (const chunk of chunks) {
     try {
       await extract(chunk.id, chunk.text, chunk.metadata as Record<string, unknown>, accountId);
+      await p.query(
+        `INSERT INTO entity_extraction_done (chunk_id, account_id) VALUES ($1, $2)
+         ON CONFLICT (chunk_id) DO NOTHING`,
+        [chunk.id, accountId],
+      );
       stats.chunksProcessed++;
       consecutiveErrors = 0;
     } catch (err) {
@@ -295,9 +306,11 @@ export async function runEntityExtraction(
     ((accountId: string, budget: number) => extractEntitiesForAccount(accountId, { budget }));
 
   const p = getPool();
-  // Contas com trabalho pendente: chunks sem nenhuma entity_mention. Inclui
-  // qualquer account_id presente em brain_chunks (friend:*, notion:*, etc.),
-  // mesmo sem linha na tabela account. entity_count prioriza o backfill.
+  // Contas com trabalho pendente: chunks sem entity_mention E ainda não
+  // marcados em entity_extraction_done (extração com zero entidades conta como
+  // processada). Inclui qualquer account_id presente em brain_chunks
+  // (friend:*, notion:*, etc.), mesmo sem linha na tabela account.
+  // entity_count prioriza o backfill.
   const { rows } = await p.query<{ account_id: string; pending: number; entity_count: number }>(
     `SELECT bc.account_id,
             COUNT(*)::int AS pending,
@@ -305,6 +318,9 @@ export async function runEntityExtraction(
      FROM brain_chunks bc
      WHERE NOT EXISTS (
        SELECT 1 FROM entity_mentions em WHERE em.chunk_id = bc.id
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM entity_extraction_done d WHERE d.chunk_id = bc.id
      )
      GROUP BY bc.account_id
      ORDER BY entity_count ASC, bc.account_id ASC`,
