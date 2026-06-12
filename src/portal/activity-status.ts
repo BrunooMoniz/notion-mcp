@@ -40,6 +40,9 @@ export interface ActivitySource {
   documents: number | null;
   /** Live indexed chunks for THIS source (from brain_chunks). Null when unknown. */
   chunks: number | null;
+  /** Bug #96 (3): true when the last run hit (or was skipped by) the plan's
+   *  chunk cap — the frontend renders the "faça upgrade" chip from this. */
+  plan_limit: boolean;
 }
 
 /** Live per-source counts, keyed by the same source key used in the entries
@@ -102,10 +105,22 @@ function stateFromRun(
   const counts = run.counts as Record<string, unknown> | null | undefined;
   if (counts && typeof counts === "object") {
     const skipped = counts.skipped;
-    if (skipped === "plan_gate") return "indisponivel_no_plano";
+    if (skipped === "plan_gate" || skipped === "plan_limit") return "indisponivel_no_plano";
     if (skipped === "no_credentials") return "pulado_sem_credencial";
   }
+  // Bug #96 (3): the source that hit the chunk cap is a plan condition, not a
+  // sync error — "erro" would prompt "corrigir" when the fix is an upgrade.
+  if (!run.ok && run.error === "plan_limit") return "indisponivel_no_plano";
   return run.ok ? "ok" : "erro";
+}
+
+/** Bug #96 (3): the run hit the plan's chunk cap (error="plan_limit") or was
+ *  skipped because a previous source did (counts.skipped="plan_limit"). */
+function isPlanLimitRun(run: StatusSource | null | undefined): boolean {
+  if (!run) return false;
+  if (run.error === "plan_limit") return true;
+  const counts = run.counts as Record<string, unknown> | null | undefined;
+  return counts != null && typeof counts === "object" && counts.skipped === "plan_limit";
 }
 
 function truncateError(msg: string | null | undefined, max = 200): string | null {
@@ -166,6 +181,7 @@ export function buildActivitySources(
       error: estado === "erro" ? truncateError(run?.error) : null,
       documents: lv?.documents ?? null,
       chunks: lv?.chunks ?? null,
+      plan_limit: isPlanLimitRun(run),
     });
   }
 
@@ -187,6 +203,7 @@ export function buildActivitySources(
       error: estado === "erro" ? truncateError(run?.error) : null,
       documents: lv?.documents ?? null,
       chunks: lv?.chunks ?? null,
+      plan_limit: isPlanLimitRun(run),
     });
   }
 
@@ -210,6 +227,7 @@ export function buildActivitySources(
       error: estado === "erro" ? truncateError(run?.error) : null,
       documents: lv?.documents ?? null,
       chunks: lv?.chunks ?? null,
+      plan_limit: isPlanLimitRun(run),
     });
   }
 
@@ -231,6 +249,7 @@ export function buildActivitySources(
       error: estado === "erro" ? truncateError(gcalRun?.error) : null,
       documents: lv?.documents ?? null,
       chunks: lv?.chunks ?? null,
+      plan_limit: isPlanLimitRun(gcalRun),
     });
   }
 

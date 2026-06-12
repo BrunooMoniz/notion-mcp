@@ -1844,6 +1844,8 @@ async function loadStatus() {
         var estado = s.estado || (s.ok === false ? 'erro' : (s.last_run ? 'ok' : 'aguardando_primeira_indexacao'));
         var tagCls = ESTADO_TAG[estado] || 'warn';
         var tagLbl = ESTADO_LABEL[estado] || estado;
+        /* bug #96 (3): fonte que bateu no teto de chunks do plano */
+        if (s.plan_limit) { tagCls = 'off'; tagLbl = 'Limite do plano atingido — faça upgrade'; }
         var displayName = s.display_name || s.source || t;
         /* error: expandable when present */
         var errHtml = '';

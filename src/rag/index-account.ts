@@ -12,6 +12,7 @@
 // requestContext.run({accountId}) so getClient/getSearchClient/notionFetch in
 // notion-source resolve THIS account's vault token.
 import { requestContext } from "../context.js";
+import { QuotaExceededError } from "../billing/usage.js";
 import { prefixChunkIds } from "./account-chunks.js";
 import { FRIEND_WORKSPACE, accountIcalConfigs } from "./account-sources.js";
 import type { Workspace, IndexableDocument, ChunkWithEmbedding } from "./types.js";
@@ -131,8 +132,30 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   let documents = 0;
   let chunks = 0;
 
+  // Bug #96 (3) — teto de chunks do plano. Quando uma fonte estoura o limite
+  // (QuotaExceededError de replaceDocumentChunks), o run NÃO explode: a fonte
+  // grava status_run com error="plan_limit" (counts parciais), as fontes ainda
+  // não processadas gravam {skipped:"plan_limit"} sem rodar, e o run termina
+  // graceful. O /portal/status propaga plan_limit para o front.
+  let planLimitHit = false;
+  const recordPlanLimitSkip = async (source: string): Promise<void> => {
+    await deps.recordRun({
+      worker: "indexer",
+      source,
+      ok: true,
+      counts: { skipped: "plan_limit" },
+      startedAt: new Date(),
+      endedAt: new Date(),
+      accountId,
+    });
+  };
+
   // ---- Notion pass (one per connected workspace) ----
   for (const ws of workspaces) {
+    if (planLimitHit) {
+      await recordPlanLimitSkip(`notion-${ws}`);
+      continue;
+    }
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
       const liveIds: string[] = [];
@@ -170,12 +193,14 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         chunks += wsChunks;
         console.log(`[index-account] ${accountId} ws=${ws} documents=${wsDocs} chunks=${wsChunks}`);
       } catch (err: any) {
+        const isPlanLimit = err instanceof QuotaExceededError;
+        if (isPlanLimit) planLimitHit = true;
         console.error(`[index-account] ${accountId} ws=${ws} FAILED: ${err?.message ?? err}`);
         await deps.recordRun({
           worker: "indexer",
           source: `notion-${ws}`,
           ok: false,
-          error: err?.message ?? String(err),
+          error: isPlanLimit ? "plan_limit" : (err?.message ?? String(err)),
           counts: { documents: wsDocs, chunks: wsChunks },
           startedAt,
           endedAt: new Date(),
@@ -186,8 +211,11 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- Granola pass (one key per account, from the vault) ----
-  const granolaKey = canGranolaCalendar ? await deps.getAccountSecret(accountId, "granola") : null;
-  if (granolaKey) {
+  const granolaKey =
+    canGranolaCalendar && !planLimitHit ? await deps.getAccountSecret(accountId, "granola") : null;
+  if (canGranolaCalendar && planLimitHit) {
+    await recordPlanLimitSkip(`granola-${FRIEND_WORKSPACE}`);
+  } else if (granolaKey) {
     await deps.ensureAccountWorkspace(accountId, FRIEND_WORKSPACE);
     const startedAt = new Date();
     await requestContext.run({ authType: "bearer", scopes: "all", accountId }, async () => {
@@ -218,12 +246,14 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         chunks += gChunks;
         console.log(`[index-account] ${accountId} granola documents=${gDocs} chunks=${gChunks}`);
       } catch (err: any) {
+        const isPlanLimit = err instanceof QuotaExceededError;
+        if (isPlanLimit) planLimitHit = true;
         console.error(`[index-account] ${accountId} granola FAILED: ${err?.message ?? err}`);
         await deps.recordRun({
           worker: "indexer",
           source: `granola-${FRIEND_WORKSPACE}`,
           ok: false,
-          error: err?.message ?? String(err),
+          error: isPlanLimit ? "plan_limit" : (err?.message ?? String(err)),
           counts: { documents: gDocs, chunks: gChunks },
           startedAt,
           endedAt: new Date(),
@@ -245,8 +275,13 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- iCal pass (many links per account, from the vault) ----
-  const icalConfigs = canGranolaCalendar ? accountIcalConfigs(await deps.getAccountSecret(accountId, "ical")) : [];
-  if (icalConfigs.length > 0) {
+  const icalConfigs =
+    canGranolaCalendar && !planLimitHit
+      ? accountIcalConfigs(await deps.getAccountSecret(accountId, "ical"))
+      : [];
+  if (canGranolaCalendar && planLimitHit) {
+    await recordPlanLimitSkip("calendar");
+  } else if (icalConfigs.length > 0) {
     for (const ws of new Set(icalConfigs.map((c) => c.workspace))) {
       await deps.ensureAccountWorkspace(accountId, ws);
     }
@@ -283,12 +318,14 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
         chunks += cChunks;
         console.log(`[index-account] ${accountId} calendar documents=${cDocs} chunks=${cChunks}`);
       } catch (err: any) {
+        const isPlanLimit = err instanceof QuotaExceededError;
+        if (isPlanLimit) planLimitHit = true;
         console.error(`[index-account] ${accountId} calendar FAILED: ${err?.message ?? err}`);
         await deps.recordRun({
           worker: "indexer",
           source: "calendar",
           ok: false,
-          error: err?.message ?? String(err),
+          error: isPlanLimit ? "plan_limit" : (err?.message ?? String(err)),
           counts: { documents: cDocs, chunks: cChunks },
           startedAt,
           endedAt: new Date(),
@@ -310,14 +347,31 @@ export async function indexAccount(accountId: string): Promise<{ documents: numb
   }
 
   // ---- Google OAuth calendar pass (many accounts per tenant, from vault) ----
-  if (canGranolaCalendar) {
-    const gcalResult = await deps.indexGcalOAuthForAccount(accountId, FRIEND_WORKSPACE);
-    documents += gcalResult.documents;
-    chunks += gcalResult.chunks;
-    if (gcalResult.documents > 0 || gcalResult.chunks > 0) {
-      console.log(
-        `[index-account] ${accountId} gcal documents=${gcalResult.documents} chunks=${gcalResult.chunks}`,
-      );
+  if (canGranolaCalendar && planLimitHit) {
+    await recordPlanLimitSkip("gcal");
+  } else if (canGranolaCalendar) {
+    try {
+      const gcalResult = await deps.indexGcalOAuthForAccount(accountId, FRIEND_WORKSPACE);
+      documents += gcalResult.documents;
+      chunks += gcalResult.chunks;
+      if (gcalResult.documents > 0 || gcalResult.chunks > 0) {
+        console.log(
+          `[index-account] ${accountId} gcal documents=${gcalResult.documents} chunks=${gcalResult.chunks}`,
+        );
+      }
+    } catch (err: any) {
+      if (!(err instanceof QuotaExceededError)) throw err;
+      planLimitHit = true;
+      console.error(`[index-account] ${accountId} gcal FAILED: ${err?.message ?? err}`);
+      await deps.recordRun({
+        worker: "indexer",
+        source: "gcal",
+        ok: false,
+        error: "plan_limit",
+        startedAt: new Date(),
+        endedAt: new Date(),
+        accountId,
+      });
     }
   } else {
     // plan gate closed — record a skipped run for each paid source so status_runs is never silent.
