@@ -589,7 +589,9 @@ export function createPortalRouter(): express.Router {
           getStatus(accountId),
           getBrainCounts(accountId),
           getActivitySourceCounts(accountId).catch(() => []),
-          lnw(accountId).catch(() => [] as { workspace: string; name: string | null }[]),
+          lnw(accountId).catch(
+            () => [] as { workspace: string; name: string | null; connection_type: string | null }[],
+          ),
           lim(accountId).catch(() => [] as { id: string; label: string }[]),
           ggm(accountId).catch(() => ({ set: false, masked: null })),
           lgam(accountId).catch(() => [] as { email: string }[]),
