@@ -16,6 +16,7 @@ const BASE = `http://localhost:${PORT}`;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const SECTION_IDS = [
+  "sistema",
   "resumo",
   "receita",
   "funil",
@@ -91,13 +92,14 @@ test.describe("admin desktop", () => {
 
   test("A2: navegação por views via sidebar", async ({ page }) => {
     await page.goto(`${BASE}/`);
-    await expect(page.locator("#resumo")).toBeVisible();
+    // Sistema é a view default agora.
+    await expect(page.locator("#sistema")).toBeVisible();
     await expect(page.locator("#contas")).toBeHidden();
 
     const navContas = page.locator('.nav-item[data-section="contas"]');
     await navContas.click();
     await expect(page.locator("#contas")).toBeVisible();
-    await expect(page.locator("#resumo")).toBeHidden();
+    await expect(page.locator("#sistema")).toBeHidden();
     await expect(navContas).toHaveClass(/(^|\s)active(\s|$)/);
     await expect(navContas).toHaveAttribute("aria-current", "true");
   });
@@ -111,9 +113,51 @@ test.describe("admin desktop", () => {
     }
   });
 
-  test("A2: hash inválido cai no resumo", async ({ page }) => {
+  test("A2: hash inválido cai na view default (sistema)", async ({ page }) => {
     await page.goto(`${BASE}/#naoexiste`);
-    await expect(page.locator("#resumo")).toBeVisible();
+    await expect(page.locator("#sistema")).toBeVisible();
+  });
+
+  // -------------------------------------------------------------------------
+  // Sistema (painel de saúde) — TD
+  // -------------------------------------------------------------------------
+  test("TD: #sistema visível por default e é a primeira nav", async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    await expect(page.locator("#sistema")).toBeVisible();
+    // Sistema é o primeiro item do sidebar.
+    const firstNav = page.locator(".sidebar-nav .nav-item").first();
+    await expect(firstNav).toHaveAttribute("data-section", "sistema");
+  });
+
+  test("TD: tile da VPS presente na seção Sistema", async ({ page }) => {
+    await page.goto(`${BASE}/#sistema`);
+    const vps = page.locator('#sistema [data-check="vps"]');
+    await expect(vps).toBeVisible();
+    // O fixture marca disco em 87%: gauge presente.
+    await expect(vps).toContainText("Disco");
+    await expect(vps).toContainText("87%");
+  });
+
+  test("TD: indicador de falha visível para o check com erro do fixture", async ({ page }) => {
+    await page.goto(`${BASE}/#sistema`);
+    // notion:personal está fail (HTTP 401) no fixture.
+    const failTile = page.locator('#sistema [data-check="notion:personal"]');
+    await expect(failTile).toBeVisible();
+    await expect(failTile.locator('[data-field="state"]')).toContainText("falha");
+    // Dot vermelho (#b3261e = rgb(179, 38, 30)).
+    const dotBg = await failTile
+      .locator('.hp-dot[data-field="dot"]')
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(dotBg).toBe("rgb(179, 38, 30)");
+  });
+
+  test("TD: barra de orçamento presente nos créditos", async ({ page }) => {
+    await page.goto(`${BASE}/#sistema`);
+    const budget = page.locator('#sistema [data-check="budget:anthropic"]');
+    await expect(budget).toBeVisible();
+    // Reusa o estilo .funnel-track/.funnel-bar para a barra de orçamento.
+    await expect(budget.locator(".funnel-track .funnel-bar")).toBeVisible();
+    await expect(budget).toContainText("85%");
   });
 
   test("A3: tabela de contas compacta, sem overflow, detalhe expansível", async ({ page }) => {

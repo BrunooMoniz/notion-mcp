@@ -10,6 +10,8 @@
 import http from "node:http";
 import { renderHtml, type AdminData } from "../src/admin/routes.js";
 import { buildFunnel } from "../src/admin/business.js";
+import type { SampleRow } from "../src/health/storage.js";
+import type { HealthStatus, HealthGroup } from "../src/health/types.js";
 
 const PORT = Number(process.env.ADMIN_PREVIEW_PORT ?? 4799);
 
@@ -36,6 +38,119 @@ const ERR_GRANOLA =
   "granola fetch failed: HTTP 502 Bad Gateway from https://api.granola.ai/v2/meetings?cursor=eyJvZmZzZXQiOjEyMH0 after 3 retries; upstream proxy timed out reading body";
 const ERR_CALENDAR =
   "ical parse error: invalid VEVENT at line 482 of https://calendar.google.com/calendar/ical/private-abc123/basic.ics — DTSTART missing TZID and value is not UTC zulu";
+
+// ---------------------------------------------------------------------------
+// HEALTH FIXTURE (seção Sistema) — última amostra por check + séries de 24h.
+// Determinístico: nada de Math.random; as séries usam uma senoide de fase fixa.
+// Representa: vps warn (disco 87%), notion:personal fail (HTTP 401),
+// ntfy skip (não configurado), budget:anthropic warn (pct 85), demais ok.
+// ---------------------------------------------------------------------------
+const HEALTH_NOW = new Date("2026-06-11T12:00:00Z");
+
+/** Amostra de health pronta — grava label/group em detail como o insertSamples faz. */
+function sample(
+  checkId: string,
+  group: HealthGroup,
+  label: string,
+  status: HealthStatus,
+  latencyMs: number | null,
+  detail: Record<string, unknown> = {},
+  error: string | null = null,
+): SampleRow {
+  return {
+    check_id: checkId,
+    ts: HEALTH_NOW,
+    status,
+    latency_ms: latencyMs,
+    detail: { ...detail, label, group },
+    error,
+  };
+}
+
+/** Série sintética determinística: senoide de fase fixa em torno de uma base. */
+function synthSeries(check_id: string, base: number, amp: number, n = 24, phase = 0): {
+  check_id: string;
+  ts: Date;
+  latency_ms: number | null;
+  detail: Record<string, unknown> | null;
+}[] {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const v = base + amp * Math.sin((i / n) * Math.PI * 2 + phase);
+    out.push({
+      check_id,
+      ts: new Date(HEALTH_NOW.getTime() - (n - 1 - i) * 3600_000),
+      latency_ms: Math.round(v),
+      detail: { diskPct: Math.round(70 + 17 * Math.sin((i / n) * Math.PI + phase)) },
+    });
+  }
+  return out;
+}
+
+const HEALTH_CHECKS: SampleRow[] = [
+  // vps: warn por disco em 87%.
+  sample("vps", "vps", "VPS", "warn", null, {
+    load1: 1.2, load5: 0.9, load15: 0.7, cores: 4, memPct: 63, diskPct: 87, uptimeSec: 1287000,
+  }),
+  // processos: pm2 ok, todos online.
+  sample("pm2", "processos", "PM2", "ok", null, {
+    "notion-mcp": { status: "online", restarts: 1, memMb: 142 },
+    "brain-indexer": { status: "online", restarts: 0, memMb: 98 },
+    "brain-classifier": { status: "online", restarts: 0, memMb: 87 },
+    "brain-reindex-nightly": { status: "online", restarts: 2, memMb: 64 },
+  }),
+  // banco: postgres ok.
+  sample("postgres", "banco", "Postgres", "ok", 8, { sizeBytes: 734003200, connections: 6 }),
+  // entrada: proxy público ok (401 é saudável).
+  sample("proxy_publico", "entrada", "Proxy público", "ok", 142, { httpStatus: 401 }),
+  // parceiros: notion:personal FALHA com HTTP 401; demais ok; ntfy skip.
+  sample("notion:personal", "parceiros", "Notion (personal)", "fail", null, {}, "HTTP 401"),
+  sample("notion:globalcripto", "parceiros", "Notion (globalcripto)", "ok", 233, {}),
+  sample("notion:nora", "parceiros", "Notion (nora)", "ok", 198, {}),
+  sample("anthropic", "parceiros", "Anthropic", "ok", 512, {}),
+  sample("voyage", "parceiros", "Voyage", "ok", 388, {}),
+  sample("resend", "parceiros", "Resend", "ok", 176, {}),
+  sample("ntfy", "parceiros", "ntfy", "skip", null, {}),
+  sample("stripe", "parceiros", "Stripe", "ok", 421, {
+    available: [{ amount: 125000, currency: "brl" }],
+    pending: [{ amount: 4200, currency: "brl" }],
+  }),
+  // créditos: budget:anthropic WARN com pct 85; budget:voyage ok; tokens:llm ok.
+  sample("budget:anthropic", "creditos", "Orçamento Anthropic", "warn", null, {
+    spentUsd: 170, budgetUsd: 200, pct: 85,
+  }),
+  sample("budget:voyage", "creditos", "Orçamento Voyage", "ok", null, {
+    spentUsd: 12, budgetUsd: 50, pct: 24,
+  }),
+  sample("tokens:llm", "creditos", "Tokens LLM (mês)", "ok", null, {
+    inTokens: 4820000, outTokens: 612000,
+  }),
+];
+
+// Séries de 24h para os checks com sparkline (banco, entrada, parceiros, vps).
+const HEALTH_SERIES_RAW = [
+  ...synthSeries("vps", 0, 0, 24, 0),
+  ...synthSeries("postgres", 8, 3, 24, 0.4),
+  ...synthSeries("proxy_publico", 140, 30, 24, 1.1),
+  ...synthSeries("notion:globalcripto", 230, 40, 24, 0.7),
+  ...synthSeries("notion:nora", 200, 35, 24, 1.9),
+  ...synthSeries("anthropic", 500, 90, 24, 2.3),
+  ...synthSeries("voyage", 390, 70, 24, 0.2),
+  ...synthSeries("resend", 175, 25, 24, 1.4),
+  ...synthSeries("stripe", 420, 60, 24, 2.8),
+];
+
+// Monta o Map<checkId, number[]> que o renderSystemSection espera (mesma lógica
+// de buildHealthView em routes.ts: vps usa diskPct, os demais usam latency_ms).
+const HEALTH_SERIES = new Map<string, number[]>();
+for (const p of HEALTH_SERIES_RAW) {
+  const arr = HEALTH_SERIES.get(p.check_id) ?? [];
+  const v = p.check_id === "vps"
+    ? (typeof p.detail?.diskPct === "number" ? p.detail.diskPct : NaN)
+    : (typeof p.latency_ms === "number" ? p.latency_ms : NaN);
+  arr.push(v);
+  HEALTH_SERIES.set(p.check_id, arr);
+}
 
 // ---------------------------------------------------------------------------
 // FIXTURE — same shape as gather() in src/admin/routes.ts (AdminData).
@@ -224,6 +339,11 @@ const FIXTURE: AdminData = {
     { account_id: FRIEND_B_ID, chunk_count: 12345, approx_bytes: 7340032 },
   ],
   wsNames: new Map([[FRIEND_B_ID, "Workspace Pessoal do Fulano"]]),
+  health: {
+    collectedAt: HEALTH_NOW.toISOString(),
+    checks: HEALTH_CHECKS,
+    series: HEALTH_SERIES,
+  },
 };
 
 // ---------------------------------------------------------------------------
