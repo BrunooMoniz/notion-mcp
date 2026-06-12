@@ -1289,6 +1289,8 @@ function toCyElements(data) {
       color: color, size: r,
     }});
   });
+  var maxEdgeW = 1;
+  (data.edges || []).forEach(function(e) { maxEdgeW = Math.max(maxEdgeW, e.weight || 1); });
   (data.edges || []).forEach(function(e) {
     var w = e.weight || 1;
     els.push({ data: {
@@ -1296,6 +1298,7 @@ function toCyElements(data) {
       source: e.a, target: e.b,
       weight: w,
       width: Math.max(0.5, Math.min(4, w * 0.4)),
+      opacity: +(0.08 + 0.37 * (w / maxEdgeW)).toFixed(3),
     }});
   });
   return els;
@@ -1338,7 +1341,8 @@ function cyStyle() {
       selector: 'edge',
       style: {
         'width': 'data(width)',
-        'line-color': 'rgba(100,90,75,0.18)',
+        'opacity': 'data(opacity)',
+        'line-color': 'rgba(100,90,75,0.35)',
         'curve-style': 'bezier',
         'transition-property': 'opacity, line-color',
         'transition-duration': '0.15s',
@@ -1349,13 +1353,25 @@ function cyStyle() {
   ];
 }
 
+/* ---- top 8 nós por weight ganham label sempre visível ---- */
+var _topLabelIds = {};
+function computeTopLabels() {
+  _topLabelIds = {};
+  if (!_cy) return;
+  _cy.nodes()
+    .filter(function(n) { return n.data('kind') === 'entity'; })
+    .sort(function(a, b) { return (b.data('weight') || 0) - (a.data('weight') || 0); })
+    .slice(0, 8)
+    .forEach(function(n) { _topLabelIds[n.id()] = true; });
+}
+
 /* ---- apply label classes based on zoom level and global toggle ---- */
 function updateLabels() {
   if (!_cy) return;
   var zoom = _cy.zoom();
   _cy.nodes().forEach(function(n) {
-    var big = n.data('weight') >= 5;
-    var show = _graphLabelsForced || big || zoom > 1.4;
+    var top = _topLabelIds[n.id()] === true;
+    var show = _graphLabelsForced || top || zoom > 1.4;
     n.toggleClass('show-label', show && !n.hasClass('dimmed'));
   });
 }
@@ -1475,7 +1491,23 @@ function initCy(data) {
     wheelSensitivity: 0.3,
   });
 
+  computeTopLabels();
   _cy.on('zoom', updateLabels);
+
+  // Hover: destaca a vizinhança e esmaece o resto (mesmo padrão do tap),
+  // com debounce; ao sair, restaura o destaque do nó selecionado (se houver)
+  var _hoverTimer = null;
+  _cy.on('mouseover', 'node', function(e) {
+    var id = e.target.id();
+    clearTimeout(_hoverTimer);
+    _hoverTimer = setTimeout(function() { highlightNode(id); }, 80);
+  });
+  _cy.on('mouseout', 'node', function() {
+    clearTimeout(_hoverTimer);
+    _hoverTimer = setTimeout(function() {
+      highlightNode(_graphCurrentNode ? _graphCurrentNode.id : null);
+    }, 160);
+  });
 
   // Física viva: agarrar um nó religa a simulação (mola), salvo se congelada
   _cy.on('grab', 'node', function() {
@@ -1545,6 +1577,7 @@ function updateCyElements(data) {
     });
     if (toAdd.length) _cy.add(toAdd);
   });
+  computeTopLabels();
   updateLabels();
   runLayout({ fit: true });
 }
