@@ -985,6 +985,16 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 .graph-presets-spacer { flex: 1; }
 #graph-period .seg-btn { padding: 3px 10px; }
 
+/* Busca de nó na toolbar do grafo */
+.graph-search-wrap { position: relative; display: inline-flex; }
+#graph-search { width: 140px; font-size: 12px; font-family: inherit; padding: 3px 8px; border: 1px solid var(--line-2, #e2e2e2); border-radius: 6px; outline: none; background: var(--bg, #fff); color: var(--ink, #222); }
+#graph-search:focus { border-color: var(--accent, #1f8b4c); }
+#graph-search-results { position: absolute; top: calc(100% + 6px); right: 0; min-width: 220px; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid var(--line, #eee); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.10); z-index: 40; }
+.graph-search-item { padding: 7px 10px; font-size: 12.5px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.graph-search-item:hover { background: var(--paper-2, #f5f5f5); }
+.graph-search-item .t { color: var(--muted, #888); font-size: 11px; }
+.graph-search-empty { padding: 7px 10px; font-size: 12px; color: var(--muted, #888); }
+
 /* Hint */
 #graph-hint {
   position: absolute;

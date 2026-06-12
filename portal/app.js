@@ -1777,6 +1777,69 @@ function wireGraphToolbar() {
     reloadGraph({ mode: 'overview' });
   });
 
+  /* Busca de nó: autocomplete sobre /portal/brain/entities?q= */
+  var searchInput = document.getElementById('graph-search');
+  var searchResults = document.getElementById('graph-search-results');
+  function hideSearchResults() {
+    if (searchResults) { searchResults.style.display = 'none'; searchResults.innerHTML = ''; }
+  }
+  function selectSearchEntity(ent) {
+    hideSearchResults();
+    if (searchInput) searchInput.value = ent.name;
+    var node = _cy ? _cy.getElementById('e:' + ent.id) : null;
+    if (node && node.nonempty()) {
+      /* nó presente: centraliza com animação e destaca a vizinhança */
+      _cy.animate({ center: { eles: node }, zoom: Math.max(_cy.zoom(), 1.2), duration: 400 });
+      highlightNode(node.id());
+      _graphCurrentNode = node.data();
+      openGraphPanel(node.data());
+    } else {
+      /* nó fora do grafo atual: abre em modo foco */
+      _graphMode = 'focus';
+      _graphFocusEntityIds = [ent.id];
+      reloadGraph({ mode: 'focus', entity_ids: [ent.id] });
+    }
+  }
+  if (searchInput && searchResults) {
+    var _searchDebounce = null;
+    searchInput.addEventListener('input', function() {
+      clearTimeout(_searchDebounce);
+      var q = searchInput.value.trim();
+      if (!q) { hideSearchResults(); return; }
+      _searchDebounce = setTimeout(async function() {
+        try {
+          var r = await api('/portal/brain/entities?q=' + encodeURIComponent(q) + '&limit=8');
+          if (!r.ok) return;
+          var d = await r.json();
+          var ents = d.entities || [];
+          searchResults.innerHTML = '';
+          if (!ents.length) {
+            searchResults.innerHTML = '<div class="graph-search-empty">Nenhuma entidade encontrada</div>';
+          } else {
+            ents.forEach(function(ent) {
+              var item = document.createElement('div');
+              item.className = 'graph-search-item';
+              item.setAttribute('role', 'option');
+              item.innerHTML = escapeHtml(ent.name) +
+                ' <span class="t">' + escapeHtml(ent.type || '') + '</span>';
+              /* mousedown dispara antes do blur do input */
+              item.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                selectSearchEntity(ent);
+              });
+              searchResults.appendChild(item);
+            });
+          }
+          searchResults.style.display = 'block';
+        } catch (_e) { /* busca é melhoria progressiva; silêncio aqui é ok */ }
+      }, 250);
+    });
+    searchInput.addEventListener('blur', function() { setTimeout(hideSearchResults, 150); });
+    searchInput.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') { hideSearchResults(); searchInput.blur(); }
+    });
+  }
+
   var panelClose = document.getElementById('graph-panel-close');
   if (panelClose) panelClose.addEventListener('click', function() {
     var panel = document.getElementById('graph-panel');
