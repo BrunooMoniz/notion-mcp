@@ -1191,6 +1191,7 @@ var _graphToolbarWired = false;  // prevent double-wiring
 var _graphCurrentNode = null;    // node data of currently selected node
 var _graphPreset = 'overview';   // preset ativo: overview|recentes|cronologia|pessoa|empresa|projeto
 var _graphDays = 0;              // janela do seletor de período em dias (0 = tudo)
+var _graphFrozen = false;        // física congelada (botão na toolbar)
 
 /* ---- colour tokens ---- */
 var GC = {
@@ -1255,6 +1256,19 @@ function ensureFcose() {
   if (window.cytoscape && window.cytoscapeFcose) {
     try { window.cytoscape.use(window.cytoscapeFcose); } catch (_e) { /* already registered */ }
     _fcoseRegistered = true;
+  }
+}
+
+/* ---- register cola once (física viva; opcional — fallback é o fcose) ---- */
+var _colaRegistered = false;
+function ensureCola() {
+  if (_colaRegistered) return;
+  /* exige o webcola de verdade carregado, não só o wrapper */
+  if (window.cytoscape && window.cytoscapeCola && (window.webcola || window.cola)) {
+    try {
+      window.cytoscape.use(window.cytoscapeCola);
+      _colaRegistered = true;
+    } catch (_e) { /* vendor quebrado: segue sem cola */ }
   }
 }
 
@@ -1374,7 +1388,36 @@ function runLayout(opts) {
   opts = opts || {};
   stopLayout();
   ensureFcose();
-  var cfg = _fcoseRegistered
+  ensureCola();
+  var fitAfter = opts.fit !== false;
+  var lay = null;
+
+  /* Física viva: cola animado; nós seguem como molas durante o drag */
+  if (_colaRegistered) {
+    try {
+      lay = _cy.layout({
+        name: 'cola',
+        animate: true,
+        refresh: 1,
+        maxSimulationTime: 2500,
+        ungrabifyWhileSimulating: false,
+        fit: false,
+        padding: 30,
+        randomize: opts.randomize === true,
+        avoidOverlap: true,
+        handleDisconnected: true,
+        convergenceThreshold: 0.01,
+        nodeSpacing: function() { return 12; },
+        edgeLength: function(e) { var w = e.data('weight') || 1; return Math.max(60, 110 - w * 8); },
+      });
+    } catch (_e) {
+      /* cola registrado mas quebrado em runtime: desliga e cai para fcose */
+      _colaRegistered = false;
+      lay = null;
+    }
+  }
+
+  if (!lay) lay = _cy.layout(_fcoseRegistered
     ? {
         name: 'fcose',
         quality: 'default',
@@ -1403,9 +1446,8 @@ function runLayout(opts) {
         idealEdgeLength: function() { return 90; },
         gravity: 0.25,
         numIter: 1500,
-      };
-  var fitAfter = opts.fit !== false;
-  var lay = _cy.layout(cfg);
+      });
+
   _layoutRun = lay;
   lay.one('layoutstop', function() {
     if (_layoutRun === lay) _layoutRun = null;
@@ -1434,6 +1476,12 @@ function initCy(data) {
   });
 
   _cy.on('zoom', updateLabels);
+
+  // Física viva: agarrar um nó religa a simulação (mola), salvo se congelada
+  _cy.on('grab', 'node', function() {
+    if (_graphFrozen || !_colaRegistered) return;
+    if (!_layoutRun) runLayout({ fit: false });
+  });
 
   // Single click: highlight + open panel
   _cy.on('tap', 'node', function(e) {
@@ -1659,6 +1707,14 @@ function wireGraphToolbar() {
   var btnZoomOut = document.getElementById('graph-btn-zoom-out');
   if (btnZoomOut) btnZoomOut.addEventListener('click', function() {
     if (_cy) _cy.animate({ zoom: Math.max(_cy.zoom() * 0.77, 0.1), duration: 200 });
+  });
+
+  var btnPhysics = document.getElementById('graph-btn-physics');
+  if (btnPhysics) btnPhysics.addEventListener('click', function() {
+    _graphFrozen = !_graphFrozen;
+    btnPhysics.setAttribute('aria-pressed', String(_graphFrozen));
+    btnPhysics.title = _graphFrozen ? 'Soltar física' : 'Congelar física';
+    if (_graphFrozen) stopLayout(); else runLayout({ fit: false });
   });
 
   var btnLabels = document.getElementById('graph-btn-labels');
