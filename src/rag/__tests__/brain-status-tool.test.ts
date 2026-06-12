@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildBrainStatus,
+  getAccountIdentity,
   type BrainStatusDeps,
 } from "../brain-status-tool.js";
 import type { StatusSource } from "../status.js";
@@ -35,6 +36,7 @@ function makeDeps(overrides: Partial<BrainStatusDeps> = {}): BrainStatusDeps {
       totals: { documents: 10, chunks: 50 },
     }),
     isRunning: (_accountId) => false,
+    getAccount: async (_accountId) => ({ email: null, plan: "owner" }),
     ...overrides,
   };
 }
@@ -119,4 +121,52 @@ test("buildBrainStatus handles empty sources", async () => {
   assert.deepEqual(result.sources, []);
   assert.equal(result.counts.totals.documents, 0);
   assert.equal(result.counts.totals.chunks, 0);
+});
+
+// ---------- identidade da conta (Frente B #97) --------------------------------
+
+test("buildBrainStatus inclui bloco account {email, plan} da dep injetada", async () => {
+  const deps = makeDeps({
+    getAccount: async (_id) => ({ email: "amiga@example.com", plan: "free" }),
+  });
+  const result = await buildBrainStatus("acct-1", deps);
+  assert.deepEqual(result.account, { email: "amiga@example.com", plan: "free" });
+});
+
+test("buildBrainStatus passa accountId para getAccount", async () => {
+  const captured: string[] = [];
+  const deps = makeDeps({
+    getAccount: async (id: string) => {
+      captured.push(id);
+      return { email: null, plan: "free" };
+    },
+  });
+  await buildBrainStatus("acct-xyz", deps);
+  assert.deepEqual(captured, ["acct-xyz"]);
+});
+
+test("getAccountIdentity: operador curto-circuita para email null / plan owner", async () => {
+  let reads = 0;
+  const readers = {
+    email: async (_id: string) => {
+      reads++;
+      return "nunca@example.com";
+    },
+    plan: async (_id: string) => {
+      reads++;
+      return "free";
+    },
+  };
+  const identity = await getAccountIdentity("bruno", readers);
+  assert.deepEqual(identity, { email: null, plan: "owner" });
+  assert.equal(reads, 0, "operador não deve ler a tabela account");
+});
+
+test("getAccountIdentity: conta friend lê email e plan dos readers", async () => {
+  const readers = {
+    email: async (id: string) => `${id}@example.com`,
+    plan: async (_id: string) => "pro",
+  };
+  const identity = await getAccountIdentity("acct-amigo", readers);
+  assert.deepEqual(identity, { email: "acct-amigo@example.com", plan: "pro" });
 });
