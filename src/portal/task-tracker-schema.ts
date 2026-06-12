@@ -118,6 +118,17 @@ export function findReusableTrackerId(
   return null;
 }
 
+/** Fingerprint do template padrão Zinom: além do título "Tarefas", a base
+ *  precisa TER cara de template nosso ("Tipo" Fazer/Cobrar + "Tempo estimado
+ *  (min)"). Evita adotar um board alheio que por acaso se chama "Tarefas"
+ *  (causa do bug 2026-06-12: tracker apontado para o scrum da Global Cripto). */
+export function isZinomStandardSchema(properties: NotionProps): boolean {
+  if (!("Tempo estimado (min)" in (properties ?? {}))) return false;
+  const tipo = (properties ?? {})["Tipo"];
+  const opts = (tipo?.select?.options ?? []).map((o) => normalize(o.name ?? ""));
+  return opts.includes("fazer") && opts.includes("cobrar");
+}
+
 /** Extrai o id de página de uma URL notion.so ou de um id cru (32-hex, com ou sem
  *  hífens). null quando o texto não contém id no fim — é um NOME para busca. */
 export function extractNotionPageId(input: string): string | null {
