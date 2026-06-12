@@ -3899,6 +3899,32 @@ function _tasksMsgHtml(html) {
   document.querySelectorAll('.js-tasks-msg').forEach(function (el) { el.innerHTML = html; });
 }
 
+/* Lista de workspaces Notion conectados, para os fluxos de Tarefas. */
+function _tasksWorkspaces() {
+  var me = window._lastMe || {};
+  var s = me.sources || {};
+  var ws = (s.notion && s.notion.workspaces) || [];
+  return ws.map(function (w) { return { id: w.workspace || w.name, name: w.name || w.workspace }; });
+}
+
+/* Render de um <select> de workspace quando há mais de um; vazio quando 0 ou 1. */
+function _tasksWorkspacePickerHtml(selectedId) {
+  var ws = _tasksWorkspaces();
+  if (ws.length <= 1) return '';
+  return '<select class="js-tasks-ws" aria-label="Workspace do Notion" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">' +
+    ws.map(function (w) {
+      return '<option value="' + escapeHtml(w.id) + '"' + (w.id === selectedId ? ' selected' : '') + '>' + escapeHtml(w.name) + '</option>';
+    }).join('') + '</select> ';
+}
+
+/* Workspace escolhido no seletor (escopo opcional); com um só conectado, ele mesmo. */
+function _tasksSelectedWorkspace(scopeEl) {
+  var sel = (scopeEl || document).querySelector('.js-tasks-ws');
+  if (sel && sel.value) return sel.value;
+  var ws = _tasksWorkspaces();
+  return ws.length === 1 ? ws[0].id : undefined;
+}
+
 /* GET /portal/tasks/info → {configured, title, url, mapped, missing, is_standard}.
    Degrada para null quando o endpoint não existe/falha (backend antigo). */
 async function loadTasksInfo() {
