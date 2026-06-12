@@ -6,8 +6,10 @@ import { registerAndSignIn } from "./helpers.js";
 test("friend generates an MCP token and a ready-to-paste connect command", async ({ page, request }) => {
   await registerAndSignIn(page, request);
 
-  // v2: connecting an AI lives in the Guia view, in per-assistant tabs.
+  // v2: connecting an AI lives in the Guia, in per-assistant tabs — now on
+  // its own subpage (#guia/conectar) reached from the Guia hub.
   await page.click('.sidebar-nav [data-nav="guia"]');
+  await page.click('#guia-hub [data-guia="conectar"]');
 
   // The Claude.ai panel shows the real MCP URL (filled from /portal/me).
   await expect(page.locator("#endpoint-claudeai")).toContainText("/mcp");
