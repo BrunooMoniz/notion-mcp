@@ -7,6 +7,7 @@ import {
   findReusableTrackerId,
   buildCreateDbPayload,
   buildParentPagePayload,
+  extractNotionPageId,
   TARGET_PROPERTIES,
 } from "../task-tracker-schema.js";
 
@@ -78,6 +79,24 @@ test("buildCreateDbPayload usa o parent page e o schema-alvo em initial_data_sou
   assert.equal(p.title[0].text.content, "Tarefas");
   // Notion 2025-09-03: o schema vive em initial_data_source.properties
   assert.equal(p.initial_data_source.properties, TARGET_PROPERTIES);
+});
+
+test("extractNotionPageId: URL notion.so com slug → id de 32 hex", () => {
+  assert.equal(
+    extractNotionPageId("https://www.notion.so/Minha-Pagina-0123456789abcdef0123456789abcdef?pvs=4"),
+    "0123456789abcdef0123456789abcdef",
+  );
+});
+
+test("extractNotionPageId: UUID com hífens → id compacto", () => {
+  assert.equal(
+    extractNotionPageId("01234567-89ab-cdef-0123-456789abcdef"),
+    "0123456789abcdef0123456789abcdef",
+  );
+});
+
+test("extractNotionPageId: nome de página → null (vai para busca)", () => {
+  assert.equal(extractNotionPageId("Projetos 2026"), null);
 });
 
 test("TARGET_PROPERTIES é o template 003-tasks-v1 (sem Frente)", () => {

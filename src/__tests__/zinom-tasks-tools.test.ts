@@ -18,9 +18,12 @@ import {
   brainRowsToPlanEvents,
   busyCalendars,
   eventBlocksBusy,
+  setupTasksFlow,
   MAX_BUSY_CALENDARS,
+  type SetupTasksDeps,
 } from "../zinom-tasks-tools.js";
 import { dedupPlanEvents } from "../tasks/plan-context.js";
+import { extractNotionPageId } from "../portal/task-tracker-schema.js";
 import { __clearTrackerProfileCache } from "../tasks/adapter.js";
 import { __setPoolForTest } from "../rag/storage.js";
 
@@ -206,4 +209,79 @@ test("zinom_plan_context: sem Notion → tracker_note de CONECTAR o Notion (não
   assert.match(r.tracker_note, /não conectou um Notion/);
   assert.ok(!/primeira tarefa/.test(r.tracker_note), "não pode sugerir criar tarefa sem Notion");
   assert.equal(r.totals.tasks_truncated, false);
+});
+
+// --- setupTasksFlow: contrato da zinom_setup_tasks (núcleo puro, deps fake) -------
+// extractNotionPageId real (pura, sem rede/DB): é a mesma que o handler injeta e
+// precisa parsear URL notion.so — um fake regex-no-input-inteiro não cobre URL.
+
+function fakeDeps(over: Partial<SetupTasksDeps> = {}): SetupTasksDeps {
+  return {
+    getTasksDbId: async () => null,
+    createTaskTracker: async () => ({ dataSourceId: "ds-1", created: true }),
+    searchParentPages: async () => [],
+    findWorkspaceForPage: async () => null,
+    getTasksInfo: async () => ({ title: "Tarefas", url: "https://notion.so/board" } as any),
+    invalidateTrackerProfile: () => {},
+    extractNotionPageId,
+    ...over,
+  };
+}
+
+test("setup: já configurada sem confirmar → already_configured com link", async () => {
+  const out: any = await setupTasksFlow("a", {}, fakeDeps({ getTasksDbId: async () => "ds-velha" }));
+  assert.equal(out.ok, false);
+  assert.equal(out.error, "already_configured");
+  assert.equal(out.tracker_url, "https://notion.so/board");
+});
+
+test("setup: nome com várias páginas → ambiguous_page com candidates", async () => {
+  const cands = [
+    { id: "p1", title: "Projetos", url: "u1", workspace: "ws-1" },
+    { id: "p2", title: "Projetos", url: "u2", workspace: "ws-2" },
+  ];
+  const out: any = await setupTasksFlow("a", { pagina: "Projetos" }, fakeDeps({ searchParentPages: async () => cands }));
+  assert.equal(out.error, "ambiguous_page");
+  assert.deepEqual(out.candidates, cands);
+});
+
+test("setup: nome não encontrado → page_not_found", async () => {
+  const out: any = await setupTasksFlow("a", { pagina: "Nada" }, fakeDeps());
+  assert.equal(out.error, "page_not_found");
+});
+
+test("setup: URL → extrai id, resolve workspace pela página e cria lá", async () => {
+  let got: any = null;
+  const out: any = await setupTasksFlow(
+    "a",
+    { pagina: "https://www.notion.so/Casa-0123456789abcdef0123456789abcdef" },
+    fakeDeps({
+      findWorkspaceForPage: async () => ({ workspace: "ws-2", title: "Casa", url: "https://notion.so/casa" }),
+      createTaskTracker: async (_a, opts) => { got = opts; return { dataSourceId: "ds-1", created: true }; },
+    }),
+  );
+  assert.equal(out.ok, true);
+  assert.equal(got.parentPageId, "0123456789abcdef0123456789abcdef");
+  assert.equal(got.workspace, "ws-2");
+  assert.equal(out.tracker_url, "https://notion.so/board");
+  assert.match(out.message, /Casa/);
+});
+
+test("setup: URL ilegível por todos os tokens → page_not_accessible", async () => {
+  const out: any = await setupTasksFlow(
+    "a",
+    { pagina: "0123456789abcdef0123456789abcdef" },
+    fakeDeps({ findWorkspaceForPage: async () => null }),
+  );
+  assert.equal(out.error, "page_not_accessible");
+});
+
+test("setup: sem pagina → cria padrão (🧠 Zinom) e devolve link", async () => {
+  let got: any = "sentinel";
+  const out: any = await setupTasksFlow("a", {}, fakeDeps({
+    createTaskTracker: async (_a, opts) => { got = opts; return { dataSourceId: "ds-1", created: true }; },
+  }));
+  assert.equal(out.ok, true);
+  assert.equal(got.parentPageId, undefined);
+  assert.match(out.message, /🧠 Zinom|topo do workspace/);
 });

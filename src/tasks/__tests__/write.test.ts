@@ -194,6 +194,8 @@ test("createTask: cria a página e devolve pageId/url/dataSourceId", async () =>
   assert.equal(r.url, "https://notion.so/page-9");
   assert.equal(r.dataSourceId, "ds-new");
   assert.equal(r.created, false);
+  // trackerUrl = ctx.profile.url (derivada do database_id pai do fixture)
+  assert.equal(r.trackerUrl, "https://www.notion.so/11112222333344445555666677778888");
 });
 
 test("createTask: 400 → invalida profile, recarrega e tenta exatamente 1x", async () => {

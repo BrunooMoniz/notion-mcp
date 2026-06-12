@@ -190,6 +190,94 @@ test("POST /portal/tasks/use: sem Notion conectado → 400 unreadable (nada grav
   assert.equal(await getTasksDbId(ACCOUNT), null);
 });
 
+test("POST /portal/tasks/create: {workspace, parent_page_id} repassados → 201 com {data_source_id, url, title}", async () => {
+  // Dois workspaces conectados — o body pede ws-2; o create tem que usar o token DELE.
+  const { setAccountSecret } = await import("../../secrets.js");
+  await setAccountSecret(ACCOUNT, "notion_pat:ws-1", "ntn_um");
+  await setAccountSecret(ACCOUNT, "notion_pat:ws-2", "ntn_dois");
+  workspaces = ["ws-1", "ws-2"];
+
+  const calls: Array<{ url: string; auth: string; body: any }> = [];
+  stubNotion((url, init) => {
+    calls.push({
+      url,
+      auth: init?.headers?.Authorization ?? "",
+      body: init?.body ? JSON.parse(init.body) : null,
+    });
+    if (init?.method === "POST" && url.includes("/v1/databases")) {
+      return { body: { id: "db-new", data_sources: [{ id: "ds-new" }] } };
+    }
+    if (init?.method === "GET" && url.includes("/v1/data_sources/ds-new")) {
+      return { body: { ...SCHEMA_STANDARD_OLD, id: "ds-new", url: "https://www.notion.so/board" } };
+    }
+    return undefined;
+  });
+
+  const res = await fetch(`${base}/portal/tasks/create`, {
+    method: "POST",
+    headers: { ...cookie, "content-type": "application/json" },
+    body: JSON.stringify({ workspace: "ws-2", parent_page_id: "0123456789abcdef0123456789abcdef" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.data_source_id, "ds-new");
+  assert.equal(body.url, "https://www.notion.so/board");
+  assert.equal(body.title, "Tarefas");
+
+  // parent_page_id virou o parent da DB e o token é o do ws-2 (pass-through).
+  const db = calls.find((c) => c.url.includes("/v1/databases"));
+  assert.ok(db, "POST /v1/databases aconteceu");
+  assert.equal(db!.body.parent.page_id, "0123456789abcdef0123456789abcdef");
+  assert.equal(db!.auth, "Bearer ntn_dois");
+  // Alvo explícito: sem reuse-guard e sem página-mãe.
+  assert.ok(!calls.some((c) => c.url.includes("/v1/search")), "sem reuse-guard");
+  assert.ok(!calls.some((c) => c.url.includes("/v1/pages")), "sem página-mãe");
+  // Gravou o tracker da conta da sessão.
+  const { getTasksDbId } = await import("../task-tracker.js");
+  assert.equal(await getTasksDbId(ACCOUNT), "ds-new");
+});
+
+test("GET /portal/tasks/pages?q=... → {pages:[...]} por workspace; sem q → {pages:[]} sem busca", async () => {
+  await seedNotion();
+  let searches = 0;
+  stubNotion((url, init) => {
+    if (init?.method === "POST" && url.includes("/v1/search")) {
+      searches++;
+      return {
+        body: {
+          results: [
+            {
+              id: "p-1",
+              url: "https://notion.so/p1",
+              properties: { Nome: { type: "title", title: [{ plain_text: "Projetos 2026" }] } },
+            },
+          ],
+        },
+      };
+    }
+    return undefined;
+  });
+
+  // Sem q: lista vazia e NENHUMA chamada de busca ao Notion.
+  const empty = await fetch(`${base}/portal/tasks/pages`, { headers: cookie });
+  assert.equal(empty.status, 200);
+  assert.deepEqual(await empty.json(), { pages: [] });
+  assert.equal(searches, 0, "sem q não pode bater no Notion");
+
+  const res = await fetch(`${base}/portal/tasks/pages?q=Projetos`, { headers: cookie });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body, {
+    pages: [{ id: "p-1", title: "Projetos 2026", url: "https://notion.so/p1", workspace: "ws-1" }],
+  });
+  assert.equal(searches, 1);
+});
+
+test("GET /portal/tasks/pages sem sessão → 401", async () => {
+  const res = await fetch(`${base}/portal/tasks/pages?q=x`);
+  assert.equal(res.status, 401);
+});
+
 test("POST /portal/tasks/upgrade: base não-padrão → 400 com erro claro; padrão → ok/added", async () => {
   await seedNotion();
   const { setTasksDbId } = await import("../task-tracker.js");

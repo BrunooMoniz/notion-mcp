@@ -805,19 +805,50 @@ export function createPortalRouter(): express.Router {
     }
   });
 
-  // Cria a DB "Tarefas" (página-mãe "🧠 Zinom" no topo). Só com confirmação (POST).
-  router.post("/portal/tasks/create", requireSession, async (_req, res) => {
+  // Cria a DB "Tarefas". Aceita destino opcional: workspace e/ou parent_page_id
+  // (página existente). Sem destino: página-mãe "🧠 Zinom" no topo (comportamento
+  // histórico). Responde com o link do board para a UI mostrar "Abrir no Notion".
+  router.post("/portal/tasks/create", requireSession, async (req, res) => {
     const accountId: string = res.locals.accountId;
+    const workspace =
+      typeof req.body?.workspace === "string" && req.body.workspace.trim() ? req.body.workspace.trim() : undefined;
+    const parentPageId =
+      typeof req.body?.parent_page_id === "string" && req.body.parent_page_id.trim()
+        ? req.body.parent_page_id.trim()
+        : undefined;
     try {
       const { createTaskTracker } = await import("./task-tracker.js");
-      const { invalidateTrackerProfile } = await import("../tasks/adapter.js");
-      const { dataSourceId } = await createTaskTracker(accountId);
+      const { invalidateTrackerProfile, getTasksInfo } = await import("../tasks/adapter.js");
+      const { dataSourceId } = await createTaskTracker(accountId, { workspace, parentPageId });
       // tasks_db mudou → o profile cacheado (5 min) não pode sobreviver.
       invalidateTrackerProfile(accountId);
-      res.status(201).json({ data_source_id: dataSourceId });
+      let info: { title: string | null; url: string | null } | null = null;
+      try {
+        info = await getTasksInfo(accountId);
+      } catch {
+        /* link opcional — o create em si deu certo */
+      }
+      res.status(201).json({ data_source_id: dataSourceId, url: info?.url ?? null, title: info?.title ?? null });
     } catch (err: any) {
       console.error(`[portal] tasks/create ${accountId}: ${err?.message ?? err}`);
       res.status(400).json({ error: err?.message ?? "não consegui criar as Tarefas" });
+    }
+  });
+
+  // Busca páginas candidatas a "casa" da base de Tarefas (picker da UI).
+  router.get("/portal/tasks/pages", requireSession, async (req, res) => {
+    const accountId: string = res.locals.accountId;
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!q) {
+      res.json({ pages: [] });
+      return;
+    }
+    try {
+      const { searchParentPages } = await import("./task-tracker.js");
+      res.json({ pages: await searchParentPages(accountId, q) });
+    } catch (err: any) {
+      console.error(`[portal] tasks/pages ${accountId}: ${err?.message ?? err}`);
+      res.status(502).json({ error: "não consegui buscar páginas no seu Notion agora" });
     }
   });
 
