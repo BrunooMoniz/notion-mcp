@@ -54,6 +54,112 @@ function taskError(e: unknown, genericCode = "task_failed"): ReturnType<typeof f
   return fail(genericCode, msg);
 }
 
+// --- zinom_setup_tasks: núcleo puro (deps injetáveis) -------------------------
+
+export interface SetupTasksDeps {
+  getTasksDbId: (accountId: string) => Promise<string | null>;
+  createTaskTracker: (
+    accountId: string,
+    opts: { workspace?: string; parentPageId?: string },
+  ) => Promise<{ dataSourceId: string; created: boolean }>;
+  searchParentPages: (
+    accountId: string,
+    q: string,
+    opts: { workspace?: string },
+  ) => Promise<Array<{ id: string; title: string; url: string | null; workspace: string }>>;
+  findWorkspaceForPage: (
+    accountId: string,
+    pageId: string,
+  ) => Promise<{ workspace: string; title: string; url: string | null } | null>;
+  getTasksInfo: (accountId: string) => Promise<{ title: string | null; url: string | null }>;
+  invalidateTrackerProfile: (accountId: string) => void;
+  extractNotionPageId: (s: string) => string | null;
+}
+
+export interface SetupTasksArgs { pagina?: string; workspace?: string; confirmar?: boolean }
+
+/** Núcleo puro (deps injetáveis) da zinom_setup_tasks — retorna o objeto JSON da
+ *  resposta. Mantido separado do handler para ser testável sem rede/DB. */
+export async function setupTasksFlow(
+  accountId: string,
+  args: SetupTasksArgs,
+  deps: SetupTasksDeps,
+): Promise<Record<string, unknown>> {
+  const existing = await deps.getTasksDbId(accountId);
+  if (existing && !args.confirmar) {
+    let info: { title: string | null; url: string | null } = { title: null, url: null };
+    try { info = await deps.getTasksInfo(accountId); } catch { /* sem link */ }
+    return {
+      ok: false,
+      error: "already_configured",
+      title: info.title,
+      tracker_url: info.url,
+      message:
+        "Você já tem uma base de Tarefas configurada" + (info.url ? `: ${info.url}` : ".") +
+        " Para criar uma NOVA base em outro lugar e passar a usá-la, chame de novo com confirmar=true" +
+        " (a base antiga continua no seu Notion; as tarefas não são migradas automaticamente).",
+    };
+  }
+
+  let parentPageId: string | undefined;
+  let targetWorkspace = args.workspace;
+  let parentTitle: string | null = null;
+
+  const pagina = args.pagina?.trim();
+  if (pagina) {
+    const direct = deps.extractNotionPageId(pagina);
+    if (direct) {
+      parentPageId = direct;
+      if (!targetWorkspace) {
+        const hit = await deps.findWorkspaceForPage(accountId, direct);
+        if (!hit) {
+          return {
+            ok: false, error: "page_not_accessible",
+            message: "Não consegui ler essa página com nenhum Notion conectado. Confira se a integração do Zinom tem acesso a ela (Share → conexões) e tente de novo.",
+          };
+        }
+        targetWorkspace = hit.workspace;
+        parentTitle = hit.title;
+      }
+    } else {
+      const candidates = await deps.searchParentPages(accountId, pagina, { workspace: targetWorkspace });
+      if (candidates.length === 0) {
+        return {
+          ok: false, error: "page_not_found",
+          message: `Não achei nenhuma página chamada "${pagina}" nos Notion conectados. Ela existe e a integração tem acesso? Você também pode mandar a URL da página.`,
+        };
+      }
+      if (candidates.length > 1) {
+        return {
+          ok: false, error: "ambiguous_page", candidates,
+          message: "Achei mais de uma página com esse nome — qual delas? Responda com a URL ou o id.",
+        };
+      }
+      parentPageId = candidates[0].id;
+      targetWorkspace = candidates[0].workspace;
+      parentTitle = candidates[0].title;
+    }
+  }
+
+  const r = await deps.createTaskTracker(accountId, { workspace: targetWorkspace, parentPageId });
+  deps.invalidateTrackerProfile(accountId);
+  let info: { title: string | null; url: string | null } = { title: null, url: null };
+  try { info = await deps.getTasksInfo(accountId); } catch { /* sem link */ }
+  const onde = parentTitle ? `dentro da página "${parentTitle}"` : 'na página "🧠 Zinom" no topo do workspace';
+  return {
+    ok: true,
+    created: r.created,
+    data_source_id: r.dataSourceId,
+    title: info.title ?? "Tarefas",
+    tracker_url: info.url,
+    workspace: targetWorkspace ?? null,
+    message: r.created
+      ? `Base de Tarefas criada ${onde}.` + (info.url ? ` Abra aqui: ${info.url}` : "") +
+        " Dica: no Notion dá para mudar a visualização da base para Board (kanban)."
+      : `Encontrei uma base "Tarefas" existente e passei a usá-la.` + (info.url ? ` Abra aqui: ${info.url}` : ""),
+  };
+}
+
 export function registerZinomTasksTools(server: McpServer): void {
   // --- zinom_create_task (retrocompatível + campos canônicos novos) -----------
   server.tool(
@@ -79,7 +185,9 @@ Parâmetros:
 - projeto: nome do projeto/frente.
 - nota: detalhe livre no corpo da página.
 
-Responde em português confirmando o que foi criado, com o link da página.`,
+Responde em português confirmando o que foi criado, com o link da página.
+
+SEMPRE mostre o link clicável da tarefa (url) na resposta e ofereça o link do board (tracker_url) para abrir as tarefas no Notion.`,
     {
       titulo: z.string().min(1).describe("Nome da tarefa/evento"),
       data: z
@@ -133,12 +241,58 @@ Responde em português confirmando o que foi criado, com o link da página.`,
           titulo,
           data: data ?? null,
           url: r.url,
+          tracker_url: r.trackerUrl,
           message: r.created
             ? "Criei sua base de Tarefas no Notion e adicionei este item."
             : "Tarefa criada no seu Notion.",
         });
       } catch (e) {
         return taskError(e, "create_failed");
+      }
+    },
+  );
+
+  // --- zinom_setup_tasks ---------------------------------------------------------
+  server.tool(
+    "zinom_setup_tasks",
+    `Configura ONDE vive a base de Tarefas (Kanban) da pessoa no Notion: cria a base dentro da página e do workspace que ela apontar, e retorna o link clicável do board. PREFIRA esta tool a criar databases por conectores nativos do Notion.
+
+Use quando a pessoa pedir "criar minha base de tarefas", "mudar minhas tarefas para a página X", "criar o kanban dentro de Y", ou reclamar de onde o board foi criado.
+
+Parâmetros:
+- pagina: URL ou ID de uma página do Notion, OU o nome da página para eu procurar ("Projetos 2026"). Sem 'pagina', crio a página "🧠 Zinom" no topo do workspace.
+- workspace: opcional; restringe a busca/criação a um workspace específico (para quem tem mais de um Notion conectado).
+- confirmar: obrigatório =true quando JÁ existe uma base configurada — cria a nova no destino e passa a usá-la (a antiga continua no Notion; as tarefas NÃO são migradas automaticamente).
+
+Se a resposta trouxer candidates (mais de uma página com o nome), mostre as opções com os links e pergunte qual usar. Responda SEMPRE com o link clicável do board (tracker_url).`,
+    {
+      pagina: z.string().optional().describe("URL/ID da página, ou nome para buscar"),
+      workspace: z.string().optional().describe("Workspace específico (opcional)"),
+      confirmar: z.boolean().optional().describe("true para substituir uma base já configurada"),
+    },
+    async ({ pagina, workspace, confirmar }) => {
+      const accountId = getAccountId();
+      try {
+        const tracker = await import("./portal/task-tracker.js");
+        const schema = await import("./portal/task-tracker-schema.js");
+        const adapter = await import("./tasks/adapter.js");
+        const out = await setupTasksFlow(accountId, { pagina, workspace, confirmar }, {
+          getTasksDbId: tracker.getTasksDbId,
+          createTaskTracker: (a, o) => tracker.createTaskTracker(a, o),
+          searchParentPages: (a, q, o) => tracker.searchParentPages(a, q, o),
+          findWorkspaceForPage: (a, p) => tracker.findWorkspaceForPage(a, p),
+          getTasksInfo: (a) => adapter.getTasksInfo(a),
+          invalidateTrackerProfile: adapter.invalidateTrackerProfile,
+          extractNotionPageId: schema.extractNotionPageId,
+        });
+        if ((out as any).ok) {
+          auditWrite("zinom_setup_tasks", "tasks",
+            { account_id: accountId, data_source_id: (out as any).data_source_id },
+            { workspace: (out as any).workspace });
+        }
+        return json(out);
+      } catch (e) {
+        return taskError(e, "setup_failed");
       }
     },
   );
@@ -157,7 +311,7 @@ Parâmetros:
 - q: busca por substring no título (use para deduplicar antes de criar).
 - limit: máximo de tarefas (default 25, máx 100).
 
-Retorna {tasks, board, tracker_url, truncated}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count. truncated=true significa que a base tem mais linhas do que o scan cobriu — os números do board são um piso.`,
+Retorna {tasks, board, tracker_url, truncated}: tasks no modelo canônico (id, title, status, prioridade, prazo, tempo_estimado_min, tipo, quem, origem_url, projeto), board com contagem por status + minutos estimados dos abertos + overdue_count. truncated=true significa que a base tem mais linhas do que o scan cobriu — os números do board são um piso. Mostre tracker_url como link clicável ("abrir no Notion") quando apresentar o board.`,
     {
       status: z
         .array(z.string())
@@ -306,12 +460,14 @@ Retorna:
         let estimado_min = 0;
         let tasks_truncated = false;
         let tracker_note: string | null = null;
+        let tracker_url: string | null = null;
         try {
           const r = await listTasks(accountId, { limit: 100 });
           tasksSection = groupOpenTasks(r.tasks, todayISO);
           abertos = r.board.abertos;
           estimado_min = r.board.estimado_min;
           tasks_truncated = r.truncated;
+          tracker_url = r.tracker_url;
         } catch (e) {
           if (e instanceof NoNotionError) {
             tracker_note = NO_NOTION_MSG;
@@ -331,6 +487,7 @@ Retorna:
           free_slots,
           tasks: tasksSection.by_status,
           overdue: tasksSection.overdue,
+          tracker_url,
           // tasks_truncated=true → abertos/estimado/overdue são um PISO (a base
           // tem mais linhas do que o scan cobriu).
           totals: { free_min, abertos, estimado_min, overdue: tasksSection.overdue.length, tasks_truncated },

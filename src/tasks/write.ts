@@ -241,6 +241,8 @@ export interface CreatedTask {
   pageId: string;
   url: string | null;
   dataSourceId: string;
+  /** Link do board (URL da base de Tarefas) para "abrir no Notion". */
+  trackerUrl: string | null;
   /** True when the standard "Tarefas" tracker was created on this first use. */
   created: boolean;
 }
@@ -292,6 +294,7 @@ export async function createTask(
     pageId: r.data?.id ?? "",
     url: r.data?.url ?? null,
     dataSourceId: ctx.profile.dataSourceId,
+    trackerUrl: ctx.profile.url ?? null,
     created,
   };
 }
