@@ -974,6 +974,35 @@ button.pl-col.hero:hover { border-color: var(--accent-strong); }
 .graph-tb-sep { width: 1px; height: 18px; background: var(--line, #eee); margin: 0 2px; }
 .graph-legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted, #888); padding: 0 2px; white-space: nowrap; }
 .graph-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.graph-legend-group { display: flex; align-items: center; gap: 4px; }
+
+/* Presets (chips) + período — barra acima do canvas (grafo v2) */
+#graph-canvas-area { position: relative; }
+#graph-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line, #eee); }
+#graph-presets .fchip { border: 1px solid var(--line-2, #e2e2e2); background: var(--paper-2, #f7f7f7); color: var(--muted, #888); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+#graph-presets .fchip:hover { color: var(--ink, #222); }
+#graph-presets .fchip.active { background: var(--accent-soft, #e8f5ee); color: var(--accent-strong, #1f8b4c); border-color: var(--accent, #1f8b4c); }
+.graph-presets-spacer { flex: 1; }
+#graph-period .seg-btn { padding: 3px 10px; }
+
+/* Busca de nó na toolbar do grafo */
+.graph-search-wrap { position: relative; display: inline-flex; }
+#graph-search { width: 140px; font-size: 12px; font-family: inherit; padding: 3px 8px; border: 1px solid var(--line-2, #e2e2e2); border-radius: 6px; outline: none; background: var(--bg, #fff); color: var(--ink, #222); }
+#graph-search:focus { border-color: var(--accent, #1f8b4c); }
+#graph-search-results { position: absolute; top: calc(100% + 6px); right: 0; min-width: 220px; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid var(--line, #eee); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.10); z-index: 40; }
+.graph-search-item { padding: 7px 10px; font-size: 12.5px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.graph-search-item:hover { background: var(--paper-2, #f5f5f5); }
+.graph-search-item .t { color: var(--muted, #888); font-size: 11px; }
+.graph-search-empty { padding: 7px 10px; font-size: 12px; color: var(--muted, #888); }
+
+/* Painel lateral: últimos documentos da entidade */
+.panel-docs { margin-top: 10px; border-top: 1px solid var(--line, #eee); padding-top: 8px; }
+.panel-docs-title { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted, #888); margin-bottom: 6px; }
+.panel-doc-item { display: block; padding: 5px 0; font-size: 12.5px; color: var(--ink, #222); text-decoration: none; border-bottom: 1px dashed var(--line, #f0f0f0); }
+.panel-doc-item:last-child { border-bottom: none; }
+a.panel-doc-item:hover .panel-doc-title { text-decoration: underline; }
+.panel-doc-title { display: block; word-break: break-word; }
+.panel-doc-date { display: block; font-size: 11px; color: var(--muted, #888); margin-top: 1px; }
 
 /* Hint */
 #graph-hint {

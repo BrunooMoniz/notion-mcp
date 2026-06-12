@@ -1195,6 +1195,9 @@ var _graphFocusEntityIds = [];   // entity IDs currently in focus
 var _graphLoaded = false;        // true once first overview is rendered
 var _graphToolbarWired = false;  // prevent double-wiring
 var _graphCurrentNode = null;    // node data of currently selected node
+var _graphPreset = 'overview';   // preset ativo: overview|recentes|cronologia|pessoa|empresa|projeto
+var _graphDays = 0;              // janela do seletor de período em dias (0 = tudo)
+var _graphFrozen = false;        // física congelada (botão na toolbar)
 
 /* ---- colour tokens ---- */
 var GC = {
@@ -1203,6 +1206,54 @@ var GC = {
   projeto: '#d4a017',
   doc:     '#9e9e9e',
 };
+
+/* Paleta categórica (8) para comunidades — Visão geral com group_by=community */
+var COMMUNITY_PALETTE = ['#1f8b4c', '#4a7ebb', '#d4a017', '#b5532a', '#7b5ea7', '#2a9d8f', '#c2566f', '#6b705c'];
+/* Buckets de recência — preset Cronologia (cores casam com a legenda no app.html) */
+var CRONO_COLORS = { d7: '#15633a', d30: '#1f8b4c', d90: '#7a8450', old: '#9e9e9e' };
+
+function daysSince(iso) {
+  if (!iso) return Infinity;
+  var t = new Date(iso).getTime();
+  if (isNaN(t)) return Infinity;
+  return (Date.now() - t) / 86400000;
+}
+
+/* Cor por comunidade; null quando o nó não tem grupo (fallback: cor por tipo) */
+function communityColor(g) {
+  if (g === null || g === undefined || g === '') return null;
+  var idx = 0;
+  if (typeof g === 'number') {
+    idx = Math.abs(Math.round(g)) % COMMUNITY_PALETTE.length;
+  } else {
+    var str = String(g);
+    for (var i = 0; i < str.length; i++) idx = ((idx * 31) + str.charCodeAt(i)) >>> 0;
+    idx = idx % COMMUNITY_PALETTE.length;
+  }
+  return COMMUNITY_PALETTE[idx];
+}
+
+function cronoColor(lastSeen) {
+  var d = daysSince(lastSeen);
+  if (d <= 7) return CRONO_COLORS.d7;
+  if (d <= 30) return CRONO_COLORS.d30;
+  if (d <= 90) return CRONO_COLORS.d90;
+  return CRONO_COLORS.old;
+}
+
+function entityColor(n) {
+  if (_graphPreset === 'cronologia') return cronoColor(n.last_seen);
+  if (_graphPreset === 'overview') return communityColor(n.group) || GC[n.type] || '#888';
+  return GC[n.type] || '#888';
+}
+
+function entitySize(n) {
+  if (_graphPreset === 'recentes') {
+    var rec = Number(n.recent) || 0;
+    return Math.max(8, Math.min(36, 6 + Math.sqrt(rec) * 5));
+  }
+  return Math.max(10, Math.min(36, Math.sqrt(n.weight || 1) * 4));
+}
 
 /* ---- register fcose once (scripts loaded by app.html) ---- */
 var _fcoseRegistered = false;
@@ -1214,20 +1265,38 @@ function ensureFcose() {
   }
 }
 
+/* ---- register cola once (física viva; opcional — fallback é o fcose) ---- */
+var _colaRegistered = false;
+function ensureCola() {
+  if (_colaRegistered) return;
+  /* exige o webcola de verdade carregado, não só o wrapper */
+  if (window.cytoscape && window.cytoscapeCola && (window.webcola || window.cola)) {
+    try {
+      window.cytoscape.use(window.cytoscapeCola);
+      _colaRegistered = true;
+    } catch (_e) { /* vendor quebrado: segue sem cola */ }
+  }
+}
+
 /* ---- convert API response to Cytoscape elements ---- */
 function toCyElements(data) {
   var els = [];
   (data.nodes || []).forEach(function(n) {
-    var color = n.kind === 'entity' ? (GC[n.type] || '#888') : GC.doc;
+    var color = n.kind === 'entity' ? entityColor(n) : GC.doc;
     var r = n.kind === 'entity'
-      ? Math.max(10, Math.min(36, Math.sqrt(n.weight || 1) * 4))
+      ? entitySize(n)
       : Math.max(7, Math.min(22, Math.sqrt(n.weight || 1) * 2.5));
     els.push({ data: {
       id: n.id, kind: n.kind, label: n.label, type: n.type,
       weight: n.weight || 1, url: n.url || null,
+      group: (n.group === undefined ? null : n.group),
+      recent: n.recent || 0,
+      last_seen: n.last_seen || null,
       color: color, size: r,
     }});
   });
+  var maxEdgeW = 1;
+  (data.edges || []).forEach(function(e) { maxEdgeW = Math.max(maxEdgeW, e.weight || 1); });
   (data.edges || []).forEach(function(e) {
     var w = e.weight || 1;
     els.push({ data: {
@@ -1235,6 +1304,7 @@ function toCyElements(data) {
       source: e.a, target: e.b,
       weight: w,
       width: Math.max(0.5, Math.min(4, w * 0.4)),
+      opacity: +(0.08 + 0.37 * (w / maxEdgeW)).toFixed(3),
     }});
   });
   return els;
@@ -1277,7 +1347,8 @@ function cyStyle() {
       selector: 'edge',
       style: {
         'width': 'data(width)',
-        'line-color': 'rgba(100,90,75,0.18)',
+        'opacity': 'data(opacity)',
+        'line-color': 'rgba(100,90,75,0.35)',
         'curve-style': 'bezier',
         'transition-property': 'opacity, line-color',
         'transition-duration': '0.15s',
@@ -1288,13 +1359,25 @@ function cyStyle() {
   ];
 }
 
+/* ---- top 8 nós por weight ganham label sempre visível ---- */
+var _topLabelIds = {};
+function computeTopLabels() {
+  _topLabelIds = {};
+  if (!_cy) return;
+  _cy.nodes()
+    .filter(function(n) { return n.data('kind') === 'entity'; })
+    .sort(function(a, b) { return (b.data('weight') || 0) - (a.data('weight') || 0); })
+    .slice(0, 8)
+    .forEach(function(n) { _topLabelIds[n.id()] = true; });
+}
+
 /* ---- apply label classes based on zoom level and global toggle ---- */
 function updateLabels() {
   if (!_cy) return;
   var zoom = _cy.zoom();
   _cy.nodes().forEach(function(n) {
-    var big = n.data('weight') >= 5;
-    var show = _graphLabelsForced || big || zoom > 1.4;
+    var top = _topLabelIds[n.id()] === true;
+    var show = _graphLabelsForced || top || zoom > 1.4;
     n.toggleClass('show-label', show && !n.hasClass('dimmed'));
   });
 }
@@ -1315,60 +1398,128 @@ function highlightNode(nodeId) {
   updateLabels();
 }
 
-/* ---- init or re-init Cytoscape ---- */
-function initCy(data) {
+/* ---- layout central: fcose animado (cose como último recurso) ---- */
+var _layoutRun = null; // layout em execução (para stop/freeze)
+
+function stopLayout() {
+  if (_layoutRun) { try { _layoutRun.stop(); } catch (_e) {} _layoutRun = null; }
+}
+
+function runLayout(opts) {
+  if (!_cy || _cy.nodes().length === 0) return;
+  opts = opts || {};
+  stopLayout();
   ensureFcose();
-  var container = document.getElementById('brain-graph-cy');
-  if (!container) return;
+  ensureCola();
+  var fitAfter = opts.fit !== false;
+  var lay = null;
 
-  if (_cy) { _cy.destroy(); _cy = null; }
+  /* Física viva: cola animado; nós seguem como molas durante o drag */
+  if (_colaRegistered) {
+    try {
+      lay = _cy.layout({
+        name: 'cola',
+        animate: true,
+        refresh: 1,
+        maxSimulationTime: 2500,
+        ungrabifyWhileSimulating: false,
+        fit: false,
+        padding: 30,
+        randomize: opts.randomize === true,
+        avoidOverlap: true,
+        handleDisconnected: true,
+        convergenceThreshold: 0.01,
+        nodeSpacing: function() { return 12; },
+        edgeLength: function(e) { var w = e.data('weight') || 1; return Math.max(60, 110 - w * 8); },
+      });
+    } catch (_e) {
+      /* cola registrado mas quebrado em runtime: desliga e cai para fcose */
+      _colaRegistered = false;
+      lay = null;
+    }
+  }
 
-  var useFcose = _fcoseRegistered;
-  var layoutConfig = useFcose
+  if (!lay) lay = _cy.layout(_fcoseRegistered
     ? {
         name: 'fcose',
-        quality: 'proof',
-        animate: true,
-        animationDuration: 600,
-        randomize: true,
+        quality: 'default',
+        animate: 'during',
+        animationDuration: 800,
+        randomize: opts.randomize === true,
+        fit: false,
         nodeRepulsion: function() { return 12000; },
         idealEdgeLength: function() { return 90; },
         edgeElasticity: function() { return 0.45; },
         numIter: 2500,
         packComponents: true,
-        componentSpacing: 50,
         nodeSeparation: 75,
         gravityRange: 3.8,
         gravity: 0.25,
         tile: true,
-        tilingPaddingVertical: 10,
-        tilingPaddingHorizontal: 10,
         initialEnergyOnIncremental: 0.5,
-        stop: function() { updateLabels(); },
       }
     : {
         name: 'cose',
         animate: true,
         animationDuration: 600,
+        randomize: opts.randomize === true,
+        fit: false,
         nodeRepulsion: function() { return 800000; },
         idealEdgeLength: function() { return 90; },
-        componentSpacing: 80,
         gravity: 0.25,
         numIter: 1500,
-        stop: function() { updateLabels(); },
-      };
+      });
+
+  _layoutRun = lay;
+  lay.one('layoutstop', function() {
+    if (_layoutRun === lay) _layoutRun = null;
+    updateLabels();
+    if (fitAfter && _cy) _cy.animate({ fit: { eles: _cy.elements(), padding: 40 }, duration: 300 });
+  });
+  lay.run();
+}
+
+/* ---- init Cytoscape (só quando não existe; mudanças são incrementais) ---- */
+function initCy(data) {
+  ensureFcose();
+  var container = document.getElementById('brain-graph-cy');
+  if (!container) return;
+
+  if (_cy) { stopLayout(); _cy.destroy(); _cy = null; }
 
   _cy = window.cytoscape({
     container: container,
     elements: toCyElements(data),
     style: cyStyle(),
-    layout: layoutConfig,
+    layout: { name: 'preset' }, // posições reais vêm de runLayout()
     minZoom: 0.1,
     maxZoom: 6,
     wheelSensitivity: 0.3,
   });
 
+  computeTopLabels();
   _cy.on('zoom', updateLabels);
+
+  // Hover: destaca a vizinhança e esmaece o resto (mesmo padrão do tap),
+  // com debounce; ao sair, restaura o destaque do nó selecionado (se houver)
+  var _hoverTimer = null;
+  _cy.on('mouseover', 'node', function(e) {
+    var id = e.target.id();
+    clearTimeout(_hoverTimer);
+    _hoverTimer = setTimeout(function() { highlightNode(id); }, 80);
+  });
+  _cy.on('mouseout', 'node', function() {
+    clearTimeout(_hoverTimer);
+    _hoverTimer = setTimeout(function() {
+      highlightNode(_graphCurrentNode ? _graphCurrentNode.id : null);
+    }, 160);
+  });
+
+  // Física viva: agarrar um nó religa a simulação (mola), salvo se congelada
+  _cy.on('grab', 'node', function() {
+    if (_graphFrozen || !_colaRegistered) return;
+    if (!_layoutRun) runLayout({ fit: false });
+  });
 
   // Single click: highlight + open panel
   _cy.on('tap', 'node', function(e) {
@@ -1404,10 +1555,41 @@ function initCy(data) {
     }
   });
 
-  _cy.one('layoutstop', function() {
-    _cy.fit(_cy.elements(), 40);
-    updateLabels();
+  runLayout({ randomize: true });
+}
+
+/* ---- atualização incremental: diff de elementos por id, sem destruir o cy ---- */
+function updateCyElements(data) {
+  var els = toCyElements(data);
+  var incoming = {};
+  els.forEach(function(e) { incoming[e.data.id] = true; });
+  _cy.batch(function() {
+    /* remove o que saiu (arestas penduradas caem junto com o nó) */
+    _cy.elements().forEach(function(el) {
+      if (!incoming[el.id()]) el.remove();
+    });
+    /* atualiza data de quem ficou, adiciona quem chegou (nós antes de arestas,
+       ordem preservada de toCyElements) */
+    var toAdd = [];
+    els.forEach(function(e) {
+      var existing = _cy.getElementById(e.data.id);
+      if (existing.nonempty()) {
+        var d = Object.assign({}, e.data);
+        delete d.id; delete d.source; delete d.target; // imutáveis no cytoscape
+        existing.data(d);
+      } else {
+        toAdd.push(e);
+      }
+    });
+    if (toAdd.length) _cy.add(toAdd);
   });
+  computeTopLabels();
+  updateLabels();
+  runLayout({ fit: true });
+}
+
+function renderGraph(data) {
+  if (_cy) updateCyElements(data); else initCy(data);
 }
 
 /* ---- empty state: distingue "sem chunks" de "chunks sem entidades ainda" ---- */
@@ -1447,6 +1629,15 @@ async function reloadGraph(overrideParams) {
   }
   if (_graphIncludeDocs && mode === 'focus') params.set('include_docs', 'true');
 
+  /* Presets (grafo v2): agrupamento por comunidade, filtro de tipo e janela temporal */
+  if (_graphPreset === 'overview') params.set('group_by', 'community');
+  if (mode !== 'focus' && (_graphPreset === 'pessoa' || _graphPreset === 'empresa' || _graphPreset === 'projeto')) {
+    params.set('type', _graphPreset);
+  }
+  var days = _graphDays;
+  if (_graphPreset === 'recentes' && !days) days = 30;
+  if (days > 0) params.set('days', String(days));
+
   try {
     var res = await api('/portal/brain/graph?' + params.toString());
     if (!res.ok) { empty.style.display = 'block'; wrap.style.display = 'none'; return; }
@@ -1474,8 +1665,9 @@ async function reloadGraph(overrideParams) {
     if (docBtn) docBtn.style.display = mode === 'focus' ? '' : 'none';
     if (clearBtn) clearBtn.style.display = mode === 'focus' ? '' : 'none';
     if (legendDoc) legendDoc.style.display = _graphIncludeDocs && mode === 'focus' ? '' : 'none';
+    updateGraphLegend();
 
-    initCy(data);
+    renderGraph(data);
     _graphLoaded = true;
   } catch (e) {
     empty.style.display = 'block'; wrap.style.display = 'none';
@@ -1492,10 +1684,54 @@ async function loadGraph() {
   await reloadGraph({ mode: 'overview' });
 }
 
+/* ---- legenda por preset: tipos vs. buckets de recência ---- */
+function updateGraphLegend() {
+  var types = document.getElementById('graph-legend-types');
+  var crono = document.getElementById('graph-legend-crono');
+  /* Visão geral pinta por comunidade e Cronologia por recência; a legenda de
+     tipos só vale nos presets que pintam por tipo. */
+  var typeColors = _graphPreset !== 'overview' && _graphPreset !== 'cronologia';
+  if (types) types.style.display = typeColors ? '' : 'none';
+  if (crono) crono.style.display = _graphPreset === 'cronologia' ? '' : 'none';
+}
+
 /* ---- wire toolbar buttons (called once on first Grafo tab open) ---- */
 function wireGraphToolbar() {
   if (_graphToolbarWired) return;
   _graphToolbarWired = true;
+
+  /* Presets de agrupamento (chips) + seletor de período — combináveis */
+  var presetBtns = document.querySelectorAll('#graph-presets .graph-preset');
+  var periodBtns = document.querySelectorAll('#graph-period .seg-btn');
+  function setGraphPeriod(days) {
+    _graphDays = days;
+    periodBtns.forEach(function(b) {
+      b.classList.toggle('active', (parseInt(b.getAttribute('data-days'), 10) || 0) === days);
+    });
+  }
+  function reloadWithPreset() {
+    reloadGraph({ mode: _graphMode, entity_ids: _graphFocusEntityIds.length ? _graphFocusEntityIds : undefined });
+  }
+  presetBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var preset = btn.getAttribute('data-preset');
+      if (preset === _graphPreset) return;
+      _graphPreset = preset;
+      presetBtns.forEach(function(b) { b.classList.toggle('active', b === btn); });
+      /* Recentes sem período escolhido: assume 30d e reflete no seletor */
+      if (preset === 'recentes' && _graphDays === 0) setGraphPeriod(30);
+      updateGraphLegend();
+      reloadWithPreset();
+    });
+  });
+  periodBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var d = parseInt(btn.getAttribute('data-days'), 10) || 0;
+      if (d === _graphDays) return;
+      setGraphPeriod(d);
+      reloadWithPreset();
+    });
+  });
 
   var btnFit = document.getElementById('graph-btn-fit');
   if (btnFit) btnFit.addEventListener('click', function() {
@@ -1510,6 +1746,14 @@ function wireGraphToolbar() {
   var btnZoomOut = document.getElementById('graph-btn-zoom-out');
   if (btnZoomOut) btnZoomOut.addEventListener('click', function() {
     if (_cy) _cy.animate({ zoom: Math.max(_cy.zoom() * 0.77, 0.1), duration: 200 });
+  });
+
+  var btnPhysics = document.getElementById('graph-btn-physics');
+  if (btnPhysics) btnPhysics.addEventListener('click', function() {
+    _graphFrozen = !_graphFrozen;
+    btnPhysics.setAttribute('aria-pressed', String(_graphFrozen));
+    btnPhysics.title = _graphFrozen ? 'Soltar física' : 'Congelar física';
+    if (_graphFrozen) stopLayout(); else runLayout({ fit: false });
   });
 
   var btnLabels = document.getElementById('graph-btn-labels');
@@ -1538,6 +1782,69 @@ function wireGraphToolbar() {
     if (panel) panel.classList.remove('open');
     reloadGraph({ mode: 'overview' });
   });
+
+  /* Busca de nó: autocomplete sobre /portal/brain/entities?q= */
+  var searchInput = document.getElementById('graph-search');
+  var searchResults = document.getElementById('graph-search-results');
+  function hideSearchResults() {
+    if (searchResults) { searchResults.style.display = 'none'; searchResults.innerHTML = ''; }
+  }
+  function selectSearchEntity(ent) {
+    hideSearchResults();
+    if (searchInput) searchInput.value = ent.name;
+    var node = _cy ? _cy.getElementById('e:' + ent.id) : null;
+    if (node && node.nonempty()) {
+      /* nó presente: centraliza com animação e destaca a vizinhança */
+      _cy.animate({ center: { eles: node }, zoom: Math.max(_cy.zoom(), 1.2), duration: 400 });
+      highlightNode(node.id());
+      _graphCurrentNode = node.data();
+      openGraphPanel(node.data());
+    } else {
+      /* nó fora do grafo atual: abre em modo foco */
+      _graphMode = 'focus';
+      _graphFocusEntityIds = [ent.id];
+      reloadGraph({ mode: 'focus', entity_ids: [ent.id] });
+    }
+  }
+  if (searchInput && searchResults) {
+    var _searchDebounce = null;
+    searchInput.addEventListener('input', function() {
+      clearTimeout(_searchDebounce);
+      var q = searchInput.value.trim();
+      if (!q) { hideSearchResults(); return; }
+      _searchDebounce = setTimeout(async function() {
+        try {
+          var r = await api('/portal/brain/entities?q=' + encodeURIComponent(q) + '&limit=8');
+          if (!r.ok) return;
+          var d = await r.json();
+          var ents = d.entities || [];
+          searchResults.innerHTML = '';
+          if (!ents.length) {
+            searchResults.innerHTML = '<div class="graph-search-empty">Nenhuma entidade encontrada</div>';
+          } else {
+            ents.forEach(function(ent) {
+              var item = document.createElement('div');
+              item.className = 'graph-search-item';
+              item.setAttribute('role', 'option');
+              item.innerHTML = escapeHtml(ent.name) +
+                ' <span class="t">' + escapeHtml(ent.type || '') + '</span>';
+              /* mousedown dispara antes do blur do input */
+              item.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                selectSearchEntity(ent);
+              });
+              searchResults.appendChild(item);
+            });
+          }
+          searchResults.style.display = 'block';
+        } catch (_e) { /* busca é melhoria progressiva; silêncio aqui é ok */ }
+      }, 250);
+    });
+    searchInput.addEventListener('blur', function() { setTimeout(hideSearchResults, 150); });
+    searchInput.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') { hideSearchResults(); searchInput.blur(); }
+    });
+  }
 
   var panelClose = document.getElementById('graph-panel-close');
   if (panelClose) panelClose.addEventListener('click', function() {
@@ -1661,6 +1968,36 @@ function wireGraphToolbar() {
   });
 }
 
+/* ---- últimos documentos da entidade no painel lateral ---- */
+async function loadGraphPanelDocs(entityId, docList, docItems) {
+  docList.setAttribute('data-ent', String(entityId));
+  try {
+    var r = await api('/portal/brain/entities/' + entityId + '/documents?limit=5');
+    if (!r.ok) return;
+    var d = await r.json();
+    /* resposta de outro nó já selecionado nesse meio tempo: descarta */
+    if (docList.getAttribute('data-ent') !== String(entityId)) return;
+    var docs = (d.documents || d.docs || []).slice(0, 5);
+    if (!docs.length) return;
+    docItems.innerHTML = docs.map(function(doc) {
+      var title = doc.title || doc.label || 'Sem título';
+      var dateIso = doc.date || doc.last_seen || doc.indexed_at || null;
+      var dateTxt = '';
+      if (dateIso) {
+        var dt = new Date(dateIso);
+        if (!isNaN(dt.getTime())) dateTxt = dt.toLocaleDateString('pt-BR');
+      }
+      var url = doc.parent_url || doc.url || null;
+      var inner = '<span class="panel-doc-title">' + escapeHtml(title) + '</span>' +
+        (dateTxt ? '<span class="panel-doc-date">' + dateTxt + '</span>' : '');
+      return url && isHttpUrl(url)
+        ? '<a class="panel-doc-item" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + inner + '</a>'
+        : '<div class="panel-doc-item">' + inner + '</div>';
+    }).join('');
+    docList.style.display = 'block';
+  } catch (_e) { /* lista de docs é complementar; painel segue útil sem ela */ }
+}
+
 /* ---- open the side panel for a clicked node ---- */
 function openGraphPanel(nodeData) {
   var panel = document.getElementById('graph-panel');
@@ -1681,6 +2018,10 @@ function openGraphPanel(nodeData) {
 
   panel.classList.add('open');
   nameEl.textContent = nodeData.label;
+
+  var docList = document.getElementById('graph-panel-doclist');
+  var docItems = document.getElementById('graph-panel-doclist-items');
+  if (docList && docItems) { docList.style.display = 'none'; docItems.innerHTML = ''; }
 
   if (nodeData.kind === 'entity') {
     var TYPE_PT = { pessoa: 'Pessoa', empresa: 'Empresa', projeto: 'Projeto' };
@@ -1717,6 +2058,9 @@ function openGraphPanel(nodeData) {
 
     if (renameBtn) renameBtn.style.display = '';
     if (mergeBtn) mergeBtn.style.display = '';
+
+    var entId = parseInt(nodeData.id.slice(2), 10);
+    if (docList && docItems && !isNaN(entId)) loadGraphPanelDocs(entId, docList, docItems);
   } else {
     // doc node
     metaEl.textContent = (nodeData.type || '') + ' · ' + nodeData.weight + ' menções';
@@ -1757,6 +2101,9 @@ function switchBrainView(view) {
     listaEl.style.display = 'block';
     if (btnLista) btnLista.classList.add('active');
     if (btnGrafo) btnGrafo.classList.remove('active');
+    /* destrói o cy só ao sair da view; troca de preset/filtro é incremental */
+    if (_cy) { stopLayout(); _cy.destroy(); _cy = null; }
+    _graphLoaded = false;
   }
 }
 
