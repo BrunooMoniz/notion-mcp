@@ -154,7 +154,7 @@ test("createTaskTracker: cria página + DB, grava o data_source id", async () =>
   assert.ok(calls.some((c) => c.includes("/v1/databases")));
 });
 
-test("createTaskTracker: reusa 'Tarefas' existente, sem criar página duplicada", async () => {
+test("createTaskTracker: reusa 'Tarefas' existente COM fingerprint Zinom, sem criar página duplicada", async () => {
   await seedNotion("friend:y");
   const calls: string[] = [];
   const fetchImpl = (async (url: string) => {
@@ -163,6 +163,17 @@ test("createTaskTracker: reusa 'Tarefas' existente, sem criar página duplicada"
     let body: any = {};
     if (u.includes("/v1/search")) {
       body = { results: [{ id: "ds-existing", object: "data_source", title: [{ plain_text: "Tarefas" }] }] };
+    } else if (u.includes("/v1/data_sources/ds-existing")) {
+      // Reuse exige o fingerprint do template Zinom (título "Tarefas" não basta).
+      body = {
+        id: "ds-existing",
+        title: [{ plain_text: "Tarefas" }],
+        properties: {
+          Nome: { type: "title" },
+          "Tempo estimado (min)": { type: "number" },
+          Tipo: { type: "select", select: { options: [{ name: "Fazer" }, { name: "Cobrar" }] } },
+        },
+      };
     }
     return { ok: true, status: 200, text: async () => JSON.stringify(body) };
   }) as any;
