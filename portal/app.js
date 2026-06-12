@@ -960,7 +960,7 @@ function renderTasksCard(notionConnected) {
       (isHttpUrl(info.url)
         ? '<a class="btn btn-primary btn-sm" href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">Abrir no Notion ↗</a> '
         : '') +
-      '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Trocar de base</button>'
+      '<button class="btn btn-ghost btn-sm" type="button" data-tasks-switch>Trocar de base…</button>'
     );
     return;
   }
@@ -3709,6 +3709,8 @@ function wireGlobal(me) {
     if (tcw) { e.stopPropagation(); runCreateTasks(_tasksSelectedWorkspace(tcw.closest('.js-tasks-msg'))); return; }
     var tdw = e.target.closest('[data-tasks-detect-ws]');
     if (tdw) { e.stopPropagation(); runDetectTasks(_tasksSelectedWorkspace(tdw.closest('.js-tasks-msg'))); return; }
+    var tsw = e.target.closest('[data-tasks-switch]');
+    if (tsw) { e.stopPropagation(); runSwitchTasks(); return; }
   });
 
   /* revogar token MCP (Início + Conta) e encerrar sessão (Conta) — delegação global */
@@ -4000,6 +4002,17 @@ async function runCreateTasks(workspace) {
     return;
   }
   _tasksMsg(b.error || 'Nao consegui criar. Tente configurar o token (PAT) em Fontes.');
+}
+
+/* "Trocar de base…" (estado configurado): aviso + as mesmas opções de destino
+   do estado não-configurado. A base atual fica intacta no Notion. */
+function runSwitchTasks() {
+  _tasksMsg('A base atual continua no seu Notion; as tarefas não migram automaticamente (peça ao Zinom depois, se quiser).');
+  _tasksActions(
+    '<button class="btn btn-primary btn-sm" type="button" data-tasks-choose>Criar em outro lugar…</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-create>Criar no topo do workspace</button>' +
+    '<button class="btn btn-ghost btn-sm" type="button" data-tasks-detect>Apontar uma base existente</button>'
+  );
 }
 
 /* Picker "Escolher onde criar…": mini-form de busca de páginas do Notion.
