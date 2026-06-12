@@ -205,6 +205,34 @@ test("resend → ok 200", async () => {
   assert.strictEqual(r!.label, "Resend");
 });
 
+test("resend → 401 restricted_api_key é ok (chave de envio válida)", async () => {
+  process.env.RESEND_API_KEY = "re_test";
+  const f = makeFetch({
+    "https://api.resend.com": fakeResponse(401, {
+      name: "restricted_api_key",
+      message: "This API key is restricted to only send emails",
+    }),
+  }, fakeResponse(200, {}));
+  const [probe] = makeExternalProbes(f);
+  const results = await probe();
+  const r = results.find((x) => x.checkId === "resend");
+  assert.strictEqual(r!.status, "ok");
+  assert.deepStrictEqual(r!.detail, { restricted: true });
+  assert.strictEqual(r!.error, undefined);
+});
+
+test("resend → 401 com outro name continua fail", async () => {
+  process.env.RESEND_API_KEY = "re_test";
+  const f = makeFetch({
+    "https://api.resend.com": fakeResponse(401, { name: "invalid_api_key" }),
+  }, fakeResponse(200, {}));
+  const [probe] = makeExternalProbes(f);
+  const results = await probe();
+  const r = results.find((x) => x.checkId === "resend");
+  assert.strictEqual(r!.status, "fail");
+  assert.strictEqual(r!.error, "HTTP 401");
+});
+
 test("resend → skip sem env", async () => {
   const [probe] = makeExternalProbes(errorFetch("não deve chamar"));
   assert.strictEqual((await probe()).find((x) => x.checkId === "resend")!.status, "skip");
@@ -285,15 +313,26 @@ test("proxy_publico → usa HEALTH_PUBLIC_URL quando definida", async () => {
   assert.strictEqual(results.find((x) => x.checkId === "proxy_publico")!.status, "ok");
 });
 
-test("ntfy → ok 2xx", async () => {
+test("ntfy → ok 2xx via GET /v1/health na raiz do servidor", async () => {
   process.env.NTFY_URL = "https://ntfy.sh/zinom-test";
-  const f = makeFetch({ "https://ntfy.sh": fakeResponse(200) });
+  const urls: string[] = [];
+  const f: typeof fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    if (url.startsWith("https://ntfy.sh")) {
+      urls.push(url);
+      assert.strictEqual(init?.method, "GET");
+      return fakeResponse(200, { healthy: true });
+    }
+    return fakeResponse(200, {});
+  };
   const [probe] = makeExternalProbes(f);
   const results = await probe();
   const r = results.find((x) => x.checkId === "ntfy");
   assert.strictEqual(r!.status, "ok");
   assert.strictEqual(r!.label, "ntfy");
   assert.strictEqual(r!.group, "parceiros");
+  // O tópico NÃO é consultado (HEAD no tópico dá 404 no ntfy): vai em /v1/health.
+  assert.deepStrictEqual(urls, ["https://ntfy.sh/v1/health"]);
 });
 
 test("ntfy → fail quando não-2xx", async () => {
