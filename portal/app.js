@@ -1394,6 +1394,28 @@ function initCy(data) {
   });
 }
 
+/* ---- empty state: distingue "sem chunks" de "chunks sem entidades ainda" ---- */
+var _graphEmptyDefaultHtml = null;
+
+function showGraphEmptyState(empty, wrap) {
+  if (_graphEmptyDefaultHtml === null) _graphEmptyDefaultHtml = empty.innerHTML;
+  var hasChunks = totalChunks(window._lastStatus) > 0;
+  if (hasChunks) {
+    /* Conta tem trechos indexados mas o grafo veio vazio: a extração de
+       entidades roda no cron e ainda não alcançou esta conta. */
+    empty.innerHTML =
+      '<p>Ainda não há entidades extraídas do seu cérebro.<br>' +
+      'A extração roda automaticamente — volte em alguns minutos.</p>' +
+      '<button class="btn btn-ghost btn-sm" id="graph-empty-retry" type="button">Tentar de novo</button>';
+    var retry = document.getElementById('graph-empty-retry');
+    if (retry) retry.onclick = function () { reloadGraph({ mode: 'overview' }); };
+  } else {
+    empty.innerHTML = _graphEmptyDefaultHtml;
+  }
+  empty.style.display = 'block';
+  wrap.style.display = 'none';
+}
+
 /* ---- fetch graph data and (re)render ---- */
 async function reloadGraph(overrideParams) {
   var wrap = document.getElementById('brain-graph-wrap');
@@ -1415,7 +1437,7 @@ async function reloadGraph(overrideParams) {
     var data = await res.json();
 
     if (!data.nodes || data.nodes.length === 0) {
-      empty.style.display = 'block'; wrap.style.display = 'none'; return;
+      showGraphEmptyState(empty, wrap); return;
     }
 
     empty.style.display = 'none';
