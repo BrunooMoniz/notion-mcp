@@ -74,6 +74,7 @@ export interface SetupTasksDeps {
   getTasksInfo: (accountId: string) => Promise<{ title: string | null; url: string | null }>;
   invalidateTrackerProfile: (accountId: string) => void;
   extractNotionPageId: (s: string) => string | null;
+  listWorkspaces: (accountId: string) => Promise<string[]>;
 }
 
 export interface SetupTasksArgs { pagina?: string; workspace?: string; confirmar?: boolean }
@@ -138,6 +139,20 @@ export async function setupTasksFlow(
       parentPageId = candidates[0].id;
       targetWorkspace = candidates[0].workspace;
       parentTitle = candidates[0].title;
+    }
+  }
+
+  if (!targetWorkspace && !parentPageId) {
+    const ws = await deps.listWorkspaces(accountId);
+    if (ws.length > 1) {
+      return {
+        ok: false,
+        error: "workspace_required",
+        workspaces: ws,
+        message:
+          "Você tem mais de um Notion conectado. Em qual workspace devo criar a base de Tarefas? " +
+          `Opções: ${ws.join(", ")}. Me diga e eu chamo de novo com esse workspace (e, se quiser, a página).`,
+      };
     }
   }
 
@@ -284,6 +299,7 @@ Se a resposta trouxer candidates (mais de uma página com o nome), mostre as op�
           getTasksInfo: (a) => adapter.getTasksInfo(a),
           invalidateTrackerProfile: adapter.invalidateTrackerProfile,
           extractNotionPageId: schema.extractNotionPageId,
+          listWorkspaces: async (a) => (await tracker.listAccountNotionTokens(a)).map((t) => t.workspace),
         });
         if ((out as any).ok) {
           auditWrite("zinom_setup_tasks", "tasks",

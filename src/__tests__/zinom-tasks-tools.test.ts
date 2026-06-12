@@ -224,6 +224,9 @@ function fakeDeps(over: Partial<SetupTasksDeps> = {}): SetupTasksDeps {
     getTasksInfo: async () => ({ title: "Tarefas", url: "https://notion.so/board" } as any),
     invalidateTrackerProfile: () => {},
     extractNotionPageId,
+    // 1 workspace só: o fluxo cria sem perguntar (o caso multi-workspace é
+    // coberto em src/portal/__tests__/setup-tasks-flow-destino.test.ts).
+    listWorkspaces: async () => ["personal"],
     ...over,
   };
 }
